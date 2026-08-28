@@ -1,0 +1,114 @@
+/**index.scss**/
+
+/* 用户卡片 */
+.user-card {
+  background: linear-gradient(135deg, #1890ff, #096dd9);
+  color: #fff;
+}
+
+.user-card .avatar {
+  width: 100rpx;
+  height: 100rpx;
+  border-radius: 50%;
+  border: 4rpx solid rgba(255, 255, 255, 0.3);
+}
+
+.user-card .text-muted {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.user-card .text-primary {
+  color: #fff;
+}
+
+/* 轮播图 */
+.banner-swiper {
+  height: 300rpx;
+}
+
+.banner-item {
+  height: 100%;
+}
+
+.banner-placeholder {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  font-size: 32rpx;
+  font-weight: bold;
+}
+
+/* 章节标题 */
+.section-title {
+  font-size: 32rpx;
+  font-weight: bold;
+  margin-bottom: 20rpx;
+}
+
+/* 快捷操作 */
+.quick-actions {
+  display: flex;
+  justify-content: space-around;
+}
+
+.quick-action-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.quick-action-icon {
+  width: 100rpx;
+  height: 100rpx;
+  border-radius: 20rpx;
+  background: linear-gradient(135deg, #e6f7ff, #bae7ff);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24rpx;
+  color: #1890ff;
+  margin-bottom: 10rpx;
+}
+
+.quick-action-name {
+  font-size: 24rpx;
+  color: #666;
+}
+
+/* 门诊列表 */
+.clinic-list {
+  /* 无额外样式 */
+}
+
+.clinic-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20rpx 0;
+  border-bottom: 1rpx solid #f0f0f0;
+}
+
+.clinic-item:last-child {
+  border-bottom: none;
+}
+
+.clinic-info {
+  flex: 1;
+}
+
+.clinic-name {
+  font-size: 30rpx;
+  margin-bottom: 8rpx;
+}
+
+.clinic-address {
+  margin-bottom: 4rpx;
+}
+
+.clinic-distance {
+  font-size: 24rpx;
+  white-space: nowrap;
+}

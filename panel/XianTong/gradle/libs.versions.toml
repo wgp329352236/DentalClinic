@@ -1,0 +1,66 @@
+[versions]
+exposed = "1.3.1"
+grpc-netty = "1.82.1"
+postgresql = "1.0.7.RELEASE"    # PostgreSQL R2DBC 驱动
+koin = "4.2.2"
+kotlin = "2.4.0"
+kotlinx-rpc-grpc = "0.11.0-grpc-188"
+bcrypt = "0.10.2"
+ktor = "3.5.0"
+lettuce = "6.5.5.RELEASE"
+logback = "1.5.37"
+
+[libraries]
+
+# ─── Exposed (Database ORM) ───
+exposed-core = { module = "org.jetbrains.exposed:exposed-core", version.ref = "exposed" }              # ORM 核心
+exposed-jdbc = { module = "org.jetbrains.exposed:exposed-jdbc", version.ref = "exposed" }              # JDBC 桥接
+exposed-java-time = { module = "org.jetbrains.exposed:exposed-java-time", version.ref = "exposed" }    # java.time 列类型
+exposed-json = { module = "org.jetbrains.exposed:exposed-json", version.ref = "exposed" }              # JSON 列类型
+exposed-r2dbc = { module = "org.jetbrains.exposed:exposed-r2dbc", version.ref = "exposed" }            # R2DBC 异步驱动
+
+# ─── PostgreSQL Database (R2DBC) ───
+postgresql-r2dbc = { module = "org.postgresql:r2dbc-postgresql", version.ref = "postgresql" }  # PostgreSQL R2DBC 驱动
+
+# ─── Ktor Server ───
+ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }                       # 服务器核心
+ktor-server-netty = { module = "io.ktor:ktor-server-netty", version.ref = "ktor" }                     # Netty 引擎
+ktor-server-content-negotiation = { module = "io.ktor:ktor-server-content-negotiation", version.ref = "ktor" }  # 内容协商
+ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktor" }  # JSON 序列化
+ktor-server-config-yaml = { module = "io.ktor:ktor-server-config-yaml", version.ref = "ktor" }         # YAML 配置
+ktor-server-cors = { module = "io.ktor:ktor-server-cors", version.ref = "ktor" }                       # 跨域资源共享
+ktor-server-status-pages = { module = "io.ktor:ktor-server-status-pages", version.ref = "ktor" }       # 统一异常处理
+
+# ─── Ktor Client ───
+ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }                     # HTTP 客户端核心
+ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }                        # CIO 异步引擎
+
+# ─── Ktor Auth ───
+ktor-server-auth = { module = "io.ktor:ktor-server-auth", version.ref = "ktor" }                       # 认证基础框架
+ktor-server-auth-jwt = { module = "io.ktor:ktor-server-auth-jwt", version.ref = "ktor" }               # JWT 认证
+
+# ─── Ktor Test ───
+ktor-server-test-host = { module = "io.ktor:ktor-server-test-host", version.ref = "ktor" }             # 服务器测试工具
+
+# ─── gRPC / kotlinx-rpc ───
+grpc-netty = { module = "io.grpc:grpc-netty", version.ref = "grpc-netty" }                             # gRPC Netty 传输层
+kotlinx-rpc-grpc-core = { module = "org.jetbrains.kotlinx:kotlinx-rpc-grpc-core", version.ref = "kotlinx-rpc-grpc" }       # RPC 核心
+kotlinx-rpc-grpc-ktorServer = { module = "org.jetbrains.kotlinx:kotlinx-rpc-grpc-ktor-server", version.ref = "kotlinx-rpc-grpc" }  # RPC Ktor 服务端
+kotlinx-rpc-grpc-client = { module = "org.jetbrains.kotlinx:kotlinx-rpc-grpc-client", version.ref = "kotlinx-rpc-grpc" }     # RPC 客户端 (测试)
+kotlinx-rpc-protobufCore = { module = "org.jetbrains.kotlinx:kotlinx-rpc-protobuf-core", version.ref = "kotlinx-rpc-grpc" }  # Protobuf 核心
+
+# ─── DI / Logging ───
+koin-ktor = { module = "io.insert-koin:koin-ktor", version.ref = "koin" }                              # Koin 依赖注入
+koin-loggerSlf4j = { module = "io.insert-koin:koin-logger-slf4j", version.ref = "koin" }              # SLF4J 日志桥接
+logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }               # Logback 日志实现
+
+# ─── Security / Cache ───
+bcrypt = { module = "at.favre.lib:bcrypt", version.ref = "bcrypt" }                                    # BCrypt 密码哈希
+lettuce-core = { module = "io.lettuce:lettuce-core", version.ref = "lettuce" }                         # Redis 异步客户端
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }                               # Kotlin JVM 编译
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }           # Kotlin 多平台
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }    # Kotlin 序列化
+kotlinx-rpc-grpc = { id = "org.jetbrains.kotlinx.rpc.plugin", version.ref = "kotlinx-rpc-grpc" }      # kotlinx-rpc gRPC
+ktor = { id = "io.ktor.plugin", version.ref = "ktor" }                                                 # Ktor 服务器 (fat-jar 等)

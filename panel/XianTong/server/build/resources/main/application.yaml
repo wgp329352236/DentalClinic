@@ -1,0 +1,16 @@
+ktor:
+  deployment:
+    port: 8080
+  application:
+    modules:
+      - com.dentalclinic.SerializationKt.configureSerialization
+      - com.dentalclinic.SecurityKt.configureSecurity
+      - com.dentalclinic.KoinKt.configureKoin
+      - com.dentalclinic.RoutingKt.configureRouting
+      - com.dentalclinic.admin.AdminModuleKt.adminModule
+
+# ─── 数据库配置（PostgreSQL） ───
+database:
+  url: "r2dbc:postgresql://localhost:5432/dental_clinic"
+  username: "postgres"
+  password: "postgres"

@@ -1,0 +1,79 @@
+<!--pages/referral/referral.wxml-->
+<view class="container">
+  <!-- 推荐卡片 -->
+  <view class="card referral-card">
+    <view class="referral-title text-center font-bold font-large mb-20">邀请好友 双赢奖励</view>
+
+    <!-- 统计数据 -->
+    <view class="stats-row" wx:if="{{referralInfo}}">
+      <view class="stat-item">
+        <view class="stat-value">{{referralInfo.totalReferrals}}</view>
+        <view class="stat-label">累计推荐</view>
+      </view>
+      <view class="stat-item">
+        <view class="stat-value">{{referralInfo.monthlyReferrals}}</view>
+        <view class="stat-label">本月推荐</view>
+      </view>
+    </view>
+
+    <!-- 推荐码 -->
+    <view class="referral-code-section" wx:if="{{referralInfo}}">
+      <view class="text-muted font-small mb-10">我的推荐码</view>
+      <view class="referral-code">{{referralInfo.referralCode}}</view>
+    </view>
+
+    <!-- 操作按钮 -->
+    <view class="action-buttons">
+      <button class="btn-primary" open-type="share">分享给好友</button>
+      <button class="btn-outline mt-10" bindtap="copyLink">复制链接</button>
+    </view>
+  </view>
+
+  <!-- 奖励规则 -->
+  <view class="card">
+    <view class="section-title">奖励规则</view>
+    <view class="rules-list text-muted font-small">
+      <view class="rule-item">
+        <view class="rule-icon">🎁</view>
+        <view class="rule-content">
+          <view class="rule-title font-bold">注册奖励</view>
+          <view>你获得20积分，好友获得50积分+新人券包</view>
+        </view>
+      </view>
+      <view class="rule-item">
+        <view class="rule-icon">💰</view>
+        <view class="rule-content">
+          <view class="rule-title font-bold">首消奖励</view>
+          <view>你获得100积分+50元余额，好友获得100元新人诊疗券</view>
+        </view>
+      </view>
+      <view class="rule-item">
+        <view class="rule-icon">🏆</view>
+        <view class="rule-content">
+          <view class="rule-title font-bold">阶梯奖励</view>
+          <view>累计推荐满5人，额外获得200积分</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 推荐记录 -->
+  <view class="card">
+    <view class="section-title">推荐记录</view>
+    <view class="record-item" wx:for="{{referralInfo?.rewards}}" wx:key="id">
+      <view class="flex-between mb-10">
+        <view class="font-bold">
+          {{item.type === 'register' ? '注册奖励' : (item.type === 'first_consumption' ? '首消奖励' : '阶梯奖励')}}
+        </view>
+        <view class="badge {{item.status === 'issued' ? 'badge-success' : 'badge-warning'}}">
+          {{item.status === 'issued' ? '已发放' : '待发放'}}
+        </view>
+      </view>
+      <view class="text-muted font-small" wx:if="{{item.points}}">+{{item.points}}积分</view>
+      <view class="text-muted font-small" wx:if="{{item.balance}}">+¥{{item.balance}}余额</view>
+      <view class="text-muted font-small" wx:if="{{item.referredPerson}}">推荐人：{{item.referredPerson}}</view>
+      <view class="text-muted font-small">{{item.createdAt}}</view>
+    </view>
+    <view wx:if="{{!referralInfo || referralInfo.rewards.length === 0}}" class="empty-state">暂无推荐记录</view>
+  </view>
+</view>

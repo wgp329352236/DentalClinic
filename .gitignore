@@ -1,0 +1,19 @@
+# Build outputs
+panel/XianTong/build/
+panel/XianTong/.gradle/
+panel/XianTong/.kotlin/
+panel/XianTong/.idea/
+panel/XianTong/client/node_modules/
+panel/XianTong/client/dist/
+
+# IDE
+*.iml
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

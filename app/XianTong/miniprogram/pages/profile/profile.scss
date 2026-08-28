@@ -1,0 +1,126 @@
+/* pages/profile/profile.scss */
+
+.profile-card {
+  /* 无额外样式 */
+}
+
+.avatar-large {
+  width: 120rpx;
+  height: 120rpx;
+  border-radius: 50%;
+}
+
+.ml-20 {
+  margin-left: 20rpx;
+}
+
+.edit-btn {
+  padding: 12rpx 24rpx;
+  border: 2rpx solid #1890ff;
+  color: #1890ff;
+  border-radius: 8rpx;
+  font-size: 24rpx;
+}
+
+.member-progress {
+  padding-top: 20rpx;
+  border-top: 1rpx solid #f0f0f0;
+}
+
+.progress-bar {
+  height: 12rpx;
+  background: #f0f0f0;
+  border-radius: 6rpx;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #1890ff, #52c41a);
+  border-radius: 6rpx;
+}
+
+.section-title {
+  font-size: 30rpx;
+  font-weight: bold;
+  margin-bottom: 20rpx;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  padding: 24rpx 0;
+  border-bottom: 1rpx solid #f0f0f0;
+  position: relative;
+}
+
+.menu-item:last-child {
+  border-bottom: none;
+}
+
+.menu-icon {
+  font-size: 40rpx;
+  margin-right: 16rpx;
+}
+
+.menu-label {
+  flex: 1;
+  font-size: 28rpx;
+}
+
+.menu-badge {
+  background: #ff4d4f;
+  color: #fff;
+  font-size: 20rpx;
+  padding: 4rpx 12rpx;
+  border-radius: 20rpx;
+  margin-right: 10rpx;
+}
+
+.menu-arrow {
+  font-size: 40rpx;
+  color: #999;
+}
+
+.coupon-list {
+  /* 无额外样式 */
+}
+
+.coupon-item {
+  display: flex;
+  align-items: center;
+  padding: 20rpx;
+  background: #fafafa;
+  border-radius: 12rpx;
+  margin-bottom: 12rpx;
+  border-left: 6rpx solid #1890ff;
+}
+
+.coupon-amount {
+  font-size: 40rpx;
+  font-weight: bold;
+  color: #ff4d4f;
+  margin-right: 16rpx;
+}
+
+.coupon-info {
+  flex: 1;
+}
+
+.coupon-name {
+  font-size: 28rpx;
+  margin-bottom: 4rpx;
+}
+
+.coupon-date {
+  margin-top: 4rpx;
+}
+
+.coupon-status {
+  margin-left: 10rpx;
+}
+
+.btn-danger {
+  color: #ff4d4f;
+  border-color: #ff4d4f;
+}
