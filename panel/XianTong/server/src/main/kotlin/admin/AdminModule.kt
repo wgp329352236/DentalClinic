@@ -5,10 +5,16 @@ import com.dentalclinic.admin.dto.response.ApiResponse
 import com.dentalclinic.admin.entity.*
 import com.dentalclinic.admin.route.*
 import com.dentalclinic.admin.service.*
+import com.dentalclinic.user.route.fileUploadRoutes
+import com.dentalclinic.user.route.testReferralRoutes
 import com.dentalclinic.user.route.userAppointmentRoutes
 import com.dentalclinic.user.route.userAuthRoutes
+import com.dentalclinic.user.route.userCouponRoutes
+import com.dentalclinic.user.route.userNotificationRoutes
+import com.dentalclinic.user.route.userPointsRoutes
 import com.dentalclinic.user.route.userProfileRoutes
 import com.dentalclinic.user.route.userRechargeRoutes
+import com.dentalclinic.user.route.userReferralRoutes
 import com.dentalclinic.user.route.userWalletRoutes
 import com.dentalclinic.admin.util.*
 import com.dentalclinic.config.DBConfig
@@ -76,7 +82,9 @@ fun Application.adminModule() {
                 UserCoupons,
                 // Notifications
                 Notifications,
-                MessageTemplates
+                MessageTemplates,
+                // Files
+                UploadedFiles
             )
             logger.info("All tables (admin + dental clinic) created/verified.")
         }
@@ -181,6 +189,12 @@ fun Application.adminRouting() {
         userWalletRoutes()
         userRechargeRoutes()
         userAppointmentRoutes()
+        userPointsRoutes()
+        userReferralRoutes()
+        userCouponRoutes()
+        userNotificationRoutes()
+        fileUploadRoutes()
+        testReferralRoutes()
 
         // Admin API
         route("/api/admin") {

@@ -333,6 +333,106 @@ class AppointmentService {
             }
         }
     }
+
+    /**
+     * Reschedule an appointment to a new date/time.
+     */
+    suspend fun rescheduleAppointment(userId: Long, appointmentId: Long, newDate: String, newStartTime: String): AppointmentResult {
+        // Parse new date
+        val appointmentDate = try {
+            LocalDate.parse(newDate)
+        } catch (e: Exception) {
+            return AppointmentResult.Error("日期格式错误，请使用 yyyy-MM-dd")
+        }
+
+        // Check if new date is in the past
+        if (appointmentDate.isBefore(LocalDate.now())) {
+            return AppointmentResult.Error("不能改约到过去的日期")
+        }
+
+        // Pre-check appointment exists and status
+        val preCheck = withContext(Dispatchers.IO) {
+            suspendTransaction(DBConfig.database) {
+                Appointments.selectAll()
+                    .where {
+                        (Appointments.id eq appointmentId) and
+                        (Appointments.userId eq userId)
+                    }
+                    .toList()
+                    .singleOrNull()
+            }
+        }
+
+        if (preCheck == null) {
+            return AppointmentResult.Error("预约不存在")
+        }
+
+        val status = preCheck[Appointments.status]
+        if (status == "cancelled") {
+            return AppointmentResult.Error("预约已取消")
+        }
+        if (status == "completed") {
+            return AppointmentResult.Error("预约已完成")
+        }
+
+        val doctorId = preCheck[Appointments.doctorId]
+
+        return withContext(Dispatchers.IO) {
+            suspendTransaction(DBConfig.database) {
+                val formatter = DateTimeFormatter.ofPattern("HH:mm")
+
+                // Check if new slot is available (exclude current appointment)
+                val bookedCount = Appointments.selectAll()
+                    .where {
+                        (Appointments.doctorId eq doctorId) and
+                        (Appointments.appointmentDate eq appointmentDate) and
+                        (Appointments.startTime eq newStartTime) and
+                        (Appointments.status neq "cancelled") and
+                        (Appointments.id neq appointmentId)
+                    }
+                    .count()
+
+                // Get schedule for the new time
+                val dayOfWeek = appointmentDate.dayOfWeek.value
+                val schedule = DoctorSchedules.selectAll()
+                    .where {
+                        (DoctorSchedules.doctorId eq doctorId) and
+                        (DoctorSchedules.dayOfWeek eq dayOfWeek) and
+                        (DoctorSchedules.isEnabled eq 1)
+                    }
+                    .toList()
+                    .firstOrNull { row ->
+                        val schedStart = row[DoctorSchedules.startTime]
+                        val schedEnd = row[DoctorSchedules.endTime]
+                        newStartTime >= schedStart && newStartTime < schedEnd
+                    }
+
+                if (schedule == null) {
+                    AppointmentResult.Error("该时段不可预约")
+                } else {
+                    val maxAppointments = schedule[DoctorSchedules.maxAppointments]
+                    if (bookedCount >= maxAppointments) {
+                        AppointmentResult.Error("该时段已满")
+                    } else {
+                        // Calculate new end time
+                        val startTimeObj = java.time.LocalTime.parse(newStartTime)
+                        val slotDuration = schedule[DoctorSchedules.slotDuration]
+                        val endTimeObj = startTimeObj.plusMinutes(slotDuration.toLong())
+                        val newEndTime = endTimeObj.format(formatter)
+
+                        // Update appointment
+                        Appointments.update({ Appointments.id eq appointmentId }) {
+                            it[Appointments.appointmentDate] = appointmentDate
+                            it[Appointments.startTime] = newStartTime
+                            it[Appointments.endTime] = newEndTime
+                        }
+
+                        AppointmentResult.Success(appointmentId)
+                    }
+                }
+            }
+        }
+    }
 }
 
 // DTOs

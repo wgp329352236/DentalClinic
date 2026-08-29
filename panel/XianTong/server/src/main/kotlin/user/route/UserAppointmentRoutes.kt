@@ -195,9 +195,55 @@ fun Application.userAppointmentRoutes() {
                     }
                 }
             }
+
+            /**
+             * Reschedule an appointment.
+             * PUT /api/v1/appointments/{id}/reschedule
+             */
+            put("/appointments/{id}/reschedule") {
+                val authHeader = call.request.headers[HttpHeaders.Authorization]
+                if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+                    call.respond(ApiResponse<Unit>(code = 401, message = "缺少认证令牌"))
+                    return@put
+                }
+
+                val token = authHeader.removePrefix("Bearer ")
+                val decoded = UserJwtConfig.verifyAccessToken(token)
+                if (decoded == null) {
+                    call.respond(ApiResponse<Unit>(code = 401, message = "无效的访问令牌"))
+                    return@put
+                }
+
+                val userId = decoded.subject.toLong()
+                val appointmentId = call.parameters["id"]?.toLongOrNull()
+
+                if (appointmentId == null) {
+                    call.respond(ApiResponse<Unit>(code = 400, message = "无效的预约ID"))
+                    return@put
+                }
+
+                try {
+                    val request = call.receive<RescheduleRequest>()
+                    val result = appointmentService.rescheduleAppointment(userId, appointmentId, request.appointmentDate, request.startTime)
+
+                    when (result) {
+                        is AppointmentResult.Success -> {
+                            call.respond(ApiResponse<Unit>(code = 0, message = "改约成功"))
+                        }
+                        is AppointmentResult.Error -> {
+                            call.respond(ApiResponse<Unit>(code = 400, message = result.message))
+                        }
+                    }
+                } catch (e: Exception) {
+                    call.respond(ApiResponse<Unit>(code = 500, message = "改约失败: ${e.message}"))
+                }
+            }
         }
     }
 }
+
+@Serializable
+data class RescheduleRequest(val appointmentDate: String, val startTime: String)
 
 @Serializable
 data class CreateAppointmentRequestDto(

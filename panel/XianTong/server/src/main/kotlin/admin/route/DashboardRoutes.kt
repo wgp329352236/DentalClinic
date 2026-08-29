@@ -3,10 +3,7 @@ package com.dentalclinic.admin.route
 import com.dentalclinic.admin.auth.authenticated
 import com.dentalclinic.admin.auth.requirePermission
 import com.dentalclinic.admin.service.AdminDashboardService
-import com.dentalclinic.admin.util.PageQuery
-import com.dentalclinic.admin.util.ValidationException
 import com.dentalclinic.admin.util.ok
-import com.dentalclinic.admin.util.okPage
 import io.ktor.server.routing.*
 
 fun Route.dashboardRoutes(dashboardService: AdminDashboardService) {
@@ -15,36 +12,47 @@ fun Route.dashboardRoutes(dashboardService: AdminDashboardService) {
         authenticated {
             requirePermission("dashboard:view") {
 
-                // GET /api/admin/dashboard/summary
+                // GET /api/admin/dashboard/summary — 实时概览
                 get("/summary") {
                     val summary = dashboardService.getSummary()
                     call.ok(summary)
                 }
 
-                // GET /api/admin/dashboard/games
-                get("/games") {
-                    val volumes = dashboardService.getGameDataVolumes()
-                    call.ok(volumes)
+                // GET /api/admin/dashboard/clinic-comparison — 门店对比
+                get("/clinic-comparison") {
+                    val comparison = dashboardService.getClinicComparison()
+                    call.ok(comparison)
                 }
 
-                // GET /api/admin/dashboard/trends
+                // GET /api/admin/dashboard/trends?days=30 — 趋势数据
                 get("/trends") {
-                    val trends = dashboardService.getTrends()
+                    val days = call.request.queryParameters["days"]?.toIntOrNull() ?: 30
+                    val trends = dashboardService.getTrends(days.coerceIn(7, 90))
                     call.ok(trends)
                 }
 
-                // GET /api/admin/dashboard/channels/{gameCode}
-                get("/channels/{gameCode}") {
-                    val gameCode = call.parameters["gameCode"]
-                        ?: throw ValidationException("缺少游戏代码")
-                    val distribution = dashboardService.getChannelDistribution(gameCode)
+                // GET /api/admin/dashboard/customer-levels — 客户等级分布
+                get("/customer-levels") {
+                    val distribution = dashboardService.getCustomerLevelDistribution()
                     call.ok(distribution)
                 }
 
-                // GET /api/admin/dashboard/push-records
-                get("/push-records") {
-                    val pq = PageQuery.from(call)
-                    call.okPage(emptyList<String>(), 0L, pq.page, pq.pageSize)
+                // GET /api/admin/dashboard/customer-sources — 客户来源分布
+                get("/customer-sources") {
+                    val distribution = dashboardService.getCustomerSourceDistribution()
+                    call.ok(distribution)
+                }
+
+                // GET /api/admin/dashboard/referral — 推荐统计
+                get("/referral") {
+                    val stats = dashboardService.getReferralStats()
+                    call.ok(stats)
+                }
+
+                // GET /api/admin/dashboard/retention — 客户留存
+                get("/retention") {
+                    val retention = dashboardService.getCustomerRetention()
+                    call.ok(retention)
                 }
             }
         }

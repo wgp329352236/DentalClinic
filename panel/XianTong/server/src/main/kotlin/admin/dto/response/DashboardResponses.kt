@@ -2,46 +2,85 @@ package com.dentalclinic.admin.dto.response
 
 import kotlinx.serialization.Serializable
 
+/**
+ * Dashboard summary — real-time metrics for today.
+ */
 @Serializable
 data class DashboardSummary(
-    val totalGames: Int,
-    val pulledToday: Long,
-    val pushedToday: Long,
-    val successRate: Double // 0.0 ~ 1.0
+    val todayAppointments: Int,       // 今日预约数
+    val todayArrivals: Int,           // 今日到店数
+    val todayRevenue: Double,         // 今日营收
+    val todayNewCustomers: Int        // 今日新增客户数
 )
 
+/**
+ * Clinic comparison data.
+ */
 @Serializable
-data class GameDataVolume(
-    val gameCode: String,
-    val gameName: String,
-    val pullCount7d: Long,
-    val pushCount7d: Long,
-    val lastPullTime: String? = null,
-    val lastPushTime: String? = null,
-    val stale: Boolean = false // 超过 24h 无新数据
+data class ClinicComparison(
+    val clinicId: Long,
+    val clinicName: String,
+    val appointmentCount: Int,        // 预约量
+    val revenue: Double,              // 营收
+    val newCustomerCount: Int,        // 新客数
+    val customerSatisfaction: Double? // 客户满意度（预留）
 )
 
+/**
+ * Trend data point for line charts.
+ */
 @Serializable
 data class TrendDataPoint(
-    val date: String, // yyyy-MM-dd
-    val pullCount: Long,
-    val pushCount: Long
+    val date: String,                 // yyyy-MM-dd
+    val appointmentCount: Int,        // 预约数
+    val revenue: Double,              // 营收
+    val newCustomerCount: Int         // 新客数
+)
+
+/**
+ * Customer distribution by member level.
+ */
+@Serializable
+data class CustomerLevelDistribution(
+    val levelCode: Int,
+    val levelName: String,
+    val count: Int
+)
+
+/**
+ * Customer source distribution.
+ */
+@Serializable
+data class CustomerSourceDistribution(
+    val sourceType: String,           // self/referral/store_entry
+    val sourceLabel: String,          // 自主注册/推荐注册/门店录入
+    val count: Int,
+    val percentage: Double            // 百分比 0-100
+)
+
+/**
+ * Referral statistics.
+ */
+@Serializable
+data class ReferralStats(
+    val conversionRate: Double,       // 推荐注册转化率 0-100
+    val topReferrers: List<TopReferrer>,
+    val monthlyNewCustomers: Int,     // 推荐带来的月度新客数
+    val monthlyRevenue: Double        // 推荐带来的月度营收
 )
 
 @Serializable
-data class ChannelDistribution(
-    val channel: String,
-    val count: Long
+data class TopReferrer(
+    val userId: Long,
+    val nickname: String?,
+    val referralCount: Int
 )
 
+/**
+ * Customer retention metrics.
+ */
 @Serializable
-data class PushRecordItem(
-    val id: Long,
-    val gameCode: String,
-    val pushTime: String,
-    val targetPlatform: String,
-    val recordCount: Int,
-    val status: String, // success, partial, failed
-    val durationMs: Long? = null,
-    val errorDetails: String? = null
+data class CustomerRetention(
+    val repeatVisitRate: Double,      // 复诊率 0-100
+    val churnRate: Double             // 流失率 0-100
 )

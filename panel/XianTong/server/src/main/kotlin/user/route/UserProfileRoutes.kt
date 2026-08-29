@@ -7,6 +7,7 @@ import com.dentalclinic.config.DBConfig
 import com.dentalclinic.user.auth.UserJwtConfig
 import io.ktor.http.*
 import io.ktor.server.application.*
+import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.coroutines.flow.toList
@@ -80,9 +81,91 @@ fun Application.userProfileRoutes() {
                     call.respond(ApiResponse<Unit>(code = 404, message = "用户不存在"))
                 }
             }
+
+            /**
+             * Update user's profile information.
+             * PUT /api/v1/profile/me
+             * Body: { "realName": "张三", "phone": "13800138000", "gender": 1, "age": 25, "avatar": "url" }
+             */
+            put("/me") {
+                val userId = authenticate(call) ?: return@put
+
+                try {
+                    val request = call.receive<UpdateProfileRequest>()
+
+                    // Validate phone format if provided
+                    if (request.phone != null && request.phone.isNotEmpty()) {
+                        if (!request.phone.matches(Regex("^1[3-9]\\d{9}$"))) {
+                            call.respond(ApiResponse<Unit>(code = 400, message = "手机号格式不正确"))
+                            return@put
+                        }
+                    }
+
+                    // Validate gender (1=male, 2=female)
+                    if (request.gender != null && request.gender !in listOf(1, 2)) {
+                        call.respond(ApiResponse<Unit>(code = 400, message = "性别值无效，应为1(男)或2(女)"))
+                        return@put
+                    }
+
+                    // Validate age
+                    if (request.age != null && (request.age < 0 || request.age > 150)) {
+                        call.respond(ApiResponse<Unit>(code = 400, message = "年龄值无效"))
+                        return@put
+                    }
+
+                    val updated = suspendTransaction(DBConfig.database) {
+                        Users.update({ Users.id eq userId }) {
+                            if (request.realName != null) it[Users.realName] = request.realName
+                            if (request.phone != null) it[Users.phone] = request.phone
+                            if (request.gender != null) it[Users.gender] = request.gender
+                            if (request.age != null) it[Users.age] = request.age
+                            if (request.avatar != null) it[Users.avatar] = request.avatar
+                            if (request.nickname != null) it[Users.nickname] = request.nickname
+                        }
+                    }
+
+                    if (updated > 0) {
+                        call.respond(ApiResponse<Unit>(code = 0, message = "更新成功"))
+                    } else {
+                        call.respond(ApiResponse<Unit>(code = 404, message = "用户不存在"))
+                    }
+                } catch (e: Exception) {
+                    call.respond(ApiResponse<Unit>(code = 500, message = "更新失败: ${e.message}"))
+                }
+            }
         }
     }
 }
+
+/**
+ * Helper: Extract and verify user ID from JWT token.
+ */
+private suspend fun authenticate(call: io.ktor.server.application.ApplicationCall): Long? {
+    val authHeader = call.request.headers[HttpHeaders.Authorization]
+    if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+        call.respond(ApiResponse<Unit>(code = 401, message = "缺少认证令牌"))
+        return null
+    }
+
+    val token = authHeader.removePrefix("Bearer ")
+    val decoded = UserJwtConfig.verifyAccessToken(token)
+    if (decoded == null) {
+        call.respond(ApiResponse<Unit>(code = 401, message = "无效的访问令牌"))
+        return null
+    }
+
+    return decoded.subject.toLong()
+}
+
+@Serializable
+data class UpdateProfileRequest(
+    val realName: String? = null,
+    val phone: String? = null,
+    val gender: Int? = null,
+    val age: Int? = null,
+    val avatar: String? = null,
+    val nickname: String? = null
+)
 
 @Serializable
 data class UserProfileDto(

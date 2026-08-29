@@ -690,3 +690,23 @@ object MessageTemplates : Table("message_template") {
         uniqueIndex("msg_tpl_uk_template_key", templateKey)
     }
 }
+
+// ============================================================
+// Uploaded Files
+// ============================================================
+object UploadedFiles : Table("uploaded_file") {
+    val id = long("id").autoIncrement()
+    val userId = long("user_id")
+    val fileName = varchar("file_name", 200)
+    val originalName = varchar("original_name", 200)
+    val fileSize = long("file_size")
+    val contentType = varchar("content_type", 100).nullable()
+    val url = varchar("url", 500)
+    val createdAt = datetime("created_at").defaultExpression(CurrentTimestamp)
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        index("idx_user_id", false, userId)
+        uniqueIndex("uf_uk_file_name", fileName)
+    }
+}
