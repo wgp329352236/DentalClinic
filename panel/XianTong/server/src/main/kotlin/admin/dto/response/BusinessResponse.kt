@@ -12,7 +12,7 @@ data class ClinicResponse(
 
 @Serializable
 data class DepartmentResponse(
-    val id: Long, val clinicId: Long, val name: String, val description: String?
+    val id: Long, val clinicId: Long, val deptName: String, val description: String?
 )
 
 @Serializable

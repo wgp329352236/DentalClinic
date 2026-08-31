@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.SortOrder
+import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.r2dbc.deleteWhere
 import org.jetbrains.exposed.v1.r2dbc.insert
@@ -121,17 +122,20 @@ fun Route.departmentRoutes() {
                     val cid = call.request.queryParameters["clinicId"]?.toLongOrNull()
                     val data = withContext(Dispatchers.IO) {
                         suspendTransaction(DBConfig.database) {
-                            val q = Departments.selectAll().where { Departments.status eq 1 }
                             val rows = if (cid != null) {
-                                q.where { Departments.clinicId eq cid }.toList()
+                                Departments.selectAll()
+                                    .where { (Departments.status eq 1) and (Departments.clinicId eq cid) }
+                                    .toList()
                             } else {
-                                q.toList()
+                                Departments.selectAll()
+                                    .where { Departments.status eq 1 }
+                                    .toList()
                             }
                             rows.map { r ->
                                 DepartmentResponse(
                                     id = r[Departments.id],
                                     clinicId = r[Departments.clinicId],
-                                    name = r[Departments.name],
+                                    deptName = r[Departments.name],
                                     description = r[Departments.description]
                                 )
                             }
