@@ -1,13 +1,13 @@
 package com.dentalclinic.admin.service
 
-import com.dentalclinic.admin.entity.*
+import com.dentalclinic.admin.entity.AdminUsers
+import com.dentalclinic.admin.entity.MemberLevels
+import com.dentalclinic.admin.entity.PointsRules
 import com.dentalclinic.config.DBConfig
-import kotlinx.coroutines.runBlocking
 import org.jetbrains.exposed.v1.r2dbc.insert
 import org.jetbrains.exposed.v1.r2dbc.selectAll
 import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
 import org.slf4j.LoggerFactory
-import java.time.LocalDateTime
 
 /**
  * Data seeding service — inserts default data on first startup.
@@ -62,7 +62,7 @@ object DataSeedService {
 
         val rules = listOf(
             Triple("消费积分", "earn", "consumption") to Pair(1, "每消费1元"),
-            Triple("充值积分", "earn", "recharge") to Pair(0.5.toInt(), "每充值1元"),
+            Triple("充值积分", "earn", "recharge") to Pair(5, "每充值1元"),
             Triple("每日签到", "earn", "signup") to Pair(2, "每日限1次"),
             Triple("完善信息", "earn", "profile_complete") to Pair(50, "一次性奖励"),
             Triple("就诊评价", "earn", "review") to Pair(10, "每月限4次"),
@@ -76,12 +76,12 @@ object DataSeedService {
                 it[PointsRules.ruleName] = name
                 it[PointsRules.ruleType] = ruleType
                 it[PointsRules.actionType] = actionType
-                it[pointsPerUnit] = points
-                it[unitDescription] = desc
-                it[dailyLimit] = if (actionType == "signup") 1 else null
-                it[monthlyLimit] = if (actionType == "review") 4 else null
-                it[validityMonths] = 12
-                it[status] = 1
+                it[PointsRules.pointsPerUnit] = points
+                it[PointsRules.unitDescription] = desc
+                it[PointsRules.dailyLimit] = if (actionType == "signup") 1 else null
+                it[PointsRules.monthlyLimit] = if (actionType == "review") 4 else null
+                it[PointsRules.validityMonths] = 12
+                it[PointsRules.status] = 1
             }
         }
         logger.info("[DataSeed]: Seeded ${rules.size} points rules.")

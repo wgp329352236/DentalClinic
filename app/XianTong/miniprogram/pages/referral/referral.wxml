@@ -60,20 +60,22 @@
   <!-- 推荐记录 -->
   <view class="card">
     <view class="section-title">推荐记录</view>
-    <view class="record-item" wx:for="{{referralInfo?.rewards}}" wx:key="id">
-      <view class="flex-between mb-10">
-        <view class="font-bold">
-          {{item.type === 'register' ? '注册奖励' : (item.type === 'first_consumption' ? '首消奖励' : '阶梯奖励')}}
+    <block wx:if="{{referralInfo}}">
+      <view class="record-item" wx:for="{{referralInfo.rewards}}" wx:key="id">
+        <view class="flex-between mb-10">
+          <view class="font-bold">
+            {{item.type === 'register' ? '注册奖励' : (item.type === 'first_consumption' ? '首消奖励' : '阶梯奖励')}}
+          </view>
+          <view class="badge {{item.status === 'issued' ? 'badge-success' : 'badge-warning'}}">
+            {{item.status === 'issued' ? '已发放' : '待发放'}}
+          </view>
         </view>
-        <view class="badge {{item.status === 'issued' ? 'badge-success' : 'badge-warning'}}">
-          {{item.status === 'issued' ? '已发放' : '待发放'}}
-        </view>
+        <view class="text-muted font-small" wx:if="{{item.points}}">+{{item.points}}积分</view>
+        <view class="text-muted font-small" wx:if="{{item.balance}}">+¥{{item.balance}}余额</view>
+        <view class="text-muted font-small" wx:if="{{item.referredPerson}}">推荐人：{{item.referredPerson}}</view>
+        <view class="text-muted font-small">{{item.createdAt}}</view>
       </view>
-      <view class="text-muted font-small" wx:if="{{item.points}}">+{{item.points}}积分</view>
-      <view class="text-muted font-small" wx:if="{{item.balance}}">+¥{{item.balance}}余额</view>
-      <view class="text-muted font-small" wx:if="{{item.referredPerson}}">推荐人：{{item.referredPerson}}</view>
-      <view class="text-muted font-small">{{item.createdAt}}</view>
-    </view>
-    <view wx:if="{{!referralInfo || referralInfo.rewards.length === 0}}" class="empty-state">暂无推荐记录</view>
+    </block>
+    <view wx:if="{{!referralInfo || !referralInfo.rewards || referralInfo.rewards.length === 0}}" class="empty-state">暂无推荐记录</view>
   </view>
 </view>

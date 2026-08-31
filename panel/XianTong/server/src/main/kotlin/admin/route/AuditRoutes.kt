@@ -8,7 +8,6 @@ import com.dentalclinic.admin.entity.AdminAuditLogs
 import com.dentalclinic.admin.util.*
 import com.dentalclinic.config.DBConfig
 import io.ktor.server.routing.*
-import kotlinx.coroutines.flow.singleOrNull
 import kotlinx.coroutines.flow.toList
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.eq

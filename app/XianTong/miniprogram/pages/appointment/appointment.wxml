@@ -38,7 +38,7 @@
       <image class="doctor-avatar" src="{{item.avatar}}" mode="aspectFill"></image>
       <view class="doctor-info">
         <view class="doctor-name">{{item.name}} <text class="doctor-title">{{item.title}}</text></view>
-        <view class="doctor-specialty text-muted font-small">{{item.specialties.join('、')}}</view>
+        <view class="doctor-specialty text-muted font-small">{{item.specialties}}</view>
         <view class="doctor-intro text-muted font-small">{{item.introduction}}</view>
       </view>
     </view>
@@ -53,15 +53,12 @@
         <view class="time-slot-date">{{item.date}}</view>
         <view class="time-slot-list">
           <view
-            class="time-slot {{item.remaining === 0 ? 'disabled' : ''}}"
-            wx:for="{{[item]}}"
-            wx:for-item="slot"
-            wx:key="timeRange"
+            class="time-slot {{item.available ? '' : 'disabled'}}"
             data-index="{{index}}"
             bindtap="onSelectSlot"
           >
-            {{slot.timeRange}}
-            <view class="time-slot-remaining" wx:if="{{slot.remaining > 0}}">余{{slot.remaining}}</view>
+            {{item.startTime}}-{{item.endTime}}
+            <view class="time-slot-status" wx:if="{{item.available}}">可预约</view>
             <view class="time-slot-full" wx:else>已满</view>
           </view>
         </view>
@@ -73,19 +70,19 @@
   <view wx:if="{{step === 5}}" class="card">
     <view class="confirm-item">
       <text class="confirm-label">门诊：</text>
-      <text>{{clinics.find(c => c.id === selectedClinicId)?.name}}</text>
+      <text>{{selectedClinicName}}</text>
     </view>
     <view class="confirm-item">
       <text class="confirm-label">科室：</text>
-      <text>{{departments.find(d => d.id === selectedDepartmentId)?.name}}</text>
+      <text>{{selectedDepartmentName}}</text>
     </view>
     <view class="confirm-item">
       <text class="confirm-label">医生：</text>
-      <text>{{doctors.find(d => d.id === selectedDoctorId)?.name}}</text>
+      <text>{{selectedDoctorName}}</text>
     </view>
     <view class="confirm-item">
       <text class="confirm-label">时间：</text>
-      <text>{{selectedSlot?.date}} {{selectedSlot?.timeRange}}</text>
+      <text>{{selectedSlot.date}} {{selectedSlot.timeRange}}</text>
     </view>
     <view class="divider"></view>
     <button class="btn-primary" bindtap="submitAppointment" disabled="{{loading}}">

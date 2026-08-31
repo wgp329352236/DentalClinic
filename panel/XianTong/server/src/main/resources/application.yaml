@@ -8,6 +8,7 @@ ktor:
       - com.dentalclinic.KoinKt.configureKoin
       - com.dentalclinic.RoutingKt.configureRouting
       - com.dentalclinic.admin.AdminModuleKt.adminModule
+      - com.dentalclinic.user.UserModuleKt.userModule
 
 # ─── 数据库配置（PostgreSQL） ───
 database:

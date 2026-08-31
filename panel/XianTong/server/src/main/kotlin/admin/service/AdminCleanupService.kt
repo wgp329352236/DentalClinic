@@ -3,7 +3,8 @@ package com.dentalclinic.admin.service
 import com.dentalclinic.admin.entity.AdminAuditLogs
 import com.dentalclinic.config.DBConfig
 import kotlinx.coroutines.runBlocking
-import org.jetbrains.exposed.v1.core.*
+import org.jetbrains.exposed.v1.core.LessOp
+import org.jetbrains.exposed.v1.core.QueryParameter
 import org.jetbrains.exposed.v1.r2dbc.deleteWhere
 import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
 import org.slf4j.LoggerFactory

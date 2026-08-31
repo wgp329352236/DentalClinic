@@ -64,6 +64,6 @@
   <view class="empty-state" wx:if="{{!userInfo && !loading}}">
     <view class="font-large mb-20">欢迎使用牙科门诊</view>
     <view class="text-muted mb-20">请先登录后享受完整服务</view>
-    <button class="btn-primary" bindtap="handleLogin">立即登录</button>
+    <button class="btn-primary" loading="{{loading}}" disabled="{{loading}}" open-type="getPhoneNumber" bindgetphonenumber="onGetPhoneNumber">{{loading ? '登录中...' : '微信一键登录'}}</button>
   </view>
 </view>

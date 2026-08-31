@@ -5,11 +5,12 @@ import com.dentalclinic.config.DBConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withContext
-import org.jetbrains.exposed.v1.core.*
-import org.jetbrains.exposed.v1.r2dbc.*
-import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
-import kotlinx.serialization.Contextual
 import kotlinx.serialization.Serializable
+import org.jetbrains.exposed.v1.core.*
+import org.jetbrains.exposed.v1.r2dbc.insert
+import org.jetbrains.exposed.v1.r2dbc.selectAll
+import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
+import org.jetbrains.exposed.v1.r2dbc.update
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 

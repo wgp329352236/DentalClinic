@@ -30,6 +30,7 @@
   <!-- 标签切换 -->
   <view class="tabs">
     <view class="tab {{activeTab === 'recharge' ? 'active' : ''}}" data-tab="recharge" bindtap="onTabChange">充值记录</view>
+    <view class="tab-divider"></view>
     <view class="tab {{activeTab === 'consumption' ? 'active' : ''}}" data-tab="consumption" bindtap="onTabChange">消费记录</view>
   </view>
 

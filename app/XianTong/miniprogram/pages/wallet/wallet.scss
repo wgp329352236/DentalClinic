@@ -43,6 +43,35 @@
   opacity: 0.7;
 }
 
+.tabs {
+  display: flex;
+  background: #fff;
+  border-radius: 16rpx;
+  margin-bottom: 20rpx;
+  overflow: hidden;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: 24rpx 0;
+  font-size: 28rpx;
+  color: #666;
+  border-bottom: 4rpx solid transparent;
+}
+
+.tab.active {
+  color: #1890ff;
+  border-bottom-color: #1890ff;
+  font-weight: bold;
+}
+
+.tab-divider {
+  width: 1rpx;
+  margin: 20rpx 0;
+  background: #eee;
+}
+
 .record-item {
   /* 无额外样式 */
 }

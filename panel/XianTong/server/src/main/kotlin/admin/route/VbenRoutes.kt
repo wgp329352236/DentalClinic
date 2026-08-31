@@ -6,8 +6,6 @@ import com.dentalclinic.admin.entity.*
 import com.dentalclinic.admin.util.ok
 import com.dentalclinic.config.DBConfig
 import io.ktor.server.routing.*
-import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.single
 import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.Serializable

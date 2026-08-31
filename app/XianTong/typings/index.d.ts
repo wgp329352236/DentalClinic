@@ -2,13 +2,17 @@
 
 import type { UserInfo } from '../miniprogram/types'
 
-interface IAppOption {
-  globalData: {
-    userInfo: UserInfo | null
-    token: string
-    clinics: any[]
+declare global {
+  interface IAppOption {
+    globalData: {
+      userInfo: UserInfo | null
+      token: string
+      clinics: any[]
+    }
+    setUserInfo(userInfo: UserInfo): void
+    setToken(token: string): void
+    logout(): void
   }
-  setUserInfo(userInfo: UserInfo): void
-  setToken(token: string): void
-  logout(): void
 }
+
+export {}

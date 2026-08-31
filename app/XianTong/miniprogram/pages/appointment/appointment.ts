@@ -1,5 +1,5 @@
 // pages/appointment/appointment.ts
-import { get, post } from '../../utils/request'
+import { getClinics, getDepartments, getDoctors, getDoctorSlots, createAppointment } from '../../utils/api'
 import type { Clinic, Department, Doctor, TimeSlot } from '../../types'
 
 Page({
@@ -18,7 +18,12 @@ Page({
     // 步骤：1-选门诊 2-选科室 3-选医生 4-选时段 5-确认
     step: 1,
 
-    loading: false
+    loading: false,
+
+    // 用于 WXML 显示的选中项信息
+    selectedClinicName: '',
+    selectedDepartmentName: '',
+    selectedDoctorName: ''
   },
 
   onLoad(options: any) {
@@ -31,50 +36,77 @@ Page({
 
   // 加载门店列表
   async loadClinics() {
-    const result = await get<Clinic[]>('/clinics')
-    if (result.code === 0 && result.data) {
-      this.setData({ clinics: result.data })
-      // 如果已选中门诊，加载该门诊的医生
-      if (this.data.selectedClinicId) {
-        this.loadDoctors()
+    try {
+      const result = await getClinics()
+      if (result.code === 0 && result.data) {
+        this.setData({ clinics: result.data })
+        if (this.data.selectedClinicId) {
+          this.loadDoctors()
+        }
       }
+    } catch (error) {
+      console.error('加载门店失败:', error)
+      wx.showToast({ title: '加载门店失败', icon: 'none' })
     }
   },
 
   // 加载科室列表
   async loadDepartments() {
-    const result = await get<Department[]>('/departments')
-    if (result.code === 0 && result.data) {
-      this.setData({ departments: result.data })
+    try {
+      const result = await getDepartments()
+      if (result.code === 0 && result.data) {
+        this.setData({ departments: result.data })
+      }
+    } catch (error) {
+      console.error('加载科室失败:', error)
     }
   },
 
   // 加载医生列表
   async loadDoctors() {
-    const { selectedClinicId, selectedDepartmentId } = this.data
-    const params: any = {}
-    if (selectedClinicId) params.clinicId = selectedClinicId
-    if (selectedDepartmentId) params.departmentId = selectedDepartmentId
-
-    const result = await get<Doctor[]>('/doctors', params)
-    if (result.code === 0 && result.data) {
-      this.setData({ doctors: result.data })
+    try {
+      const { selectedClinicId, selectedDepartmentId } = this.data
+      const result = await getDoctors(selectedClinicId || undefined, selectedDepartmentId || undefined)
+      if (result.code === 0 && result.data) {
+        this.setData({ doctors: result.data })
+      }
+    } catch (error) {
+      console.error('加载医生失败:', error)
+      wx.showToast({ title: '加载医生失败', icon: 'none' })
     }
   },
 
   // 加载医生时段
   async loadTimeSlots(doctorId: number) {
-    const result = await get<TimeSlot[]>(`/doctors/${doctorId}/slots`)
-    if (result.code === 0 && result.data) {
-      this.setData({ timeSlots: result.data })
+    try {
+      const today = new Date()
+      const slots: TimeSlot[] = []
+
+      for (let i = 0; i < 7; i++) {
+        const date = new Date(today)
+        date.setDate(today.getDate() + i)
+        const dateStr = date.toISOString().split('T')[0]
+
+        const result = await getDoctorSlots(doctorId, dateStr)
+        if (result.code === 0 && result.data) {
+          slots.push(...result.data)
+        }
+      }
+
+      this.setData({ timeSlots: slots })
+    } catch (error) {
+      console.error('加载时段失败:', error)
+      wx.showToast({ title: '加载时段失败', icon: 'none' })
     }
   },
 
   // 选择门诊
   onSelectClinic(e: any) {
     const clinicId = Number(e.currentTarget.dataset.id)
+    const clinic = this.data.clinics.find(c => c.id === clinicId)
     this.setData({
       selectedClinicId: clinicId,
+      selectedClinicName: clinic?.name || '',
       step: 2
     })
     this.loadDoctors()
@@ -83,8 +115,10 @@ Page({
   // 选择科室
   onSelectDepartment(e: any) {
     const departmentId = Number(e.currentTarget.dataset.id)
+    const department = this.data.departments.find(d => d.id === departmentId)
     this.setData({
       selectedDepartmentId: departmentId,
+      selectedDepartmentName: department?.name || '',
       step: 3
     })
     this.loadDoctors()
@@ -93,8 +127,10 @@ Page({
   // 选择医生
   async onSelectDoctor(e: any) {
     const doctorId = Number(e.currentTarget.dataset.id)
+    const doctor = this.data.doctors.find(d => d.id === doctorId)
     this.setData({
       selectedDoctorId: doctorId,
+      selectedDoctorName: doctor?.name || '',
       step: 4,
       loading: true
     })
@@ -124,12 +160,12 @@ Page({
     this.setData({ loading: true })
 
     try {
-      const result = await post('/appointments', {
+      const result = await createAppointment({
         clinicId: selectedClinicId,
         doctorId: selectedDoctorId,
         departmentId: selectedDepartmentId,
-        date: selectedSlot.date,
-        timeRange: selectedSlot.timeRange
+        appointmentDate: selectedSlot.date,
+        startTime: selectedSlot.startTime
       })
 
       if (result.code === 0) {
@@ -140,9 +176,9 @@ Page({
       } else {
         wx.showToast({ title: result.message || '预约失败', icon: 'none' })
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('预约失败:', error)
-      wx.showToast({ title: '预约失败', icon: 'none' })
+      wx.showToast({ title: error.message || '预约失败', icon: 'none' })
     } finally {
       this.setData({ loading: false })
     }

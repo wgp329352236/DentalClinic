@@ -9,6 +9,7 @@ export interface UserInfo {
   clinicId: number
   memberLevel: MemberLevel
   registerSource: 'self' | 'referral' | 'store'
+  totalSpent?: number // 累计消费金额
 }
 
 export interface MemberLevel {
@@ -44,13 +45,13 @@ export interface Doctor {
   specialties: string[]
   introduction: string
   avatar: string
-  availableSlots: TimeSlot[]
 }
 
 export interface TimeSlot {
   date: string // YYYY-MM-DD
-  timeRange: string // 如 "09:00-09:30"
-  remaining: number
+  startTime: string // 如 "09:00"
+  endTime: string // 如 "09:30"
+  available: boolean
 }
 
 // 预约相关类型

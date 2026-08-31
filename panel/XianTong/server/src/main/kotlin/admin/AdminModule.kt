@@ -5,19 +5,9 @@ import com.dentalclinic.admin.dto.response.ApiResponse
 import com.dentalclinic.admin.entity.*
 import com.dentalclinic.admin.route.*
 import com.dentalclinic.admin.service.*
-import com.dentalclinic.user.route.fileUploadRoutes
-import com.dentalclinic.user.route.testReferralRoutes
-import com.dentalclinic.user.route.userAppointmentRoutes
-import com.dentalclinic.user.route.userAuthRoutes
-import com.dentalclinic.user.route.userCouponRoutes
-import com.dentalclinic.user.route.userNotificationRoutes
-import com.dentalclinic.user.route.userPointsRoutes
-import com.dentalclinic.user.route.userProfileRoutes
-import com.dentalclinic.user.route.userRechargeRoutes
-import com.dentalclinic.user.route.userReferralRoutes
-import com.dentalclinic.user.route.userWalletRoutes
 import com.dentalclinic.admin.util.*
 import com.dentalclinic.config.DBConfig
+import com.dentalclinic.user.route.*
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.plugins.*
@@ -207,6 +197,12 @@ fun Application.adminRouting() {
             dashboardRoutes(dashboardService)
             configRoutes()
             auditRoutes()
+
+            // Business data management routes
+            clinicRoutes()
+            departmentRoutes()
+            doctorRoutes()
+            scheduleRoutes()
         }
     }
 }

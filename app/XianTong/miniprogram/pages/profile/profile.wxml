@@ -17,8 +17,8 @@
     </view>
 
     <!-- 会员等级进度 -->
-    <view class="member-progress mt-20" wx:if="{{userInfo.memberLevel.nextLevelCost > 0}}">
-      <view class="text-muted font-small mb-10">距{{userInfo.memberLevel.name}}还需消费 ¥{{userInfo.memberLevel.nextLevelCost}}</view>
+    <view class="member-progress mt-20" wx:if="{{userInfo.memberLevel.nextLevelCost > 0 && userInfo.totalSpent}}">
+      <view class="text-muted font-small mb-10">距升级还需消费 ¥{{userInfo.memberLevel.nextLevelCost}}</view>
       <view class="progress-bar">
         <view class="progress-fill" style="width: {{userInfo.totalSpent / (userInfo.totalSpent + userInfo.memberLevel.nextLevelCost) * 100}}%"></view>
       </view>

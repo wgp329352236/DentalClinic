@@ -6,21 +6,18 @@ import com.dentalclinic.admin.auth.PasswordEncoder
 import com.dentalclinic.admin.dto.response.*
 import com.dentalclinic.admin.entity.*
 import com.dentalclinic.admin.util.AuthenticationException
-import com.dentalclinic.config.DBConfig
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.singleOrNull
 import kotlinx.coroutines.flow.toList
 import org.jetbrains.exposed.v1.core.JoinType
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.r2dbc.select
 import org.jetbrains.exposed.v1.r2dbc.selectAll
-import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
 import org.jetbrains.exposed.v1.r2dbc.update
 import org.slf4j.LoggerFactory
 import java.time.LocalDateTime
 
-class AdminAuthService: BaseService() {
+class AdminAuthService : BaseService() {
 
     private val logger = LoggerFactory.getLogger(AdminAuthService::class.java)
 

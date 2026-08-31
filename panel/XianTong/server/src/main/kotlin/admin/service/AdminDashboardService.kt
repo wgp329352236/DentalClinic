@@ -27,7 +27,7 @@ class AdminDashboardService {
         val todayAppointments = Appointments.selectAll()
             .where {
                 (Appointments.createdAt greaterEq todayStart) and
-                (Appointments.createdAt less todayEnd)
+                        (Appointments.createdAt less todayEnd)
             }
             .count().toInt()
 
@@ -35,7 +35,7 @@ class AdminDashboardService {
         val todayArrivals = Appointments.selectAll()
             .where {
                 (Appointments.arrivedAt greaterEq todayStart) and
-                (Appointments.arrivedAt less todayEnd)
+                        (Appointments.arrivedAt less todayEnd)
             }
             .count().toInt()
 
@@ -43,7 +43,7 @@ class AdminDashboardService {
         val todayRevenue = ConsumptionRecords.selectAll()
             .where {
                 (ConsumptionRecords.createdAt greaterEq todayStart) and
-                (ConsumptionRecords.createdAt less todayEnd)
+                        (ConsumptionRecords.createdAt less todayEnd)
             }
             .toList()
             .sumOf { it[ConsumptionRecords.amount].toDouble() }
@@ -52,7 +52,7 @@ class AdminDashboardService {
         val todayNewCustomers = Users.selectAll()
             .where {
                 (Users.createdAt greaterEq todayStart) and
-                (Users.createdAt less todayEnd)
+                        (Users.createdAt less todayEnd)
             }
             .count().toInt()
 
@@ -78,7 +78,7 @@ class AdminDashboardService {
             val appointmentCount = Appointments.selectAll()
                 .where {
                     (Appointments.clinicId eq clinicId) and
-                    (Appointments.createdAt greaterEq monthStart)
+                            (Appointments.createdAt greaterEq monthStart)
                 }
                 .count().toInt()
 
@@ -86,7 +86,7 @@ class AdminDashboardService {
             val revenue = ConsumptionRecords.selectAll()
                 .where {
                     (ConsumptionRecords.clinicId eq clinicId) and
-                    (ConsumptionRecords.createdAt greaterEq monthStart)
+                            (ConsumptionRecords.createdAt greaterEq monthStart)
                 }
                 .toList()
                 .sumOf { it[ConsumptionRecords.amount].toDouble() }
@@ -95,7 +95,7 @@ class AdminDashboardService {
             val newCustomerCount = Users.selectAll()
                 .where {
                     (Users.primaryClinicId eq clinicId) and
-                    (Users.createdAt greaterEq monthStart)
+                            (Users.createdAt greaterEq monthStart)
                 }
                 .count().toInt()
 
@@ -126,14 +126,14 @@ class AdminDashboardService {
             val appointmentCount = Appointments.selectAll()
                 .where {
                     (Appointments.createdAt greaterEq dayStart) and
-                    (Appointments.createdAt less dayEnd)
+                            (Appointments.createdAt less dayEnd)
                 }
                 .count().toInt()
 
             val revenue = ConsumptionRecords.selectAll()
                 .where {
                     (ConsumptionRecords.createdAt greaterEq dayStart) and
-                    (ConsumptionRecords.createdAt less dayEnd)
+                            (ConsumptionRecords.createdAt less dayEnd)
                 }
                 .toList()
                 .sumOf { it[ConsumptionRecords.amount].toDouble() }
@@ -141,7 +141,7 @@ class AdminDashboardService {
             val newCustomerCount = Users.selectAll()
                 .where {
                     (Users.createdAt greaterEq dayStart) and
-                    (Users.createdAt less dayEnd)
+                            (Users.createdAt less dayEnd)
                 }
                 .count().toInt()
 
@@ -244,7 +244,7 @@ class AdminDashboardService {
             ConsumptionRecords.selectAll()
                 .where {
                     (ConsumptionRecords.userId inList referredUserIds) and
-                    (ConsumptionRecords.createdAt greaterEq monthStart)
+                            (ConsumptionRecords.createdAt greaterEq monthStart)
                 }
                 .toList()
                 .sumOf { it[ConsumptionRecords.amount].toDouble() }

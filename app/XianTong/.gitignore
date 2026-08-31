@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# WeChat DevTools: per-developer local settings
+project.private.config.json
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local env files (package-lock.json must stay tracked for reproducible installs)
+.env
+.env.local
+.env.*.local
