@@ -1,0 +1,341 @@
+{
+	"info": {
+		"name": "就诊记录模块 API 测试",
+		"description": "测试用户端和管理端的就诊记录相关接口",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8080",
+			"type": "string"
+		},
+		{
+			"key": "user_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "admin_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "appointment_id",
+			"value": "1001",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "1. 用户登录",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"code\": \"test_user_code\",\n  \"userInfo\": {\n    \"nickName\": \"测试用户\",\n    \"avatarUrl\": \"https://example.com/avatar.png\"\n  }\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/v1/auth/login",
+					"host": ["{{base_url}}"],
+					"path": ["api", "v1", "auth", "login"]
+				},
+				"description": "用户微信登录，获取 access token"
+			},
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"var jsonData = pm.response.json();",
+							"if (jsonData.data && jsonData.data.accessToken) {",
+							"    pm.collectionVariables.set('user_token', jsonData.data.accessToken);",
+							"    console.log('User token saved:', jsonData.data.accessToken);",
+							"}"
+						],
+						"type": "text/javascript"
+					}
+				}
+			]
+		},
+		{
+			"name": "2. 管理员登录",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"username\": \"admin\",\n  \"password\": \"admin123\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/admin/auth/login",
+					"host": ["{{base_url}}"],
+					"path": ["api", "admin", "auth", "login"]
+				},
+				"description": "管理员登录，获取 access token"
+			},
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"var jsonData = pm.response.json();",
+							"if (jsonData.data && jsonData.data.accessToken) {",
+							"    pm.collectionVariables.set('admin_token', jsonData.data.accessToken);",
+							"    console.log('Admin token saved:', jsonData.data.accessToken);",
+							"}"
+						],
+						"type": "text/javascript"
+					}
+				}
+			]
+		},
+		{
+			"name": "3. 用户查询就诊记录列表",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "{{user_token}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/v1/medical-records?page=1&pageSize=10",
+					"host": ["{{base_url}}"],
+					"path": ["api", "v1", "medical-records"],
+					"query": [
+						{
+							"key": "page",
+							"value": "1"
+						},
+						{
+							"key": "pageSize",
+							"value": "10"
+						}
+					]
+				},
+				"description": "获取用户的就诊记录列表（只返回已完成的预约）"
+			},
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 200', function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"pm.test('Response has list', function () {",
+							"    var jsonData = pm.response.json();",
+							"    pm.expect(jsonData.data).to.have.property('list');",
+							"    pm.expect(jsonData.data).to.have.property('total');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			]
+		},
+		{
+			"name": "4. 用户查询就诊记录详情",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "{{user_token}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/v1/medical-records/{{appointment_id}}",
+					"host": ["{{base_url}}"],
+					"path": ["api", "v1", "medical-records", "{{appointment_id}}"]
+				},
+				"description": "获取指定就诊记录的详细信息，包含诊断、治疗方案和消费明细"
+			},
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 200', function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"pm.test('Response has diagnosis', function () {",
+							"    var jsonData = pm.response.json();",
+							"    pm.expect(jsonData.data).to.have.property('diagnosis');",
+							"});",
+							"",
+							"pm.test('Response has consumption details', function () {",
+							"    var jsonData = pm.response.json();",
+							"    pm.expect(jsonData.data).to.have.property('consumptionDetails');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			]
+		},
+		{
+			"name": "5. 管理员查看预约详情",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "{{admin_token}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/admin/appointments/{{appointment_id}}",
+					"host": ["{{base_url}}"],
+					"path": ["api", "admin", "appointments", "{{appointment_id}}"]
+				},
+				"description": "管理员查看预约详情，包含病历信息"
+			},
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 200', function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"pm.test('Response has appointment data', function () {",
+							"    var jsonData = pm.response.json();",
+							"    pm.expect(jsonData.data).to.have.property('appointment');",
+							"    pm.expect(jsonData.data).to.have.property('consumption');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			]
+		},
+		{
+			"name": "6. 管理员编辑病历摘要",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "{{admin_token}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "PUT",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"diagnosis\": \"龋齿补牙（左下第一磨牙）\",\n  \"treatmentPlan\": \"树脂充填治疗，建议半年后复查\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/admin/appointments/{{appointment_id}}/medical-record",
+					"host": ["{{base_url}}"],
+					"path": ["api", "admin", "appointments", "{{appointment_id}}", "medical-record"]
+				},
+				"description": "管理员编辑预约的诊断和治疗方案"
+			},
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 200', function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"pm.test('Update success message', function () {",
+							"    var jsonData = pm.response.json();",
+							"    pm.expect(jsonData.message).to.include('病历更新成功');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			]
+		},
+		{
+			"name": "7. 验证病历更新",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "{{user_token}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/v1/medical-records/{{appointment_id}}",
+					"host": ["{{base_url}}"],
+					"path": ["api", "v1", "medical-records", "{{appointment_id}}"]
+				},
+				"description": "验证管理员编辑的病历是否已同步到用户端"
+			},
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 200', function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"pm.test('Diagnosis updated', function () {",
+							"    var jsonData = pm.response.json();",
+							"    pm.expect(jsonData.data.diagnosis).to.include('龋齿补牙');",
+							"});",
+							"",
+							"pm.test('Treatment plan updated', function () {",
+							"    var jsonData = pm.response.json();",
+							"    pm.expect(jsonData.data.treatmentPlan).to.include('树脂充填');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			]
+		}
+	]
+}

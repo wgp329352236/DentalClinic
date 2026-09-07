@@ -171,6 +171,7 @@ fun Application.adminRouting() {
     val roleService = AdminRoleService()
     val menuService = AdminMenuService()
     val dashboardService = AdminDashboardService()
+    val pointsService = AdminPointsService()
 
     routing {
         // User-end API (C-end patients)
@@ -179,6 +180,7 @@ fun Application.adminRouting() {
         userWalletRoutes()
         userRechargeRoutes()
         userAppointmentRoutes()
+        userMedicalRecordRoutes()
         userPointsRoutes()
         userReferralRoutes()
         userCouponRoutes()
@@ -197,6 +199,7 @@ fun Application.adminRouting() {
             dashboardRoutes(dashboardService)
             configRoutes()
             auditRoutes()
+            pointsRoutes(pointsService)
 
             // Business data management routes
             clinicRoutes()

@@ -71,6 +71,7 @@ fun Application.userModule() {
     userAuthRoutes()
     userProfileRoutes()
     userAppointmentRoutes()
+    userMedicalRecordRoutes()
     userWalletRoutes()
     userRechargeRoutes()
     userPointsRoutes()

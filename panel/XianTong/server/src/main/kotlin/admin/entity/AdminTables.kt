@@ -486,6 +486,8 @@ object Appointments : Table("appointment") {
     val arrivedAt = datetime("arrived_at").nullable()
     val completedAt = datetime("completed_at").nullable()
     val noShowCount = integer("no_show_count").default(0) // 累计爽约次数
+    val diagnosis = text("diagnosis").nullable()  // 诊断结果/电子病历摘要
+    val treatmentPlan = text("treatment_plan").nullable() // 治疗方案
     val remark = text("remark").nullable()      // 备注
     val createdAt = datetime("created_at").defaultExpression(CurrentTimestamp)
     val updatedAt = datetime("updated_at").defaultExpression(CurrentTimestamp)

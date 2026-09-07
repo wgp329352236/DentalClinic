@@ -1,5 +1,6 @@
 package com.dentalclinic.admin.route
 
+import com.dentalclinic.admin.auth.adminPrincipal
 import com.dentalclinic.admin.auth.authenticated
 import com.dentalclinic.admin.auth.requirePermission
 import com.dentalclinic.admin.dto.response.*
@@ -26,6 +27,41 @@ import org.jetbrains.exposed.v1.r2dbc.update
 @Serializable data class DepartmentRequest(val clinicId: Long, val name: String, val description: String? = null)
 @Serializable data class DoctorRequest(val name: String, val title: String, val specialties: String, val introduction: String? = null, val avatar: String? = null, val clinicIds: List<Long> = emptyList())
 @Serializable data class ScheduleRequest(val doctorId: Long, val dayOfWeek: Int, val startTime: String, val endTime: String, val maxAppointments: Int = 1)
+@Serializable data class MedicalRecordUpdateRequest(val diagnosis: String?, val treatmentPlan: String?)
+
+// DTO for admin appointment detail view
+@Serializable data class AppointmentDetailResponse(
+    val appointment: AppointmentDetailDto,
+    val consumption: ConsumptionSummaryDto
+)
+
+@Serializable data class AppointmentDetailDto(
+    val id: Long,
+    val userId: Long,
+    val userName: String?,
+    val userPhone: String?,
+    val clinicId: Long,
+    val clinicName: String?,
+    val doctorId: Long,
+    val doctorName: String?,
+    val departmentId: Long?,
+    val departmentName: String?,
+    val appointmentDate: String,
+    val startTime: String,
+    val endTime: String?,
+    val status: String,
+    val diagnosis: String?,
+    val treatmentPlan: String?,
+    val remark: String?,
+    val arrivedAt: String?,
+    val completedAt: String?,
+    val createdAt: String
+)
+
+@Serializable data class ConsumptionSummaryDto(
+    val totalAmount: Double,
+    val recordCount: Int
+)
 
 // Helper function to get first element from list (R2DBC doesn't have firstOrNull)
 private fun <T> List<T>.firstOrNone(): T? = if (isEmpty()) null else this[0]
@@ -499,6 +535,109 @@ fun Route.appointmentAdminRoutes() {
                     call.ok<Unit>(message = "预约已取消")
                 }
             }
+
+            // GET /api/admin/appointments/{id} - 查看预约详情（含病历）
+            requirePermission("appointment:view") {
+                get("/{id}") {
+                    val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的ID")
+
+                    val data = withContext(Dispatchers.IO) {
+                        suspendTransaction(DBConfig.database) {
+                            val appointmentRows = Appointments.selectAll()
+                                .where { Appointments.id eq id }
+                                .toList()
+                            val appointment = appointmentRows.firstOrNone()
+                                ?: throw ValidationException("预约不存在")
+
+                            // Get user info
+                            val userRows = Users.selectAll()
+                                .where { Users.id eq appointment[Appointments.userId] }
+                                .toList()
+                            val user = userRows.firstOrNone()
+
+                            // Get clinic info
+                            val clinicRows = Clinics.selectAll()
+                                .where { Clinics.id eq appointment[Appointments.clinicId] }
+                                .toList()
+                            val clinic = clinicRows.firstOrNone()
+
+                            // Get doctor info
+                            val doctorRows = Doctors.selectAll()
+                                .where { Doctors.id eq appointment[Appointments.doctorId] }
+                                .toList()
+                            val doctor = doctorRows.firstOrNone()
+
+                            // Get department info
+                            val deptId = appointment[Appointments.departmentId]
+                            val dept = if (deptId != null) {
+                                val deptRows = Departments.selectAll()
+                                    .where { Departments.id eq deptId }
+                                    .toList()
+                                deptRows.firstOrNone()
+                            } else null
+
+                            // Get consumption records
+                            val consumptionRows = ConsumptionRecords.selectAll()
+                                .where { ConsumptionRecords.appointmentId eq id }
+                                .toList()
+                            val totalAmount = consumptionRows.sumOf { it[ConsumptionRecords.amount].toDouble() }
+
+                            val response = AppointmentDetailResponse(
+                                appointment = AppointmentDetailDto(
+                                    id = appointment[Appointments.id],
+                                    userId = appointment[Appointments.userId],
+                                    userName = user?.get(Users.realName) ?: user?.get(Users.nickname),
+                                    userPhone = user?.get(Users.phone),
+                                    clinicId = appointment[Appointments.clinicId],
+                                    clinicName = clinic?.get(Clinics.name),
+                                    doctorId = appointment[Appointments.doctorId],
+                                    doctorName = doctor?.get(Doctors.name),
+                                    departmentId = deptId,
+                                    departmentName = dept?.get(Departments.name),
+                                    appointmentDate = appointment[Appointments.appointmentDate].toString(),
+                                    startTime = appointment[Appointments.startTime],
+                                    endTime = appointment[Appointments.endTime],
+                                    status = appointment[Appointments.status],
+                                    diagnosis = appointment[Appointments.diagnosis],
+                                    treatmentPlan = appointment[Appointments.treatmentPlan],
+                                    remark = appointment[Appointments.remark],
+                                    arrivedAt = appointment[Appointments.arrivedAt]?.toString(),
+                                    completedAt = appointment[Appointments.completedAt]?.toString(),
+                                    createdAt = appointment[Appointments.createdAt].toString()
+                                ),
+                                consumption = ConsumptionSummaryDto(
+                                    totalAmount = totalAmount,
+                                    recordCount = consumptionRows.size
+                                )
+                            )
+                            
+                            call.ok(response)
+                        }
+                    }
+                }
+            }
+
+            // PUT /api/admin/appointments/{id}/medical-record - 编辑病历摘要
+            requirePermission("appointment:update") {
+                put("/{id}/medical-record") {
+                    val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的ID")
+                    val req = call.receive<MedicalRecordUpdateRequest>()
+
+                    withContext(Dispatchers.IO) {
+                        suspendTransaction(DBConfig.database) {
+                            Appointments.update({ Appointments.id eq id }) {
+                                if (req.diagnosis != null) {
+                                    it[diagnosis] = req.diagnosis
+                                }
+                                if (req.treatmentPlan != null) {
+                                    it[treatmentPlan] = req.treatmentPlan
+                                }
+                            }
+                        }
+                    }
+                    call.ok<Unit>(message = "病历更新成功")
+                }
+            }
         }
     }
 }
@@ -524,6 +663,7 @@ fun Route.appointmentAdminRoutes() {
 
 @Serializable data class WalletAdjustRequest(val amount: Double, val reason: String)
 @Serializable data class LevelAdjustRequest(val levelCode: Int, val reason: String)
+@Serializable data class PointsAdjustRequest(val amount: Int, val reason: String)
 
 fun Route.customerRoutes() {
     route("/customers") {
@@ -731,6 +871,77 @@ fun Route.customerRoutes() {
                         }
                     }
                     call.ok<Unit>(message = "会员等级调整成功")
+                }
+            }
+
+            requirePermission("customer:update") {
+                put("/{id}/points") {
+                    val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的客户ID")
+                    val req = call.receive<PointsAdjustRequest>()
+
+                    // Validate input
+                    if (req.reason.isBlank()) {
+                        throw ValidationException("调整原因不能为空")
+                    }
+
+                    // Get admin user for operator info
+                    val principal = call.adminPrincipal()
+
+                    withContext(Dispatchers.IO) {
+                        suspendTransaction(DBConfig.database) {
+                            // Get current balance
+                            var currentBalance = UserPointsSummary.selectAll()
+                                .where { UserPointsSummary.userId eq id }
+                                .toList()
+                                .singleOrNull()
+                                ?.get(UserPointsSummary.totalBalance) ?: 0
+
+                            // If no summary exists, calculate from records
+                            if (currentBalance == 0) {
+                                currentBalance = PointsRecords.selectAll()
+                                    .where { PointsRecords.userId eq id }
+                                    .toList()
+                                    .sumOf { it[PointsRecords.changeAmount] }
+                            }
+
+                            val newBalance = currentBalance + req.amount
+
+                            // Validate: balance cannot be negative
+                            if (newBalance < 0) {
+                                throw ValidationException("积分余额不足，当前余额：$currentBalance")
+                            }
+
+                            // Calculate expiresAt (default 12 months from now)
+                            val expiresAt = java.time.LocalDateTime.now().plusMonths(12)
+
+                            // Insert points record
+                            PointsRecords.insert {
+                                it[PointsRecords.userId] = id
+                                it[PointsRecords.changeAmount] = req.amount
+                                it[PointsRecords.balanceAfter] = newBalance
+                                it[PointsRecords.sourceType] = "admin_adjust"
+                                it[PointsRecords.description] = "管理员手动调整：${req.reason}（操作人：${principal.username}）"
+                                it[PointsRecords.expiresAt] = expiresAt
+                            }
+
+                            // Update or insert summary
+                            val summaryExists = UserPointsSummary.selectAll()
+                                .where { UserPointsSummary.userId eq id }
+                                .count() > 0
+
+                            if (summaryExists) {
+                                UserPointsSummary.update({ UserPointsSummary.userId eq id }) {
+                                    it[UserPointsSummary.totalBalance] = newBalance
+                                }
+                            } else {
+                                UserPointsSummary.insert {
+                                    it[UserPointsSummary.userId] = id
+                                    it[UserPointsSummary.totalBalance] = newBalance
+                                }
+                            }
+                        }
+                    }
+                    call.ok<Unit>(message = "积分调整成功")
                 }
             }
         }
