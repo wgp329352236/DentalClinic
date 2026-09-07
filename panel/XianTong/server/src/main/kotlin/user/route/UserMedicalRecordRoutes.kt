@@ -17,14 +17,30 @@ fun Application.userMedicalRecordRoutes() {
         route("/api/v1/medical-records") {
             /**
              * Get user's medical records (completed appointments).
-             * GET /api/v1/medical-records?page=1&pageSize=20
+             * GET /api/v1/medical-records?page=1&pageSize=20&startDate=2026-01-01&endDate=2026-12-31&doctorId=1&departmentId=1&keyword=龋齿
              */
             get("") {
                 val userId = authenticate(call) ?: return@get
                 val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 1
                 val pageSize = call.request.queryParameters["pageSize"]?.toIntOrNull() ?: 20
+                
+                // Optional filters
+                val startDate = call.request.queryParameters["startDate"]
+                val endDate = call.request.queryParameters["endDate"]
+                val doctorId = call.request.queryParameters["doctorId"]?.toLongOrNull()
+                val departmentId = call.request.queryParameters["departmentId"]?.toLongOrNull()
+                val keyword = call.request.queryParameters["keyword"]
 
-                val response = medicalRecordService.getMedicalRecords(userId, page, pageSize)
+                val response = medicalRecordService.getMedicalRecords(
+                    userId = userId,
+                    page = page,
+                    pageSize = pageSize,
+                    startDate = startDate,
+                    endDate = endDate,
+                    doctorId = doctorId,
+                    departmentId = departmentId,
+                    keyword = keyword
+                )
                 call.respond(ApiResponse(
                     code = 0,
                     message = "success",

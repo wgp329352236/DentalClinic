@@ -13,6 +13,8 @@ import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.greaterEq
+import org.jetbrains.exposed.v1.core.lessEq
 import org.jetbrains.exposed.v1.r2dbc.selectAll
 import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
 import java.time.format.DateTimeFormatter
@@ -23,31 +25,84 @@ import java.time.format.DateTimeFormatter
 class MedicalRecordService {
 
     /**
-     * Get user's medical records (completed appointments) with pagination.
+     * Get user's medical records (completed appointments) with pagination and filters.
      */
-    suspend fun getMedicalRecords(userId: Long, page: Int, pageSize: Int): MedicalRecordsResponse = withContext(Dispatchers.IO) {
+    suspend fun getMedicalRecords(
+        userId: Long,
+        page: Int,
+        pageSize: Int,
+        startDate: String? = null,
+        endDate: String? = null,
+        doctorId: Long? = null,
+        departmentId: Long? = null,
+        keyword: String? = null
+    ): MedicalRecordsResponse = withContext(Dispatchers.IO) {
         suspendTransaction(DBConfig.database) {
-            // Query completed appointments for this user
-            val total = Appointments.selectAll()
+            // Build query with filters
+            var query = Appointments.selectAll()
                 .where {
                     (Appointments.userId eq userId) and
                     (Appointments.status eq "completed")
                 }
-                .count()
 
-            val rows = Appointments.selectAll()
-                .where {
-                    (Appointments.userId eq userId) and
-                    (Appointments.status eq "completed")
-                }
+            // Filter by date range
+            if (!startDate.isNullOrBlank()) {
+                val start = java.time.LocalDate.parse(startDate)
+                query = query.where { Appointments.appointmentDate greaterEq start }
+            }
+            if (!endDate.isNullOrBlank()) {
+                val end = java.time.LocalDate.parse(endDate)
+                query = query.where { Appointments.appointmentDate lessEq end }
+            }
+
+            // Filter by doctor
+            if (doctorId != null) {
+                query = query.where { Appointments.doctorId eq doctorId }
+            }
+
+            // Filter by department
+            if (departmentId != null) {
+                query = query.where { Appointments.departmentId eq departmentId }
+            }
+
+            val total = query.count()
+
+            val rows = query
                 .orderBy(Appointments.appointmentDate, SortOrder.DESC)
                 .limit(pageSize).offset((page - 1).toLong())
                 .toList()
 
+            // Filter by keyword in memory (diagnosis, remark, clinic name, doctor name)
+            val filteredRows = if (!keyword.isNullOrBlank()) {
+                val kw = keyword.lowercase()
+                rows.filter { row ->
+                    val diagnosis = row[Appointments.diagnosis]?.lowercase() ?: ""
+                    val remark = row[Appointments.remark]?.lowercase() ?: ""
+                    
+                    // Get clinic and doctor names for keyword search
+                    val clinicName = Clinics.selectAll()
+                        .where { Clinics.id eq row[Appointments.clinicId] }
+                        .toList()
+                        .firstOrNull()
+                        ?.get(Clinics.name)?.lowercase() ?: ""
+                    
+                    val doctorName = Doctors.selectAll()
+                        .where { Doctors.id eq row[Appointments.doctorId] }
+                        .toList()
+                        .firstOrNull()
+                        ?.get(Doctors.name)?.lowercase() ?: ""
+                    
+                    diagnosis.contains(kw) || remark.contains(kw) || 
+                    clinicName.contains(kw) || doctorName.contains(kw)
+                }
+            } else {
+                rows
+            }
+
             val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
             val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
-            val records = rows.map { row ->
+            val records = filteredRows.map { row ->
                 // Get clinic info
                 val clinicRows = Clinics.selectAll()
                     .where { Clinics.id eq row[Appointments.clinicId] }
