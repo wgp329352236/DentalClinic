@@ -75,7 +75,7 @@ class AppointmentService {
                 .map { it[DoctorClinicRels.doctorId] }
 
             if (doctorIds.isEmpty()) {
-                emptyList<DoctorDto>()
+                emptyList()
             } else {
                 val rows = Doctors.selectAll()
                     .where {
@@ -197,7 +197,7 @@ class AppointmentService {
                     .firstOrNull { row ->
                         val schedStart = row[DoctorSchedules.startTime]
                         val schedEnd = row[DoctorSchedules.endTime]
-                        request.startTime >= schedStart && request.startTime < schedEnd
+                        request.startTime in schedStart..<schedEnd
                     }
 
                 if (schedule == null) {
@@ -255,7 +255,7 @@ class AppointmentService {
         suspendTransaction(DBConfig.database) {
             val baseQuery = Appointments.selectAll().where { Appointments.userId eq userId }
 
-            val rows = if (status != null && status.isNotEmpty()) {
+            val rows = if (!status.isNullOrEmpty()) {
                 Appointments.selectAll()
                     .where { (Appointments.userId eq userId) and (Appointments.status eq status) }
                     .orderBy(Appointments.appointmentDate, SortOrder.DESC)
@@ -316,19 +316,23 @@ class AppointmentService {
                     AppointmentResult.Error("预约不存在")
                 } else {
                     val status = appointment[Appointments.status]
-                    if (status == "cancelled") {
-                        AppointmentResult.Error("预约已取消")
-                    } else if (status == "completed") {
-                        AppointmentResult.Error("预约已完成，无法取消")
-                    } else {
-                        // Update status
-                        Appointments.update({ Appointments.id eq appointmentId }) {
-                            it[Appointments.status] = "cancelled"
-                            it[Appointments.cancelledAt] = java.time.LocalDateTime.now()
-                            it[Appointments.cancelledBy] = userId
+                    when (status) {
+                        "cancelled" -> {
+                            AppointmentResult.Error("预约已取消")
                         }
+                        "completed" -> {
+                            AppointmentResult.Error("预约已完成，无法取消")
+                        }
+                        else -> {
+                            // Update status
+                            Appointments.update({ Appointments.id eq appointmentId }) {
+                                it[Appointments.status] = "cancelled"
+                                it[Appointments.cancelledAt] = java.time.LocalDateTime.now()
+                                it[Appointments.cancelledBy] = userId
+                            }
 
-                        AppointmentResult.Success(appointmentId)
+                            AppointmentResult.Success(appointmentId)
+                        }
                     }
                 }
             }
@@ -405,7 +409,7 @@ class AppointmentService {
                     .firstOrNull { row ->
                         val schedStart = row[DoctorSchedules.startTime]
                         val schedEnd = row[DoctorSchedules.endTime]
-                        newStartTime >= schedStart && newStartTime < schedEnd
+                        newStartTime in schedStart..<schedEnd
                     }
 
                 if (schedule == null) {

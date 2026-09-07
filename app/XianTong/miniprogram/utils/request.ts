@@ -3,6 +3,11 @@ import type { ApiResponse } from '../types'
 import { mockApiService } from './mockData'
 
 // 后端地址 - 根据环境切换
+// 注意：
+// 1. 开发者工具调试：若请求报 "url not in domain list"，请在 详情 -> 本地设置 勾选
+//    "不校验合法域名、web-view（业务域名）、TLS 版本以及 HTTPS 证书"
+// 2. 真机预览：localhost 指向手机自身，需改成电脑局域网 IP（如 http://192.168.1.100:8080/api/v1）
+// 3. 生产环境：必须使用 HTTPS 域名，并在微信公众平台配置 request 合法域名
 const BASE_URL = 'http://localhost:8080/api/v1' // 开发环境
 // const BASE_URL = 'https://your-domain.com/api/v1' // 生产环境
 
@@ -36,8 +41,7 @@ export function request<T = any>(options: RequestOptions): Promise<ApiResponse<T
     const token = wx.getStorageSync('token') || ''
 
     if (needAuth && !token) {
-      wx.redirectTo({ url: '/pages/index/index' })
-      reject(new Error('未登录'))
+      handleAuthExpired('未登录', reject)
       return
     }
 
@@ -45,6 +49,7 @@ export function request<T = any>(options: RequestOptions): Promise<ApiResponse<T
       url: `${BASE_URL}${options.url}`,
       method: options.method || 'GET',
       data: options.data,
+      timeout: 10000, // 防止弱网下请求长时间挂起
       header: {
         'Content-Type': 'application/json',
         ...(needAuth && token ? { 'Authorization': `Bearer ${token}` } : {}),
@@ -53,19 +58,26 @@ export function request<T = any>(options: RequestOptions): Promise<ApiResponse<T
       success: (res) => {
         const data = res.data as ApiResponse<T>
 
+        // 登录失效：清理登录态并回到首页
         if (res.statusCode === 401) {
-          wx.removeStorageSync('token')
-          wx.removeStorageSync('userInfo')
-          wx.redirectTo({ url: '/pages/index/index' })
-          reject(new Error('登录已过期，请重新登录'))
+          handleAuthExpired('登录已过期，请重新登录', reject)
           return
         }
 
-        if (res.statusCode === 200 && data) {
-          resolve(data)
-        } else {
+        // HTTP 层失败
+        if (res.statusCode !== 200 || !data) {
           reject(new Error(data?.message || `请求失败: ${res.statusCode}`))
+          return
         }
+
+        // 业务层失败（code !== 0）统一 reject，调用方用 try-catch 即可捕获，
+        // 与 mock 模式错误语义保持一致
+        if (data.code !== 0) {
+          reject(new Error(data.message || '请求失败'))
+          return
+        }
+
+        resolve(data)
       },
       fail: (err) => {
         console.error('[Request Failed]', err)
@@ -76,12 +88,42 @@ export function request<T = any>(options: RequestOptions): Promise<ApiResponse<T
 }
 
 /**
+ * 处理登录失效：清理本地与全局登录态，并回到首页
+ * 注意：首页是 tabBar 页面，必须用 reLaunch（redirectTo 无法跳转 tabBar，会静默失败）
+ */
+function handleAuthExpired(message: string, reject: (reason?: any) => void) {
+  wx.removeStorageSync('token')
+  wx.removeStorageSync('refreshToken')
+  wx.removeStorageSync('userInfo')
+
+  // 同步清理全局登录态，避免 app.globalData 残留导致页面误判为已登录
+  const app = getApp<IAppOption>()
+  if (app && app.globalData) {
+    app.globalData.token = ''
+    app.globalData.userInfo = null
+  }
+
+  // 已在首页时不重复跳转
+  const pages = getCurrentPages()
+  const current = pages[pages.length - 1]
+  if (!current || current.route !== 'pages/index/index') {
+    wx.reLaunch({ url: '/pages/index/index' })
+  }
+
+  reject(new Error(message))
+}
+
+/**
  * GET 请求
  */
 export function get<T = any>(url: string, params?: Record<string, any>, needAuth = true): Promise<ApiResponse<T>> {
-  const queryString = params ? '?' + Object.entries(params)
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-    .join('&') : ''
+  // 过滤空值参数，避免拼出 "key=undefined" 或多余的 "?"
+  const pairs = params
+    ? Object.entries(params).filter(([, v]) => v !== undefined && v !== null)
+    : []
+  const queryString = pairs.length
+    ? '?' + pairs.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')
+    : ''
   return request<T>({ url: url + queryString, method: 'GET', needAuth })
 }
 
@@ -117,11 +159,27 @@ export function uploadFile<T = any>(url: string, filePath: string, name = 'file'
       url: `${BASE_URL}${url}`,
       filePath,
       name,
+      timeout: 30000, // 上传大文件时给予更长超时
       header: {
-        'Authorization': `Bearer ${token}`
+        // 未登录时不发送空的 Authorization 头
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
       },
       success: (res) => {
-        const data = JSON.parse(res.data) as ApiResponse<T>
+        // 登录失效：清理登录态并回到首页
+        if (res.statusCode === 401) {
+          handleAuthExpired('登录已过期，请重新登录', reject)
+          return
+        }
+
+        // 后端可能返回非 JSON（如 HTML 错误页），解析需容错，避免 Promise 永不 settle
+        let data: ApiResponse<T> | null = null
+        try {
+          data = JSON.parse(res.data) as ApiResponse<T>
+        } catch (e) {
+          reject(new Error(`上传失败: ${res.statusCode}`))
+          return
+        }
+
         if (res.statusCode === 200 && data) {
           resolve(data)
         } else {
@@ -142,18 +200,19 @@ async function mockRequest<T = any>(options: RequestOptions): Promise<ApiRespons
   const { url, method, data } = options
   const path = url.split('?')[0]
 
-  try {
-    const result = await mockApiService.call(path, method || 'GET', data)
-    return {
-      code: 0,
-      message: 'success',
-      data: result as T
-    }
-  } catch (error: any) {
-    return {
-      code: error.code || 500,
-      message: error.message || '服务器错误',
-      data: null as T
-    }
+  // mock 调用失败时直接 reject（async 函数抛出即 reject），
+  // 与真实 API 模式"业务错误统一 reject"的语义保持一致
+  const result = await mockApiService.call(path, method || 'GET', data)
+
+  // 兼容 mock 处理器直接返回业务错误对象（{ code, message }）的情况：
+  // 不把失败响应包装成成功，避免调用方拿到 code !== 0 的"假成功"
+  if (result && typeof result === 'object' && typeof result.code === 'number' && result.code !== 0) {
+    throw new Error(result.message || '请求失败')
+  }
+
+  return {
+    code: 0,
+    message: 'success',
+    data: result as T
   }
 }

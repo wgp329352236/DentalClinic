@@ -314,7 +314,7 @@ class ReferralService {
                 }
 
                 // Award 50 yuan bonus balance
-                var currentBonus = UserWallets.selectAll()
+                val currentBonus = UserWallets.selectAll()
                     .where { UserWallets.userId eq referrerId }
                     .toList()
                     .singleOrNull()

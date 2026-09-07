@@ -3,17 +3,15 @@ package com.dentalclinic.user.route
 import com.dentalclinic.admin.dto.response.ApiResponse
 import com.dentalclinic.admin.entity.RechargeRecords
 import com.dentalclinic.admin.entity.UserWallets
-import com.dentalclinic.admin.entity.Users
 import com.dentalclinic.config.DBConfig
-import com.dentalclinic.user.auth.UserJwtConfig
-import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.Serializable
-import org.jetbrains.exposed.v1.core.*
-import org.jetbrains.exposed.v1.r2dbc.*
+import org.jetbrains.exposed.v1.core.SortOrder
+import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.r2dbc.selectAll
 import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
 import java.time.format.DateTimeFormatter
 
@@ -29,20 +27,7 @@ fun Application.userWalletRoutes() {
              * Header: Authorization: Bearer <access_token>
              */
             get("/details") {
-                val authHeader = call.request.headers[HttpHeaders.Authorization]
-                if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-                    call.respond(ApiResponse<Unit>(code = 401, message = "缺少认证令牌"))
-                    return@get
-                }
-
-                val token = authHeader.removePrefix("Bearer ")
-                val decoded = UserJwtConfig.verifyAccessToken(token)
-                if (decoded == null) {
-                    call.respond(ApiResponse<Unit>(code = 401, message = "无效的访问令牌"))
-                    return@get
-                }
-
-                val userId = decoded.subject.toLong()
+                val userId = authenticate(call) ?: return@get
 
                 val walletData = suspendTransaction(DBConfig.database) {
                     // Get wallet info

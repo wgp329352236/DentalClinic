@@ -6,8 +6,10 @@
       <view class="flex">
         <image class="avatar-large" src="{{userInfo.avatar}}" mode="aspectFill"></image>
         <view class="ml-20">
-          <view class="font-bold font-large">{{userInfo.name}}</view>
-          <view class="text-muted mt-10">{{userInfo.phone}}</view>
+          <!-- 用户名：未设置姓名时默认为手机号 -->
+          <view class="font-bold font-large">{{userInfo.name || userInfo.phone || '未设置'}}</view>
+          <!-- 姓名与手机号不同时才单独展示手机号，避免重复 -->
+          <view class="text-muted mt-10" wx:if="{{userInfo.name && userInfo.phone}}">{{userInfo.phone}}</view>
           <view class="mt-10">
             <text class="badge badge-primary">{{userInfo.memberLevel.name}}</text>
           </view>
@@ -20,7 +22,7 @@
     <view class="member-progress mt-20" wx:if="{{userInfo.memberLevel.nextLevelCost > 0 && userInfo.totalSpent}}">
       <view class="text-muted font-small mb-10">距升级还需消费 ¥{{userInfo.memberLevel.nextLevelCost}}</view>
       <view class="progress-bar">
-        <view class="progress-fill" style="width: {{userInfo.totalSpent / (userInfo.totalSpent + userInfo.memberLevel.nextLevelCost) * 100}}%"></view>
+        <view class="progress-fill" style="width: {{progressPercent}}%;"></view>
       </view>
     </view>
   </view>
@@ -45,14 +47,14 @@
     <view class="section-title">我的优惠券</view>
     <view class="coupon-list">
       <view class="coupon-item" wx:for="{{coupons}}" wx:key="id">
-        <view class="coupon-amount">¥{{coupon.amount}}</view>
+        <view class="coupon-amount">¥{{item.amount}}</view>
         <view class="coupon-info">
-          <view class="coupon-name font-bold">{{coupon.name}}</view>
-          <view class="coupon-desc text-muted font-small">满{{coupon.minAmount}}可用 · {{coupon.scope}}</view>
-          <view class="coupon-date text-muted font-small">有效期至 {{coupon.validTo}}</view>
+          <view class="coupon-name font-bold">{{item.name}}</view>
+          <view class="coupon-desc text-muted font-small">满{{item.minAmount}}可用 · {{item.scope}}</view>
+          <view class="coupon-date text-muted font-small">有效期至 {{item.validTo}}</view>
         </view>
-        <view class="coupon-status badge {{coupon.status === 'unused' ? 'badge-success' : (coupon.status === 'used' ? 'badge-default' : 'badge-danger')}}">
-          {{coupon.status === 'unused' ? '未使用' : (coupon.status === 'used' ? '已使用' : '已过期')}}
+        <view class="coupon-status badge {{item.status === 'unused' ? 'badge-success' : (item.status === 'used' ? 'badge-default' : 'badge-danger')}}">
+          {{item.status === 'unused' ? '未使用' : (item.status === 'used' ? '已使用' : '已过期')}}
         </view>
       </view>
     </view>

@@ -4,8 +4,6 @@ import com.dentalclinic.admin.dto.response.ApiResponse
 import com.dentalclinic.admin.entity.Users
 import com.dentalclinic.admin.entity.UserWallets
 import com.dentalclinic.config.DBConfig
-import com.dentalclinic.user.auth.UserJwtConfig
-import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
@@ -28,21 +26,7 @@ fun Application.userProfileRoutes() {
              * Header: Authorization: Bearer <access_token>
              */
             get("/me") {
-                // Extract and verify token from Authorization header
-                val authHeader = call.request.headers[HttpHeaders.Authorization]
-                if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-                    call.respond(ApiResponse<Unit>(code = 401, message = "缺少认证令牌"))
-                    return@get
-                }
-
-                val token = authHeader.removePrefix("Bearer ")
-                val decoded = UserJwtConfig.verifyAccessToken(token)
-                if (decoded == null) {
-                    call.respond(ApiResponse<Unit>(code = 401, message = "无效的访问令牌"))
-                    return@get
-                }
-
-                val userId = decoded.subject.toLong()
+                val userId = authenticate(call) ?: return@get
 
                 // Fetch user data from database
                 val userData = suspendTransaction(DBConfig.database) {
@@ -137,25 +121,6 @@ fun Application.userProfileRoutes() {
     }
 }
 
-/**
- * Helper: Extract and verify user ID from JWT token.
- */
-private suspend fun authenticate(call: io.ktor.server.application.ApplicationCall): Long? {
-    val authHeader = call.request.headers[HttpHeaders.Authorization]
-    if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-        call.respond(ApiResponse<Unit>(code = 401, message = "缺少认证令牌"))
-        return null
-    }
-
-    val token = authHeader.removePrefix("Bearer ")
-    val decoded = UserJwtConfig.verifyAccessToken(token)
-    if (decoded == null) {
-        call.respond(ApiResponse<Unit>(code = 401, message = "无效的访问令牌"))
-        return null
-    }
-
-    return decoded.subject.toLong()
-}
 
 @Serializable
 data class UpdateProfileRequest(

@@ -11,16 +11,11 @@ import com.dentalclinic.admin.util.ConflictException
 import com.dentalclinic.admin.util.NotFoundException
 import com.dentalclinic.admin.util.ValidationException
 import com.dentalclinic.admin.util.toDisplayString
-import com.dentalclinic.config.DBConfig
 import kotlinx.coroutines.flow.toList
 import org.jetbrains.exposed.v1.core.*
 import org.jetbrains.exposed.v1.r2dbc.*
-import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
 
-class AdminUserService {
-
-    private suspend fun <T> dbQuery(block: suspend () -> T): T =
-        suspendTransaction(DBConfig.database) { block() }
+class AdminUserService : BaseService() {
 
     suspend fun listUsers(page: Int, pageSize: Int, keyword: String?, roleId: Long?): Pair<List<UserListItem>, Long> =
         dbQuery {

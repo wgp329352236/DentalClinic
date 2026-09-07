@@ -67,7 +67,7 @@ object JwtConfig {
                 .withIssuer(issuer)
                 .build()
                 .verify(token)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
     }

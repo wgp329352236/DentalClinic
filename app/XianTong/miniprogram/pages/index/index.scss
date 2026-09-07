@@ -112,3 +112,17 @@
   font-size: 24rpx;
   white-space: nowrap;
 }
+
+/* 登录失败原因 */
+.login-error {
+  margin-top: 20rpx;
+  padding: 16rpx 24rpx;
+  max-width: 100%;
+  font-size: 24rpx;
+  line-height: 1.5;
+  color: #ff4d4f;
+  background: #fff1f0;
+  border: 1rpx solid #ffa39e;
+  border-radius: 12rpx;
+  word-break: break-all;
+}

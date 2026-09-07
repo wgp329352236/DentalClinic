@@ -2,18 +2,13 @@ package com.dentalclinic.admin.service
 
 import com.dentalclinic.admin.dto.response.*
 import com.dentalclinic.admin.entity.*
-import com.dentalclinic.config.DBConfig
 import kotlinx.coroutines.flow.toList
 import org.jetbrains.exposed.v1.core.*
 import org.jetbrains.exposed.v1.r2dbc.selectAll
-import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
-class AdminDashboardService {
-
-    private suspend fun <T> dbQuery(block: suspend () -> T): T =
-        suspendTransaction(DBConfig.database) { block() }
+class AdminDashboardService : BaseService() {
 
     /**
      * 实时概览：今日预约数、到店数、营收、新增客户

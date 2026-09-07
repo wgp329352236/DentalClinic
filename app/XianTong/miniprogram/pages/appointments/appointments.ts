@@ -1,5 +1,5 @@
 // pages/appointments/appointments.ts
-import { get, post } from '../../utils/request'
+import { getMyAppointments, cancelAppointment } from '../../utils/api'
 import type { Appointment } from '../../types'
 
 const statusMap: Record<string, string> = {
@@ -34,10 +34,23 @@ Page({
   async loadAppointments() {
     this.setData({ loading: true })
     try {
-      const result = await get<{ list: Appointment[] }>('/appointments')
-      if (result.code === 0 && result.data) {
-        const appointments = result.data.list.map(appt => ({
-          ...appt,
+      // GET /appointments/my，后端直接返回数组；兼容分页对象
+      const result = await getMyAppointments()
+      const rawList = Array.isArray(result.data)
+        ? result.data
+        : (result.data as any)?.list || []
+      if (result.code === 0) {
+        const appointments = rawList.map((appt: any) => ({
+          id: appt.id,
+          clinicId: appt.clinicId || 0,
+          clinicName: appt.clinicName,
+          doctorId: appt.doctorId || 0,
+          doctorName: appt.doctorName,
+          departmentId: appt.departmentId || 0,
+          departmentName: appt.departmentName || '',
+          appointmentTime: appt.appointmentTime || `${appt.appointmentDate || ''} ${appt.startTime || ''}`,
+          status: appt.status,
+          createdAt: appt.createdAt,
           statusText: statusMap[appt.status] || appt.status,
           statusClass: statusClassMap[appt.status] || 'badge-default'
         }))
@@ -65,7 +78,7 @@ Page({
       success: async (res) => {
         if (res.confirm) {
           try {
-            const result = await post(`/appointments/${id}/cancel`)
+            const result = await cancelAppointment(id)
             if (result.code === 0) {
               wx.showToast({ title: '已取消', icon: 'success' })
               this.loadAppointments()

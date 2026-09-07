@@ -1,13 +1,17 @@
 package com.dentalclinic.admin.service
 
-import com.dentalclinic.admin.entity.AdminUsers
-import com.dentalclinic.admin.entity.MemberLevels
-import com.dentalclinic.admin.entity.PointsRules
+import com.dentalclinic.admin.entity.*
 import com.dentalclinic.config.DBConfig
+import kotlinx.coroutines.flow.toList
+import org.jetbrains.exposed.v1.core.and
+import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.r2dbc.insert
 import org.jetbrains.exposed.v1.r2dbc.selectAll
 import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
 import org.slf4j.LoggerFactory
+
+// Helper function for R2DBC (no firstOrNull)
+private fun <T> List<T>.firstOrNone(): T? = if (isEmpty()) null else this[0]
 
 /**
  * Data seeding service — inserts default data on first startup.
@@ -21,6 +25,7 @@ object DataSeedService {
             seedMemberLevels()
             seedPointsRules()
             seedDefaultAdmin()
+            seedBusinessPermissions()
         }
         logger.info("[DataSeed]: Default data seeded successfully.")
     }
@@ -100,5 +105,83 @@ object DataSeedService {
             it[AdminUsers.status] = 1
         }
         logger.info("[DataSeed]: Seeded default admin user (username=admin, password=admin123).")
+    }
+
+    private suspend fun seedBusinessPermissions() {
+        // Seed appointment permissions
+        val appointmentPerms = listOf(
+            Triple("appointment:list", "查看预约", "appointment"),
+            Triple("appointment:update", "更新预约状态", "appointment"),
+            Triple("appointment:delete", "取消预约", "appointment")
+        )
+        for ((code, name, module) in appointmentPerms) {
+            val existing = AdminPermissions.selectAll()
+                .where { AdminPermissions.permissionCode eq code }
+                .toList()
+            if (existing.isEmpty()) {
+                AdminPermissions.insert {
+                    it[permissionCode] = code
+                    it[permissionName] = name
+                    it[AdminPermissions.module] = module
+                }
+                logger.info("[DataSeed]: Created permission: $code")
+            }
+        }
+
+        // Seed customer permissions
+        val customerPerms = listOf(
+            Triple("customer:list", "查看客户", "customer"),
+            Triple("customer:view", "查看客户详情", "customer"),
+            Triple("customer:update", "更新客户信息", "customer")
+        )
+        for ((code, name, module) in customerPerms) {
+            val existing = AdminPermissions.selectAll()
+                .where { AdminPermissions.permissionCode eq code }
+                .toList()
+            if (existing.isEmpty()) {
+                AdminPermissions.insert {
+                    it[permissionCode] = code
+                    it[permissionName] = name
+                    it[AdminPermissions.module] = module
+                }
+                logger.info("[DataSeed]: Created permission: $code")
+            }
+        }
+
+        // Assign new permissions to super_admin role
+        val superAdminRole = AdminRoles.selectAll()
+            .where { AdminRoles.roleCode eq "super_admin" }
+            .toList()
+            .firstOrNone()
+
+        if (superAdminRole != null) {
+            val roleId = superAdminRole[AdminRoles.id]
+
+            // Get all new permission IDs
+            val allPermCodes = appointmentPerms.map { it.first } + customerPerms.map { it.first }
+            for (code in allPermCodes) {
+                val perm = AdminPermissions.selectAll()
+                    .where { AdminPermissions.permissionCode eq code }
+                    .toList()
+                    .firstOrNone()
+                if (perm != null) {
+                    val permId = perm[AdminPermissions.id]
+                    // Check if already assigned
+                    val existing = AdminRolePermissions.selectAll()
+                        .where {
+                            (AdminRolePermissions.roleId eq roleId) and
+                            (AdminRolePermissions.permissionId eq permId)
+                        }
+                        .toList()
+                    if (existing.isEmpty()) {
+                        AdminRolePermissions.insert {
+                            it[AdminRolePermissions.roleId] = roleId
+                            it[AdminRolePermissions.permissionId] = permId
+                        }
+                        logger.info("[DataSeed]: Assigned permission $code to super_admin")
+                    }
+                }
+            }
+        }
     }
 }

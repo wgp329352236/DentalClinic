@@ -1,5 +1,6 @@
 // pages/points/points.ts
-import { get, post } from '../../utils/request'
+import { getPointsBalance, getPointsRecords, checkin } from '../../utils/api'
+import { checkLogin } from '../../utils/auth'
 import type { PointsInfo, PointsRecord } from '../../types'
 
 Page({
@@ -11,22 +12,49 @@ Page({
   },
 
   onLoad() {
+    if (!checkLogin()) return
     this.loadPoints()
     this.loadPointsRecords()
     this.checkCheckinStatus()
   },
 
+  // 加载积分余额（GET /points/balance）
   async loadPoints() {
-    const result = await get<PointsInfo>('/points')
-    if (result.code === 0 && result.data) {
-      this.setData({ pointsInfo: result.data })
+    try {
+      const result = await getPointsBalance()
+      if (result.code === 0 && result.data) {
+        this.setData({
+          pointsInfo: {
+            balance: result.data.totalBalance,
+            monthlyEarned: 0, // 后端暂无本月获得/消耗统计
+            monthlySpent: 0
+          }
+        })
+      }
+    } catch (error) {
+      // 未登录/过期等认证错误由 request.ts 统一处理（跳回首页），这里兜底避免未捕获异常
+      console.warn('[Points] 加载积分失败:', error)
     }
   },
 
+  // 加载积分明细（GET /points/records，映射后端字段）
   async loadPointsRecords() {
-    const result = await get<{ list: PointsRecord[] }>('/points/records')
-    if (result.code === 0 && result.data) {
-      this.setData({ pointsRecords: result.data.list })
+    try {
+      const result = await getPointsRecords()
+      if (result.code === 0 && result.data) {
+        const records: PointsRecord[] = (result.data.list || []).map((r: any) => ({
+          id: r.id,
+          type: r.changeAmount >= 0 ? 'earn' : 'spend',
+          source: r.sourceType,
+          points: Math.abs(r.changeAmount),
+          relatedInfo: r.description,
+          expireAt: r.expiresAt,
+          createdAt: r.createdAt
+        }))
+        this.setData({ pointsRecords: records })
+      }
+    } catch (error) {
+      console.warn('[Points] 加载积分记录失败:', error)
     }
   },
 
@@ -46,9 +74,9 @@ Page({
 
     this.setData({ loading: true })
     try {
-      const result = await post('/points/checkin')
+      const result = await checkin()
       if (result.code === 0) {
-        wx.showToast({ title: `签到成功 +${result.data.points}积分`, icon: 'success' })
+        wx.showToast({ title: `签到成功 +${result.data.pointsEarned}积分`, icon: 'success' })
         wx.setStorageSync('lastCheckinDate', new Date().toISOString().split('T')[0])
         this.setData({ checkedIn: true })
         this.loadPoints()

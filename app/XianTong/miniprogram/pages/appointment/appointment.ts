@@ -31,7 +31,10 @@ Page({
       this.setData({ selectedClinicId: Number(options.clinicId) })
     }
     this.loadClinics()
-    this.loadDepartments()
+    // 后端 /departments 要求 clinicId 必填，仅在有选中门诊时加载
+    if (this.data.selectedClinicId) {
+      this.loadDepartments()
+    }
   },
 
   // 加载门店列表
@@ -88,8 +91,14 @@ Page({
         const dateStr = date.toISOString().split('T')[0]
 
         const result = await getDoctorSlots(doctorId, dateStr)
-        if (result.code === 0 && result.data) {
-          slots.push(...result.data)
+        if (result.code === 0 && Array.isArray(result.data)) {
+          // 后端返回 remaining/maxAppointments，映射为本地 TimeSlot
+          slots.push(...result.data.map((s: any) => ({
+            date: dateStr,
+            startTime: s.startTime,
+            endTime: s.endTime,
+            available: (s.remaining || 0) > 0
+          })))
         }
       }
 
@@ -109,6 +118,7 @@ Page({
       selectedClinicName: clinic?.name || '',
       step: 2
     })
+    this.loadDepartments()
     this.loadDoctors()
   },
 
@@ -143,7 +153,7 @@ Page({
     const index = Number(e.currentTarget.dataset.index)
     const slot = this.data.timeSlots[index]
     this.setData({
-      selectedSlot: slot,
+      selectedSlot: { ...slot, timeRange: `${slot.startTime}-${slot.endTime}` } as any,
       step: 5
     })
   },

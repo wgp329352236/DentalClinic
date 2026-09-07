@@ -35,7 +35,7 @@ fun Application.fileUploadRoutes() {
                         if (part is PartData.FileItem) {
                             result = fileUploadService.saveFile(userId, part)
                         }
-                        part.dispose()
+                        part.release()
                     }
 
                     when (val res = result) {
@@ -111,23 +111,6 @@ fun Application.fileUploadRoutes() {
             }
         }
     }
-}
-
-private suspend fun authenticate(call: io.ktor.server.application.ApplicationCall): Long? {
-    val authHeader = call.request.headers[HttpHeaders.Authorization]
-    if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-        call.respond(ApiResponse<Unit>(code = 401, message = "缺少认证令牌"))
-        return null
-    }
-
-    val token = authHeader.removePrefix("Bearer ")
-    val decoded = UserJwtConfig.verifyAccessToken(token)
-    if (decoded == null) {
-        call.respond(ApiResponse<Unit>(code = 401, message = "无效的访问令牌"))
-        return null
-    }
-
-    return decoded.subject.toLong()
 }
 
 @Serializable

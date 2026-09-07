@@ -1,5 +1,5 @@
 // pages/referral/referral.ts
-import { get } from '../../utils/request'
+import { getReferralCode, getReferralRecords } from '../../utils/api'
 import type { ReferralInfo } from '../../types'
 
 Page({
@@ -12,12 +12,31 @@ Page({
     this.loadReferralInfo()
   },
 
+  // 加载推荐信息（GET /referral/code + GET /referral/records，映射后端字段）
   async loadReferralInfo() {
     this.setData({ loading: true })
     try {
-      const result = await get<ReferralInfo>('/referral')
-      if (result.code === 0 && result.data) {
-        this.setData({ referralInfo: result.data })
+      const [codeRes, recordsRes] = await Promise.all([
+        getReferralCode(),
+        getReferralRecords()
+      ])
+
+      if (codeRes.code === 0 && codeRes.data) {
+        const records = recordsRes.code === 0 && recordsRes.data ? recordsRes.data : null
+        const referralInfo: ReferralInfo = {
+          referralCode: codeRes.data.referralCode,
+          referralLink: codeRes.data.shareLink,
+          totalReferrals: records?.total || 0,
+          monthlyReferrals: 0, // 后端暂无本月推荐统计
+          rewards: (records?.list || []).map((r: any) => ({
+            id: r.id,
+            type: 'register',
+            status: r.rewardStatus === 'full' ? 'issued' : 'pending',
+            referredPerson: r.refereeName,
+            createdAt: r.registeredAt
+          }))
+        }
+        this.setData({ referralInfo })
       }
     } catch (error) {
       console.error('加载推荐信息失败:', error)

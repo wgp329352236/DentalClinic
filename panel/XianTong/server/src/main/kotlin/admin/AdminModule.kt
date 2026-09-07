@@ -203,6 +203,8 @@ fun Application.adminRouting() {
             departmentRoutes()
             doctorRoutes()
             scheduleRoutes()
+            appointmentAdminRoutes()
+            customerRoutes()
         }
     }
 }

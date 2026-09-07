@@ -67,7 +67,7 @@ miniprogram/
 在 `utils/request.ts` 中修改：
 
 ```typescript
-const USE_MOCK = false  // true: 使用模拟数据, false: 连接真实后端
+const USE_MOCK = true  // true: 使用模拟数据, false: 连接真实后端
 ```
 
 ### 后端接口地址

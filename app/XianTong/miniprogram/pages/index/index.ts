@@ -33,7 +33,8 @@ Page({
       { id: 'points', name: '积分兑换', icon: '/images/icon-points.png', path: '/pages/points/points' },
       { id: 'referral', name: '推荐好友', icon: '/images/icon-referral.png', path: '/pages/referral/referral' }
     ],
-    loading: false
+    loading: false,
+    loginError: '' // 登录失败原因（页面可见，便于排查）
   },
 
   onLoad() {
@@ -69,15 +70,20 @@ Page({
   onGetPhoneNumber(e: any) {
     if (this.data.loading) return
 
-    // 用户取消授权
-    if (e.detail.errMsg !== 'getPhoneNumber:ok') {
-      this.loginFailed('已取消微信授权登录')
+    this.setData({ loginError: '' })
+
+    // 授权成功，携带手机号动态令牌登录
+    if (e.detail.errMsg === 'getPhoneNumber:ok' && e.detail.code) {
+      this.setData({ loading: true })
+      this.doWechatLogin(e.detail.code)
       return
     }
 
+    // 用户取消授权，或手机号能力不可用（个人主体小程序/未开通/基础库不支持），
+    // 降级为微信 code 静默登录，保证登录流程不被阻断
+    console.warn('[Login] 手机号授权未完成:', e.detail.errMsg)
     this.setData({ loading: true })
-    // e.detail.code 为微信手机号授权返回的动态令牌，可换取用户手机号
-    this.doWechatLogin(e.detail.code)
+    this.doWechatLogin()
   },
 
   // 微信登录：wx.login 获取 code（静默），配合手机号令牌调用后端换取登录态
@@ -133,16 +139,25 @@ Page({
             this.setData({ userInfo: fallback, loading: false })
           }
 
+          this.setData({ loginError: '' })
           wx.showToast({
             title: '登录成功',
             icon: 'success'
           })
         } catch (error: any) {
-          this.loginFailed(error?.message || '登录失败')
+          // 完整输出失败原因（含 errno/errMsg/message），便于排查
+          console.error('[Login] 登录接口失败详情:', error)
+          const detail = error?.message
+            || error?.errMsg
+            || (error?.statusCode ? `请求失败(${error.statusCode})` : '')
+            || '登录失败'
+          this.loginFailed(detail)
         }
       },
-      fail: () => {
-        this.loginFailed('微信登录失败')
+      fail: (err) => {
+        // 打印真实失败原因，便于排查（如 AppID 无效、网络异常等）
+        console.error('[Login] wx.login 失败详情:', err)
+        this.loginFailed(`微信登录失败：${err?.errMsg || '未知错误'}`)
       }
     })
   },
@@ -192,10 +207,13 @@ Page({
     }
   },
 
-  // 登录失败处理
+  // 登录失败处理：toast 提示 + 页面可见的错误原因（便于排查）
   loginFailed(message: string) {
     console.error('登录失败:', message)
-    this.setData({ loading: false })
+    this.setData({
+      loading: false,
+      loginError: message
+    })
     wx.showToast({
       title: message,
       icon: 'none'
@@ -246,15 +264,15 @@ Page({
     try {
       const result = await getClinics() // 不需要认证
       if (result.code === 0 && result.data) {
-        // 转换数据格式
+        // 转换数据格式（后端返回 openTime/closeTime/coverImage）
         const clinics: Clinic[] = result.data.map((item: any) => ({
           id: item.id,
           name: item.name,
           address: item.address,
           phone: item.phone,
-          businessHours: item.businessHours,
+          businessHours: item.businessHours || (item.openTime && item.closeTime ? `${item.openTime}-${item.closeTime}` : ''),
           distance: item.distance,
-          image: item.image
+          image: item.image || item.coverImage || ''
         }))
         this.setData({ clinics })
       }

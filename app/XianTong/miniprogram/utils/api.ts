@@ -271,7 +271,8 @@ export function createRecharge(params: CreateRechargeParams) {
 // ==================== 积分 ====================
 
 export interface PointsBalance {
-  balance: number
+  totalBalance: number
+  updatedAt?: string
 }
 
 export interface PointsRecord {

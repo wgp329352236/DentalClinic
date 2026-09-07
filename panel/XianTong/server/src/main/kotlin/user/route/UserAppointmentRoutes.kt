@@ -2,13 +2,14 @@ package com.dentalclinic.user.route
 
 import com.dentalclinic.admin.dto.response.ApiResponse
 import com.dentalclinic.user.auth.UserJwtConfig
-import com.dentalclinic.user.service.*
+import com.dentalclinic.user.service.AppointmentResult
+import com.dentalclinic.user.service.AppointmentService
+import com.dentalclinic.user.service.CreateAppointmentRequest
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import kotlinx.serialization.Contextual
 import kotlinx.serialization.Serializable
 import java.time.LocalDate
 

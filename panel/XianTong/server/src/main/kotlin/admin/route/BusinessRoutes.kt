@@ -27,6 +27,9 @@ import org.jetbrains.exposed.v1.r2dbc.update
 @Serializable data class DoctorRequest(val name: String, val title: String, val specialties: String, val introduction: String? = null, val avatar: String? = null, val clinicIds: List<Long> = emptyList())
 @Serializable data class ScheduleRequest(val doctorId: Long, val dayOfWeek: Int, val startTime: String, val endTime: String, val maxAppointments: Int = 1)
 
+// Helper function to get first element from list (R2DBC doesn't have firstOrNull)
+private fun <T> List<T>.firstOrNone(): T? = if (isEmpty()) null else this[0]
+
 fun Route.clinicRoutes() {
     route("/clinics") {
         authenticated {
@@ -341,6 +344,393 @@ fun Route.scheduleRoutes() {
                         }
                     }
                     call.ok<Unit>(message = "删除成功")
+                }
+            }
+        }
+    }
+}
+
+// ==================== 预约管理 ====================
+
+@Serializable data class AppointmentAdminResponse(
+    val id: Long,
+    val userId: Long,
+    val userName: String?,
+    val userPhone: String?,
+    val clinicId: Long,
+    val clinicName: String,
+    val doctorId: Long,
+    val doctorName: String,
+    val departmentId: Long?,
+    val departmentName: String?,
+    val appointmentDate: String,
+    val startTime: String,
+    val endTime: String?,
+    val status: String,
+    val remark: String?,
+    val createdAt: String
+)
+
+@Serializable data class AppointmentStatusRequest(val status: String, val remark: String? = null)
+
+fun Route.appointmentAdminRoutes() {
+    route("/appointments") {
+        authenticated {
+            requirePermission("appointment:list") {
+                get {
+                    val status = call.request.queryParameters["status"]
+                    val clinicId = call.request.queryParameters["clinicId"]?.toLongOrNull()
+                    val doctorId = call.request.queryParameters["doctorId"]?.toLongOrNull()
+
+                    val data = withContext(Dispatchers.IO) {
+                        suspendTransaction(DBConfig.database) {
+                            var query = Appointments.selectAll()
+
+                            if (!status.isNullOrBlank()) {
+                                query = query.where { Appointments.status eq status }
+                            }
+                            if (clinicId != null) {
+                                query = query.where { Appointments.clinicId eq clinicId }
+                            }
+                            if (doctorId != null) {
+                                query = query.where { Appointments.doctorId eq doctorId }
+                            }
+
+                            val allRows = query
+                                .orderBy(Appointments.createdAt, SortOrder.DESC)
+                                .toList()
+
+                            val list = allRows.map { row ->
+                                // Get user info
+                                val userRows = Users.selectAll()
+                                    .where { Users.id eq row[Appointments.userId] }
+                                    .toList()
+                                val user = userRows.firstOrNone()
+
+                                // Get clinic info
+                                val clinicRows = Clinics.selectAll()
+                                    .where { Clinics.id eq row[Appointments.clinicId] }
+                                    .toList()
+                                val clinic = clinicRows.firstOrNone()
+
+                                // Get doctor info
+                                val doctorRows = Doctors.selectAll()
+                                    .where { Doctors.id eq row[Appointments.doctorId] }
+                                    .toList()
+                                val doctor = doctorRows.firstOrNone()
+
+                                // Get department info
+                                val deptId = row[Appointments.departmentId]
+                                val dept = if (deptId != null) {
+                                    val deptRows = Departments.selectAll()
+                                        .where { Departments.id eq deptId }
+                                        .toList()
+                                    deptRows.firstOrNone()
+                                } else null
+
+                                AppointmentAdminResponse(
+                                    id = row[Appointments.id],
+                                    userId = row[Appointments.userId],
+                                    userName = user?.get(Users.realName) ?: user?.get(Users.nickname),
+                                    userPhone = user?.get(Users.phone),
+                                    clinicId = row[Appointments.clinicId],
+                                    clinicName = clinic?.get(Clinics.name) ?: "",
+                                    doctorId = row[Appointments.doctorId],
+                                    doctorName = doctor?.get(Doctors.name) ?: "",
+                                    departmentId = deptId,
+                                    departmentName = dept?.get(Departments.name),
+                                    appointmentDate = row[Appointments.appointmentDate].toString(),
+                                    startTime = row[Appointments.startTime],
+                                    endTime = row[Appointments.endTime],
+                                    status = row[Appointments.status],
+                                    remark = row[Appointments.remark],
+                                    createdAt = row[Appointments.createdAt].toString()
+                                )
+                            }
+
+                            mapOf("list" to list, "total" to list.size)
+                        }
+                    }
+                    call.ok(data)
+                }
+            }
+
+            requirePermission("appointment:update") {
+                put("/{id}/status") {
+                    val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的ID")
+                    val req = call.receive<AppointmentStatusRequest>()
+
+                    withContext(Dispatchers.IO) {
+                        suspendTransaction(DBConfig.database) {
+                            Appointments.update({ Appointments.id eq id }) {
+                                it[status] = req.status
+                                if (req.remark != null) {
+                                    it[remark] = req.remark
+                                }
+                                when (req.status) {
+                                    "arrived" -> it[arrivedAt] = java.time.LocalDateTime.now()
+                                    "completed" -> it[completedAt] = java.time.LocalDateTime.now()
+                                    "cancelled" -> {
+                                        it[cancelledAt] = java.time.LocalDateTime.now()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    call.ok<Unit>(message = "状态更新成功")
+                }
+            }
+
+            requirePermission("appointment:update") {
+                put("/{id}/cancel") {
+                    val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的ID")
+                    val req = call.receive<Map<String, String?>>()
+                    val reason = req["reason"]
+
+                    withContext(Dispatchers.IO) {
+                        suspendTransaction(DBConfig.database) {
+                            Appointments.update({ Appointments.id eq id }) {
+                                it[status] = "cancelled"
+                                it[cancelReason] = reason
+                                it[cancelledAt] = java.time.LocalDateTime.now()
+                            }
+                        }
+                    }
+                    call.ok<Unit>(message = "预约已取消")
+                }
+            }
+        }
+    }
+}
+
+// ==================== 客户管理 ====================
+
+@Serializable data class CustomerResponse(
+    val id: Long,
+    val phone: String?,
+    val nickname: String?,
+    val realName: String?,
+    val gender: Int?,
+    val age: Int?,
+    val avatar: String?,
+    val primaryClinicId: Long?,
+    val balance: Double,
+    val bonusBalance: Double,
+    val memberLevel: Int?,
+    val levelName: String?,
+    val totalConsumption: Double,
+    val createdAt: String
+)
+
+@Serializable data class WalletAdjustRequest(val amount: Double, val reason: String)
+@Serializable data class LevelAdjustRequest(val levelCode: Int, val reason: String)
+
+fun Route.customerRoutes() {
+    route("/customers") {
+        authenticated {
+            requirePermission("customer:list") {
+                get {
+                    val keyword = call.request.queryParameters["keyword"]
+                    val clinicId = call.request.queryParameters["clinicId"]?.toLongOrNull()
+
+                    val data = withContext(Dispatchers.IO) {
+                        suspendTransaction(DBConfig.database) {
+                            var query = Users.selectAll()
+
+                            // Filter by clinic
+                            if (clinicId != null) {
+                                query = query.where { Users.primaryClinicId eq clinicId }
+                            }
+
+                            val allUsers = query
+                                .orderBy(Users.createdAt, SortOrder.DESC)
+                                .toList()
+
+                            // Filter by keyword in memory (since R2DBC doesn't support like)
+                            val filteredUsers = if (!keyword.isNullOrBlank()) {
+                                val kw = keyword.lowercase()
+                                allUsers.filter { user ->
+                                    val phone = user[Users.phone]?.lowercase() ?: ""
+                                    val nickname = user[Users.nickname]?.lowercase() ?: ""
+                                    val realName = user[Users.realName]?.lowercase() ?: ""
+                                    phone.contains(kw) || nickname.contains(kw) || realName.contains(kw)
+                                }
+                            } else {
+                                allUsers
+                            }
+
+                            val list = filteredUsers.map { user ->
+                                // Get wallet
+                                val walletRows = UserWallets.selectAll()
+                                    .where { UserWallets.userId eq user[Users.id] }
+                                    .toList()
+                                val wallet = walletRows.firstOrNone()
+
+                                // Get member level
+                                val umlRows = UserMemberLevels.selectAll()
+                                    .where { UserMemberLevels.userId eq user[Users.id] }
+                                    .toList()
+                                val uml = umlRows.firstOrNone()
+
+                                val levelId = uml?.get(UserMemberLevels.levelId)
+                                val ml = if (levelId != null) {
+                                    val mlRows = MemberLevels.selectAll()
+                                        .where { MemberLevels.id eq levelId }
+                                        .toList()
+                                    mlRows.firstOrNone()
+                                } else null
+
+                                val levelCode = ml?.get(MemberLevels.levelCode)
+
+                                CustomerResponse(
+                                    id = user[Users.id],
+                                    phone = user[Users.phone],
+                                    nickname = user[Users.nickname],
+                                    realName = user[Users.realName],
+                                    gender = user[Users.gender],
+                                    age = user[Users.age],
+                                    avatar = user[Users.avatar],
+                                    primaryClinicId = user[Users.primaryClinicId],
+                                    balance = wallet?.get(UserWallets.balance)?.toDouble() ?: 0.0,
+                                    bonusBalance = wallet?.get(UserWallets.bonusBalance)?.toDouble() ?: 0.0,
+                                    memberLevel = levelCode,
+                                    levelName = ml?.get(MemberLevels.levelName),
+                                    totalConsumption = 0.0, // TODO: calculate from consumption records
+                                    createdAt = user[Users.createdAt].toString()
+                                )
+                            }
+
+                            mapOf("list" to list, "total" to list.size)
+                        }
+                    }
+                    call.ok(data)
+                }
+            }
+
+            requirePermission("customer:view") {
+                get("/{id}") {
+                    val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的客户ID")
+
+                    val data = withContext(Dispatchers.IO) {
+                        suspendTransaction(DBConfig.database) {
+                            val userRows = Users.selectAll()
+                                .where { Users.id eq id }
+                                .toList()
+                            val user = userRows.firstOrNone() ?: throw ValidationException("客户不存在")
+
+                            val walletRows = UserWallets.selectAll()
+                                .where { UserWallets.userId eq id }
+                                .toList()
+                            val wallet = walletRows.firstOrNone()
+
+                            val umlRows = UserMemberLevels.selectAll()
+                                .where { UserMemberLevels.userId eq id }
+                                .toList()
+                            val uml = umlRows.firstOrNone()
+
+                            val levelId = uml?.get(UserMemberLevels.levelId)
+                            val ml = if (levelId != null) {
+                                val mlRows = MemberLevels.selectAll()
+                                    .where { MemberLevels.id eq levelId }
+                                    .toList()
+                                mlRows.firstOrNone()
+                            } else null
+                            val levelCode = ml?.get(MemberLevels.levelCode)
+
+                            mapOf(
+                                "user" to mapOf(
+                                    "id" to user[Users.id],
+                                    "phone" to user[Users.phone],
+                                    "nickname" to user[Users.nickname],
+                                    "realName" to user[Users.realName],
+                                    "gender" to user[Users.gender],
+                                    "age" to user[Users.age],
+                                    "avatar" to user[Users.avatar],
+                                    "primaryClinicId" to user[Users.primaryClinicId],
+                                    "createdAt" to user[Users.createdAt].toString()
+                                ),
+                                "wallet" to mapOf(
+                                    "balance" to (wallet?.get(UserWallets.balance)?.toDouble() ?: 0.0),
+                                    "bonusBalance" to (wallet?.get(UserWallets.bonusBalance)?.toDouble() ?: 0.0),
+                                    "version" to (wallet?.get(UserWallets.version) ?: 0)
+                                ),
+                                "memberLevel" to mapOf(
+                                    "levelCode" to levelCode,
+                                    "levelName" to (ml?.get(MemberLevels.levelName)),
+                                    "minConsumption" to (ml?.get(MemberLevels.minConsumption)?.toDouble() ?: 0.0),
+                                    "discount" to (ml?.get(MemberLevels.discountRate)?.toDouble() ?: 1.0)
+                                )
+                            )
+                        }
+                    }
+                    call.ok(data)
+                }
+            }
+
+            requirePermission("customer:update") {
+                put("/{id}/wallet") {
+                    val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的客户ID")
+                    val req = call.receive<WalletAdjustRequest>()
+
+                    withContext(Dispatchers.IO) {
+                        suspendTransaction(DBConfig.database) {
+                            val walletRows = UserWallets.selectAll()
+                                .where { UserWallets.userId eq id }
+                                .toList()
+                            val wallet = walletRows.firstOrNone()
+
+                            if (wallet == null) {
+                                UserWallets.insert {
+                                    it[userId] = id
+                                    it[balance] = req.amount.toBigDecimal()
+                                    it[bonusBalance] = 0.toBigDecimal()
+                                    it[version] = 1
+                                }
+                            } else {
+                                UserWallets.update({ UserWallets.userId eq id }) {
+                                    it[balance] = wallet[UserWallets.balance] + req.amount.toBigDecimal()
+                                }
+                            }
+                        }
+                    }
+                    call.ok<Unit>(message = "余额调整成功")
+                }
+            }
+
+            requirePermission("customer:update") {
+                put("/{id}/level") {
+                    val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的客户ID")
+                    val req = call.receive<LevelAdjustRequest>()
+
+                    withContext(Dispatchers.IO) {
+                        suspendTransaction(DBConfig.database) {
+                            // Get the level id from level code
+                            val levelRows = MemberLevels.selectAll()
+                                .where { MemberLevels.levelCode eq req.levelCode }
+                                .toList()
+                            val level = levelRows.firstOrNone()
+                            val targetLevelId = level?.get(MemberLevels.id) ?: throw ValidationException("无效的会员等级代码")
+
+                            val existingRows = UserMemberLevels.selectAll()
+                                .where { UserMemberLevels.userId eq id }
+                                .toList()
+                            val existing = existingRows.firstOrNone()
+
+                            if (existing == null) {
+                                UserMemberLevels.insert {
+                                    it[UserMemberLevels.userId] = id
+                                    it[UserMemberLevels.levelId] = targetLevelId
+                                    it[UserMemberLevels.effectiveFrom] = java.time.LocalDateTime.now()
+                                }
+                            } else {
+                                UserMemberLevels.update({ UserMemberLevels.userId eq id }) {
+                                    it[UserMemberLevels.levelId] = targetLevelId
+                                    it[UserMemberLevels.effectiveFrom] = java.time.LocalDateTime.now()
+                                }
+                            }
+                        }
+                    }
+                    call.ok<Unit>(message = "会员等级调整成功")
                 }
             }
         }
