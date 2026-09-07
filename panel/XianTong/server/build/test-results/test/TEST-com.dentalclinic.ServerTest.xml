@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.dentalclinic.ServerTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-09-07T08:24:39.431Z" hostname="WGPdeMacBook-Pro-2781.local" time="2.104">
+  <properties/>
+  <testcase name="test root endpoint" classname="com.dentalclinic.ServerTest" time="2.1"/>
+  <system-out><![CDATA[2026-09-07 16:24:40.230 [DefaultDispatcher-worker-2 @call-context#3] INFO  io.ktor.test - No ktor.deployment.watch patterns specified, automatic reload is not active.
+2026-09-07 16:24:40.316 [DefaultDispatcher-worker-2 @coroutine#4] INFO  [Koin] - Started 0 definitions in 2.216 ms
+2026-09-07 16:24:41.080 [DefaultDispatcher-worker-2 @coroutine#5] INFO  AdminModule - All tables (admin + dental clinic) created/verified.
+2026-09-07 16:24:41.217 [DefaultDispatcher-worker-2 @coroutine#7] INFO  c.d.admin.service.DataSeedService - [DataSeed]: Created permission: appointment:list
+2026-09-07 16:24:41.234 [DefaultDispatcher-worker-2 @coroutine#7] INFO  c.d.admin.service.DataSeedService - [DataSeed]: Created permission: appointment:update
+2026-09-07 16:24:41.239 [DefaultDispatcher-worker-2 @coroutine#7] INFO  c.d.admin.service.DataSeedService - [DataSeed]: Created permission: appointment:delete
+2026-09-07 16:24:41.244 [DefaultDispatcher-worker-2 @coroutine#7] INFO  c.d.admin.service.DataSeedService - [DataSeed]: Created permission: customer:list
+2026-09-07 16:24:41.248 [DefaultDispatcher-worker-2 @coroutine#7] INFO  c.d.admin.service.DataSeedService - [DataSeed]: Created permission: customer:view
+2026-09-07 16:24:41.252 [DefaultDispatcher-worker-2 @coroutine#7] INFO  c.d.admin.service.DataSeedService - [DataSeed]: Created permission: customer:update
+2026-09-07 16:24:41.289 [DefaultDispatcher-worker-2 @coroutine#7] INFO  c.d.admin.service.DataSeedService - [DataSeed]: Assigned permission appointment:list to super_admin
+2026-09-07 16:24:41.295 [DefaultDispatcher-worker-2 @coroutine#7] INFO  c.d.admin.service.DataSeedService - [DataSeed]: Assigned permission appointment:update to super_admin
+2026-09-07 16:24:41.301 [DefaultDispatcher-worker-2 @coroutine#7] INFO  c.d.admin.service.DataSeedService - [DataSeed]: Assigned permission appointment:delete to super_admin
+2026-09-07 16:24:41.307 [DefaultDispatcher-worker-2 @coroutine#7] INFO  c.d.admin.service.DataSeedService - [DataSeed]: Assigned permission customer:list to super_admin
+2026-09-07 16:24:41.312 [DefaultDispatcher-worker-2 @coroutine#7] INFO  c.d.admin.service.DataSeedService - [DataSeed]: Assigned permission customer:view to super_admin
+2026-09-07 16:24:41.334 [DefaultDispatcher-worker-2 @coroutine#7] INFO  c.d.admin.service.DataSeedService - [DataSeed]: Assigned permission customer:update to super_admin
+2026-09-07 16:24:41.336 [DefaultDispatcher-worker-2 @coroutine#7] INFO  c.d.admin.service.DataSeedService - [DataSeed]: Default data seeded successfully.
+2026-09-07 16:24:41.408 [DefaultDispatcher-worker-2 @coroutine#4] INFO  c.d.a.service.AdminCleanupService - [AdminCleanup]: Audit log cleanup scheduled (daily at 3 AM)
+2026-09-07 16:24:41.444 [DefaultDispatcher-worker-2 @coroutine#8] INFO  UserModule - User tables created/verified.
+2026-09-07 16:24:41.446 [DefaultDispatcher-worker-2 @coroutine#4] INFO  UserModule - User module initialized with all routes.
+2026-09-07 16:24:41.446 [DefaultDispatcher-worker-2 @call-context#3] INFO  io.ktor.test - Application started in 1.23 seconds.
+2026-09-07 16:24:41.448 [DefaultDispatcher-worker-1 @coroutine#9] INFO  io.ktor.test - Responding at http://localhost:80
+2026-09-07 16:24:41.448 [DefaultDispatcher-worker-1 @coroutine#9] INFO  io.ktor.test - Responding at https://localhost:443
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
