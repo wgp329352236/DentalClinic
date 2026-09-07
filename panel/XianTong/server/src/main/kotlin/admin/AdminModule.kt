@@ -174,6 +174,14 @@ fun Application.adminRouting() {
     val pointsService = AdminPointsService()
     val couponService = AdminCouponService()
 
+    // Business data services
+    val clinicService = ClinicService()
+    val departmentService = DepartmentService()
+    val doctorService = DoctorService()
+    val scheduleService = ScheduleService()
+    val appointmentService = AppointmentAdminService()
+    val customerService = CustomerService()
+
     routing {
         // User-end API (C-end patients)
         userAuthRoutes()
@@ -205,12 +213,12 @@ fun Application.adminRouting() {
             couponRoutes(couponService)
 
             // Business data management routes
-            clinicRoutes()
-            departmentRoutes()
-            doctorRoutes()
-            scheduleRoutes()
-            appointmentAdminRoutes()
-            customerRoutes()
+            clinicRoutes(clinicService)
+            departmentRoutes(departmentService)
+            doctorRoutes(doctorService)
+            scheduleRoutes(scheduleService)
+            appointmentAdminRoutes(appointmentService)
+            customerRoutes(customerService)
         }
     }
 }
