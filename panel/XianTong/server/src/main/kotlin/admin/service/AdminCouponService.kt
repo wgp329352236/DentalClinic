@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.SortOrder
+import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.r2dbc.insert
 import org.jetbrains.exposed.v1.r2dbc.selectAll
@@ -198,6 +199,79 @@ class AdminCouponService {
         val random = (1000..9999).random()
         return "ADM${templateId}${timestamp}${random}"
     }
+
+    /**
+     * Scan and redeem coupon by QR data.
+     */
+    suspend fun scanAndRedeemCoupon(qrData: String, operator: String): ScanRedeemResult {
+        return withContext(Dispatchers.IO) {
+            suspendTransaction(DBConfig.database) {
+                try {
+                    // Parse QR data: couponCode|userId|couponId
+                    val parts = qrData.split("|")
+                    if (parts.size != 3) {
+                        return@suspendTransaction ScanRedeemResult.Error("无效的二维码格式")
+                    }
+
+                    val couponCode = parts[0]
+                    val userId = parts[1].toLongOrNull() ?: return@suspendTransaction ScanRedeemResult.Error("无效的用户ID")
+                    val couponId = parts[2].toLongOrNull() ?: return@suspendTransaction ScanRedeemResult.Error("无效的优惠券ID")
+
+                    // Find the coupon
+                    val coupon = UserCoupons.selectAll()
+                        .where {
+                            (UserCoupons.id eq couponId) and
+                            (UserCoupons.userId eq userId) and
+                            (UserCoupons.couponCode eq couponCode)
+                        }
+                        .toList()
+                        .singleOrNull()
+
+                    if (coupon == null) {
+                        return@suspendTransaction ScanRedeemResult.Error("优惠券不存在或已被使用")
+                    }
+
+                    // Check status
+                    if (coupon[UserCoupons.status] != "unused") {
+                        return@suspendTransaction ScanRedeemResult.Error("优惠券已使用或已过期")
+                    }
+
+                    // Get template and check validity
+                    val template = CouponTemplates.selectAll()
+                        .where { CouponTemplates.id eq coupon[UserCoupons.templateId] }
+                        .toList()
+                        .singleOrNull()
+
+                    if (template == null) {
+                        return@suspendTransaction ScanRedeemResult.Error("优惠券模板不存在")
+                    }
+
+                    val now = LocalDateTime.now()
+                    if (now.isBefore(template[CouponTemplates.validFrom]) || now.isAfter(template[CouponTemplates.validTo])) {
+                        return@suspendTransaction ScanRedeemResult.Error("优惠券已过期")
+                    }
+
+                    // Mark as used
+                    UserCoupons.update({ UserCoupons.id eq couponId }) {
+                        it[UserCoupons.status] = "used"
+                        it[UserCoupons.usedAt] = now
+                    }
+
+                    // Update used quantity in template
+                    CouponTemplates.update({ CouponTemplates.id eq coupon[UserCoupons.templateId] }) {
+                        it[CouponTemplates.usedQuantity] = template[CouponTemplates.usedQuantity] + 1
+                    }
+
+                    ScanRedeemResult.Success(
+                        couponName = template[CouponTemplates.name],
+                        faceValue = template[CouponTemplates.faceValue].toDouble()
+                    )
+                } catch (e: Exception) {
+                    ScanRedeemResult.Error("核销失败: ${e.message}")
+                }
+            }
+        }
+    }
 }
 
 // DTOs
@@ -267,3 +341,15 @@ data class CouponStatisticsDto(
     val totalRemaining: Int,
     val usageRate: Double
 )
+
+@Serializable
+data class ScanRedeemRequest(
+    val qrData: String  // Format: couponCode|userId|couponId
+)
+
+sealed class ScanRedeemResult {
+    @Serializable
+    data class Success(val couponName: String, val faceValue: Double) : ScanRedeemResult()
+    @Serializable
+    data class Error(val message: String) : ScanRedeemResult()
+}

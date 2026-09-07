@@ -109,6 +109,38 @@ fun Route.couponRoutes(couponService: AdminCouponService) {
                     call.ok(statistics)
                 }
             }
+
+            // POST /api/admin/coupons/scan-redeem - Scan and redeem coupon
+            requirePermission("coupon:manage") {
+                post("/scan-redeem") {
+                    val request = call.receive<com.dentalclinic.admin.service.ScanRedeemRequest>()
+                    val principal = call.adminPrincipal()
+
+                    if (request.qrData.isBlank()) {
+                        throw ValidationException("二维码数据不能为空")
+                    }
+
+                    val result = couponService.scanAndRedeemCoupon(
+                        qrData = request.qrData,
+                        operator = principal.username
+                    )
+
+                    when (result) {
+                        is com.dentalclinic.admin.service.ScanRedeemResult.Success -> {
+                            call.ok(
+                                mapOf(
+                                    "couponName" to result.couponName,
+                                    "faceValue" to result.faceValue
+                                ),
+                                "核销成功"
+                            )
+                        }
+                        is com.dentalclinic.admin.service.ScanRedeemResult.Error -> {
+                            throw ValidationException(result.message)
+                        }
+                    }
+                }
+            }
         }
     }
 }

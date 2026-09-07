@@ -207,6 +207,41 @@ class CouponService {
         val random = (1000..9999).random()
         return "CPN${templateId}${timestamp}${random}"
     }
+
+    /**
+     * Get coupon detail by ID for QR code generation.
+     */
+    suspend fun getCouponDetail(userId: Long, couponId: Long): CouponDetailDto? = withContext(Dispatchers.IO) {
+        suspendTransaction(DBConfig.database) {
+            val coupon = UserCoupons.selectAll()
+                .where {
+                    (UserCoupons.id eq couponId) and
+                    (UserCoupons.userId eq userId)
+                }
+                .toList()
+                .singleOrNull() ?: return@suspendTransaction null
+
+            val template = CouponTemplates.selectAll()
+                .where { CouponTemplates.id eq coupon[UserCoupons.templateId] }
+                .toList()
+                .singleOrNull() ?: return@suspendTransaction null
+
+            val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+
+            CouponDetailDto(
+                id = coupon[UserCoupons.id],
+                couponCode = coupon[UserCoupons.couponCode],
+                templateName = template[CouponTemplates.name],
+                couponType = template[CouponTemplates.couponType],
+                faceValue = template[CouponTemplates.faceValue].toDouble(),
+                minConsumption = template[CouponTemplates.minConsumption].toDouble(),
+                validFrom = template[CouponTemplates.validFrom].format(formatter),
+                validTo = template[CouponTemplates.validTo].format(formatter),
+                status = coupon[UserCoupons.status],
+                qrData = "${coupon[UserCoupons.couponCode]}|${userId}|${coupon[UserCoupons.id]}"
+            )
+        }
+    }
 }
 
 // DTOs
@@ -243,3 +278,17 @@ sealed class CouponClaimResult {
     @Serializable
     data class Error(val message: String) : CouponClaimResult()
 }
+
+@Serializable
+data class CouponDetailDto(
+    val id: Long,
+    val couponCode: String,
+    val templateName: String,
+    val couponType: String,
+    val faceValue: Double,
+    val minConsumption: Double,
+    val validFrom: String,
+    val validTo: String,
+    val status: String,
+    val qrData: String  // QR code data: couponCode|userId|couponId
+)

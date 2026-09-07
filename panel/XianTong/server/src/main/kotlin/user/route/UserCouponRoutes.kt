@@ -30,6 +30,27 @@ fun Application.userCouponRoutes() {
             }
 
             /**
+             * Get coupon detail for QR code generation.
+             * GET /api/v1/coupons/{id}/detail
+             */
+            get("/{id}/detail") {
+                val userId = authenticate(call) ?: return@get
+                val couponId = call.parameters["id"]?.toLongOrNull()
+
+                if (couponId == null) {
+                    call.respond(ApiResponse<Unit>(code = 400, message = "无效的优惠券ID"))
+                    return@get
+                }
+
+                val detail = couponService.getCouponDetail(userId, couponId)
+                if (detail != null) {
+                    call.respond(ApiResponse(code = 0, message = "success", data = detail))
+                } else {
+                    call.respond(ApiResponse<Unit>(code = 404, message = "优惠券不存在"))
+                }
+            }
+
+            /**
              * Redeem a coupon.
              * POST /api/v1/coupons/redeem
              * Body: { "couponCode": "NEW20057523", "appointmentId": 1 }
