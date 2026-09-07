@@ -181,6 +181,7 @@ fun Application.adminRouting() {
         userRechargeRoutes()
         userAppointmentRoutes()
         userMedicalRecordRoutes()
+        userConsumptionRoutes()
         userPointsRoutes()
         userReferralRoutes()
         userCouponRoutes()
