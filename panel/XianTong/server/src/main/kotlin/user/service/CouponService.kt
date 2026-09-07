@@ -10,6 +10,7 @@ import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.r2dbc.insert
 import org.jetbrains.exposed.v1.r2dbc.selectAll
 import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
 import org.jetbrains.exposed.v1.r2dbc.update
@@ -137,6 +138,75 @@ class CouponService {
             }
         }
     }
+
+    /**
+     * Claim a coupon by template ID.
+     */
+    suspend fun claimCoupon(userId: Long, templateId: Long): CouponClaimResult {
+        return withContext(Dispatchers.IO) {
+            suspendTransaction(DBConfig.database) {
+                // Check if template exists and is available
+                val template = CouponTemplates.selectAll()
+                    .where { CouponTemplates.id eq templateId }
+                    .toList()
+                    .singleOrNull()
+
+                if (template == null) {
+                    return@suspendTransaction CouponClaimResult.Error("优惠券模板不存在")
+                }
+
+                // Check if template is active
+                if (template[CouponTemplates.status] != 1) {
+                    return@suspendTransaction CouponClaimResult.Error("优惠券已停用")
+                }
+
+                // Check if within valid period
+                val now = LocalDateTime.now()
+                if (now.isBefore(template[CouponTemplates.validFrom]) || now.isAfter(template[CouponTemplates.validTo])) {
+                    return@suspendTransaction CouponClaimResult.Error("优惠券不在有效期内")
+                }
+
+                // Check if there are remaining coupons
+                val issuedQuantity = template[CouponTemplates.issuedQuantity]
+                val totalQuantity = template[CouponTemplates.totalQuantity]
+                if (issuedQuantity >= totalQuantity) {
+                    return@suspendTransaction CouponClaimResult.Error("优惠券已领完")
+                }
+
+                // Generate unique coupon code
+                val couponCode = generateCouponCode(templateId, userId)
+
+                // Create user coupon
+                UserCoupons.insert {
+                    it[UserCoupons.userId] = userId
+                    it[UserCoupons.templateId] = templateId
+                    it[UserCoupons.couponCode] = couponCode
+                    it[UserCoupons.status] = "unused"
+                }
+
+                // Update issued quantity
+                CouponTemplates.update({ CouponTemplates.id eq templateId }) {
+                    it[CouponTemplates.issuedQuantity] = issuedQuantity + 1
+                }
+
+                CouponClaimResult.Success(
+                    couponCode = couponCode,
+                    couponName = template[CouponTemplates.name],
+                    faceValue = template[CouponTemplates.faceValue].toDouble(),
+                    validTo = template[CouponTemplates.validTo].format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+                )
+            }
+        }
+    }
+
+    /**
+     * Generate unique coupon code.
+     */
+    private fun generateCouponCode(templateId: Long, userId: Long): String {
+        val timestamp = System.currentTimeMillis().toString().takeLast(6)
+        val random = (1000..9999).random()
+        return "CPN${templateId}${timestamp}${random}"
+    }
 }
 
 // DTOs
@@ -160,4 +230,16 @@ sealed class CouponRedeemResult {
     data class Success(val couponName: String, val faceValue: Double) : CouponRedeemResult()
     @Serializable
     data class Error(val message: String) : CouponRedeemResult()
+}
+
+sealed class CouponClaimResult {
+    @Serializable
+    data class Success(
+        val couponCode: String,
+        val couponName: String,
+        val faceValue: Double,
+        val validTo: String
+    ) : CouponClaimResult()
+    @Serializable
+    data class Error(val message: String) : CouponClaimResult()
 }

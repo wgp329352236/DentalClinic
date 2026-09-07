@@ -60,6 +60,44 @@ fun Application.userCouponRoutes() {
                     call.respond(ApiResponse<Unit>(code = 500, message = "核销失败: ${e.message}"))
                 }
             }
+
+            /**
+             * Claim a coupon by template ID.
+             * POST /api/v1/coupons/claim/{templateId}
+             */
+            post("/claim/{templateId}") {
+                val userId = authenticate(call) ?: return@post
+                val templateId = call.parameters["templateId"]?.toLongOrNull()
+
+                if (templateId == null) {
+                    call.respond(ApiResponse<Unit>(code = 400, message = "无效的模板ID"))
+                    return@post
+                }
+
+                try {
+                    val result = couponService.claimCoupon(userId, templateId)
+
+                    when (result) {
+                        is com.dentalclinic.user.service.CouponClaimResult.Success -> {
+                            call.respond(ApiResponse(
+                                code = 0,
+                                message = "领取成功",
+                                data = mapOf(
+                                    "couponCode" to result.couponCode,
+                                    "couponName" to result.couponName,
+                                    "faceValue" to result.faceValue,
+                                    "validTo" to result.validTo
+                                )
+                            ))
+                        }
+                        is com.dentalclinic.user.service.CouponClaimResult.Error -> {
+                            call.respond(ApiResponse<Unit>(code = 400, message = result.message))
+                        }
+                    }
+                } catch (e: Exception) {
+                    call.respond(ApiResponse<Unit>(code = 500, message = "领取失败: ${e.message}"))
+                }
+            }
         }
     }
 }
