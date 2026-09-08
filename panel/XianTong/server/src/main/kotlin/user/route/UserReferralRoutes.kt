@@ -2,9 +2,9 @@ package com.dentalclinic.user.route
 
 import com.dentalclinic.admin.dto.response.ApiResponse
 import com.dentalclinic.admin.dto.response.PageResponse
-import com.dentalclinic.user.auth.UserJwtConfig
+import com.dentalclinic.user.auth.userAuthenticated
+import com.dentalclinic.user.auth.userId
 import com.dentalclinic.user.service.*
-import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
@@ -19,12 +19,13 @@ fun Application.userReferralRoutes() {
 
     routing {
         route("/api/v1/referral") {
+            userAuthenticated {
             /**
              * Get user's referral code.
              * GET /api/v1/referral/code
              */
             get("/code") {
-                val userId = authenticate(call) ?: return@get
+                val userId = call.userId()
                 val code = referralService.getReferralCode(userId)
                 call.respond(ApiResponse(
                     code = 0,
@@ -38,7 +39,7 @@ fun Application.userReferralRoutes() {
              * GET /api/v1/referral/records?page=1&pageSize=20
              */
             get("/records") {
-                val userId = authenticate(call) ?: return@get
+                val userId = call.userId()
                 val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 1
                 val pageSize = call.request.queryParameters["pageSize"]?.toIntOrNull() ?: 20
 
@@ -60,7 +61,7 @@ fun Application.userReferralRoutes() {
              * POST /api/v1/referral/register
              */
             post("/register") {
-                val userId = authenticate(call) ?: return@post
+                val userId = call.userId()
 
                 try {
                     val request = call.receive<RegisterWithReferralRequest>()
@@ -77,6 +78,7 @@ fun Application.userReferralRoutes() {
                 } catch (e: Exception) {
                     call.respond(ApiResponse<Unit>(code = 500, message = "绑定失败: ${e.message}"))
                 }
+            }
             }
         }
     }

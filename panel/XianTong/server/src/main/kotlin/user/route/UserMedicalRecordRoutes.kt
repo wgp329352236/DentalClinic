@@ -2,6 +2,8 @@ package com.dentalclinic.user.route
 
 import com.dentalclinic.admin.dto.response.ApiResponse
 import com.dentalclinic.admin.dto.response.PageResponse
+import com.dentalclinic.user.auth.userAuthenticated
+import com.dentalclinic.user.auth.userId
 import com.dentalclinic.user.service.MedicalRecordService
 import io.ktor.server.application.*
 import io.ktor.server.response.*
@@ -15,12 +17,13 @@ fun Application.userMedicalRecordRoutes() {
 
     routing {
         route("/api/v1/medical-records") {
+            userAuthenticated {
             /**
              * Get user's medical records (completed appointments).
              * GET /api/v1/medical-records?page=1&pageSize=20&startDate=2026-01-01&endDate=2026-12-31&doctorId=1&departmentId=1&keyword=龋齿
              */
             get("") {
-                val userId = authenticate(call) ?: return@get
+                val userId = call.userId()
                 val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 1
                 val pageSize = call.request.queryParameters["pageSize"]?.toIntOrNull() ?: 20
                 
@@ -58,7 +61,7 @@ fun Application.userMedicalRecordRoutes() {
              * GET /api/v1/medical-records/{id}
              */
             get("/{id}") {
-                val userId = authenticate(call) ?: return@get
+                val userId = call.userId()
                 val appointmentId = call.parameters["id"]?.toLongOrNull()
 
                 if (appointmentId == null) {
@@ -72,6 +75,7 @@ fun Application.userMedicalRecordRoutes() {
                 } else {
                     call.respond(ApiResponse<Unit>(code = 404, message = "就诊记录不存在"))
                 }
+            }
             }
         }
     }

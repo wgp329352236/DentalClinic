@@ -4,6 +4,8 @@ import com.dentalclinic.admin.dto.response.ApiResponse
 import com.dentalclinic.admin.entity.RechargeRecords
 import com.dentalclinic.admin.entity.UserWallets
 import com.dentalclinic.config.DBConfig
+import com.dentalclinic.user.auth.userAuthenticated
+import com.dentalclinic.user.auth.userId
 import io.ktor.server.application.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
@@ -21,13 +23,14 @@ import java.time.format.DateTimeFormatter
 fun Application.userWalletRoutes() {
     routing {
         route("/api/v1/wallet") {
+            userAuthenticated {
             /**
              * Get wallet details including balance and recent recharge records.
              * GET /api/v1/wallet/details
              * Header: Authorization: Bearer <access_token>
              */
             get("/details") {
-                val userId = authenticate(call) ?: return@get
+                val userId = call.userId()
 
                 val walletData = suspendTransaction(DBConfig.database) {
                     // Get wallet info
@@ -66,6 +69,7 @@ fun Application.userWalletRoutes() {
                 }
 
                 call.respond(ApiResponse(code = 0, message = "success", data = walletData))
+            }
             }
         }
     }

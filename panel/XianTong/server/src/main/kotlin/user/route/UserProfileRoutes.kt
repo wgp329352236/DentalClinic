@@ -4,6 +4,8 @@ import com.dentalclinic.admin.dto.response.ApiResponse
 import com.dentalclinic.admin.entity.Users
 import com.dentalclinic.admin.entity.UserWallets
 import com.dentalclinic.config.DBConfig
+import com.dentalclinic.user.auth.userAuthenticated
+import com.dentalclinic.user.auth.userId
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
@@ -20,13 +22,14 @@ import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
 fun Application.userProfileRoutes() {
     routing {
         route("/api/v1/profile") {
+            userAuthenticated {
             /**
              * Get current user's profile.
              * GET /api/v1/profile/me
              * Header: Authorization: Bearer <access_token>
              */
             get("/me") {
-                val userId = authenticate(call) ?: return@get
+                val userId = call.userId()
 
                 // Fetch user data from database
                 val userData = suspendTransaction(DBConfig.database) {
@@ -72,7 +75,7 @@ fun Application.userProfileRoutes() {
              * Body: { "realName": "张三", "phone": "13800138000", "gender": 1, "age": 25, "avatar": "url" }
              */
             put("/me") {
-                val userId = authenticate(call) ?: return@put
+                val userId = call.userId()
 
                 try {
                     val request = call.receive<UpdateProfileRequest>()
@@ -116,6 +119,7 @@ fun Application.userProfileRoutes() {
                 } catch (e: Exception) {
                     call.respond(ApiResponse<Unit>(code = 500, message = "更新失败: ${e.message}"))
                 }
+            }
             }
         }
     }

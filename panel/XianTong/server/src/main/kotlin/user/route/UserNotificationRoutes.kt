@@ -2,14 +2,12 @@ package com.dentalclinic.user.route
 
 import com.dentalclinic.admin.dto.response.ApiResponse
 import com.dentalclinic.admin.dto.response.PageResponse
-import com.dentalclinic.user.auth.UserJwtConfig
+import com.dentalclinic.user.auth.userAuthenticated
+import com.dentalclinic.user.auth.userId
 import com.dentalclinic.user.service.*
-import io.ktor.http.*
 import io.ktor.server.application.*
-import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import kotlinx.serialization.Serializable
 
 /**
  * User notification routes (protected by JWT).
@@ -19,12 +17,13 @@ fun Application.userNotificationRoutes() {
 
     routing {
         route("/api/v1/messages") {
+            userAuthenticated {
             /**
              * Get notification list.
              * GET /api/v1/messages?page=1&pageSize=20&msgType=system&isRead=false
              */
             get("") {
-                val userId = authenticate(call) ?: return@get
+                val userId = call.userId()
                 val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 1
                 val pageSize = call.request.queryParameters["pageSize"]?.toIntOrNull() ?: 20
                 val msgType = call.request.queryParameters["msgType"]
@@ -53,7 +52,7 @@ fun Application.userNotificationRoutes() {
              * GET /api/v1/messages/unread-count
              */
             get("/unread-count") {
-                val userId = authenticate(call) ?: return@get
+                val userId = call.userId()
                 val count = notificationService.getUnreadCount(userId)
                 call.respond(ApiResponse(code = 0, message = "success", data = mapOf("count" to count)))
             }
@@ -63,7 +62,7 @@ fun Application.userNotificationRoutes() {
              * PUT /api/v1/messages/{id}/read
              */
             put("/{id}/read") {
-                val userId = authenticate(call) ?: return@put
+                val userId = call.userId()
                 val notificationId = call.parameters["id"]?.toLongOrNull()
 
                 if (notificationId == null) {
@@ -84,9 +83,10 @@ fun Application.userNotificationRoutes() {
              * PUT /api/v1/messages/read-all
              */
             put("/read-all") {
-                val userId = authenticate(call) ?: return@put
+                val userId = call.userId()
                 val count = notificationService.markAllAsRead(userId)
                 call.respond(ApiResponse(code = 0, message = "全部标记已读", data = mapOf("markedCount" to count)))
+            }
             }
         }
     }

@@ -2,6 +2,8 @@ package com.dentalclinic.user.route
 
 import com.dentalclinic.admin.dto.response.ApiResponse
 import com.dentalclinic.admin.dto.response.PageResponse
+import com.dentalclinic.user.auth.userAuthenticated
+import com.dentalclinic.user.auth.userId
 import com.dentalclinic.user.service.PointsResult
 import com.dentalclinic.user.service.PointsService
 import io.ktor.server.application.*
@@ -16,12 +18,13 @@ fun Application.userPointsRoutes() {
 
     routing {
         route("/api/v1/points") {
+            userAuthenticated {
             /**
              * Get points balance.
              * GET /api/v1/points/balance
              */
             get("/balance") {
-                val userId = authenticate(call) ?: return@get
+                val userId = call.userId()
                 val balance = pointsService.getPointsBalance(userId)
                 call.respond(ApiResponse(code = 0, message = "success", data = balance))
             }
@@ -31,7 +34,7 @@ fun Application.userPointsRoutes() {
              * GET /api/v1/points/records?page=1&pageSize=20
              */
             get("/records") {
-                val userId = authenticate(call) ?: return@get
+                val userId = call.userId()
                 val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 1
                 val pageSize = call.request.queryParameters["pageSize"]?.toIntOrNull() ?: 20
 
@@ -53,7 +56,7 @@ fun Application.userPointsRoutes() {
              * POST /api/v1/points/checkin
              */
             post("/checkin") {
-                val userId = authenticate(call) ?: return@post
+                val userId = call.userId()
                 val result = pointsService.checkIn(userId)
                 when (result) {
                     is PointsResult.Success -> {
@@ -74,7 +77,7 @@ fun Application.userPointsRoutes() {
              * POST /api/v1/points/profile-complete
              */
             post("/profile-complete") {
-                val userId = authenticate(call) ?: return@post
+                val userId = call.userId()
                 val result = pointsService.completeProfileReward(userId)
                 when (result) {
                     is PointsResult.Success -> {
@@ -88,6 +91,7 @@ fun Application.userPointsRoutes() {
                         call.respond(ApiResponse<Unit>(code = 400, message = result.message))
                     }
                 }
+            }
             }
         }
     }

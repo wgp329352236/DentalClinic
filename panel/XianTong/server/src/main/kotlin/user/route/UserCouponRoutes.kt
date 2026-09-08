@@ -1,9 +1,9 @@
 package com.dentalclinic.user.route
 
 import com.dentalclinic.admin.dto.response.ApiResponse
-import com.dentalclinic.user.auth.UserJwtConfig
+import com.dentalclinic.user.auth.userAuthenticated
+import com.dentalclinic.user.auth.userId
 import com.dentalclinic.user.service.*
-import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
@@ -18,12 +18,13 @@ fun Application.userCouponRoutes() {
 
     routing {
         route("/api/v1/coupons") {
+            userAuthenticated {
             /**
              * Get user's coupon list.
              * GET /api/v1/coupons?status=unused
              */
             get("") {
-                val userId = authenticate(call) ?: return@get
+                val userId = call.userId()
                 val status = call.request.queryParameters["status"]
                 val coupons = couponService.getUserCoupons(userId, status)
                 call.respond(ApiResponse(code = 0, message = "success", data = coupons))
@@ -34,7 +35,7 @@ fun Application.userCouponRoutes() {
              * GET /api/v1/coupons/{id}/detail
              */
             get("/{id}/detail") {
-                val userId = authenticate(call) ?: return@get
+                val userId = call.userId()
                 val couponId = call.parameters["id"]?.toLongOrNull()
 
                 if (couponId == null) {
@@ -56,7 +57,7 @@ fun Application.userCouponRoutes() {
              * Body: { "couponCode": "NEW20057523", "appointmentId": 1 }
              */
             post("/redeem") {
-                val userId = authenticate(call) ?: return@post
+                val userId = call.userId()
 
                 try {
                     val request = call.receive<RedeemCouponRequest>()
@@ -87,7 +88,7 @@ fun Application.userCouponRoutes() {
              * POST /api/v1/coupons/claim/{templateId}
              */
             post("/claim/{templateId}") {
-                val userId = authenticate(call) ?: return@post
+                val userId = call.userId()
                 val templateId = call.parameters["templateId"]?.toLongOrNull()
 
                 if (templateId == null) {
@@ -99,7 +100,7 @@ fun Application.userCouponRoutes() {
                     val result = couponService.claimCoupon(userId, templateId)
 
                     when (result) {
-                        is com.dentalclinic.user.service.CouponClaimResult.Success -> {
+                        is CouponClaimResult.Success -> {
                             call.respond(ApiResponse(
                                 code = 0,
                                 message = "领取成功",
@@ -111,13 +112,14 @@ fun Application.userCouponRoutes() {
                                 )
                             ))
                         }
-                        is com.dentalclinic.user.service.CouponClaimResult.Error -> {
+                        is CouponClaimResult.Error -> {
                             call.respond(ApiResponse<Unit>(code = 400, message = result.message))
                         }
                     }
                 } catch (e: Exception) {
                     call.respond(ApiResponse<Unit>(code = 500, message = "领取失败: ${e.message}"))
                 }
+            }
             }
         }
     }

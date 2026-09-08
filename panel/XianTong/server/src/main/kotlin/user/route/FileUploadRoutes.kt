@@ -1,7 +1,8 @@
 package com.dentalclinic.user.route
 
 import com.dentalclinic.admin.dto.response.ApiResponse
-import com.dentalclinic.user.auth.UserJwtConfig
+import com.dentalclinic.user.auth.userAuthenticated
+import com.dentalclinic.user.auth.userId
 import com.dentalclinic.user.service.*
 import io.ktor.http.*
 import io.ktor.http.content.*
@@ -20,12 +21,13 @@ fun Application.fileUploadRoutes() {
 
     routing {
         route("/api/v1/files") {
+            userAuthenticated {
             /**
              * Upload a file.
              * POST /api/v1/files/upload
              */
             post("/upload") {
-                val userId = authenticate(call) ?: return@post
+                val userId = call.userId()
 
                 try {
                     val multipart = call.receiveMultipart()
@@ -67,7 +69,7 @@ fun Application.fileUploadRoutes() {
              * DELETE /api/v1/files/{fileName}
              */
             delete("/{fileName}") {
-                val userId = authenticate(call) ?: return@delete
+                val userId = call.userId()
                 val fileName = call.parameters["fileName"]
 
                 if (fileName == null) {
@@ -84,6 +86,7 @@ fun Application.fileUploadRoutes() {
                         call.respond(ApiResponse<Unit>(code = 400, message = result.message))
                     }
                 }
+            }
             }
 
             /**
