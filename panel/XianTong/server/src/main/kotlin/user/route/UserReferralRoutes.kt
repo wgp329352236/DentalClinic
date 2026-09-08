@@ -14,9 +14,7 @@ import kotlinx.serialization.Serializable
 /**
  * User referral routes (protected by JWT).
  */
-fun Application.userReferralRoutes() {
-    val referralService = ReferralService()
-
+fun Application.userReferralRoutes(referralService: ReferralService) {
     routing {
         route("/api/v1/referral") {
             userAuthenticated {

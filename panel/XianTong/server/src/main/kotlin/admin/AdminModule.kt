@@ -7,7 +7,6 @@ import com.dentalclinic.admin.route.*
 import com.dentalclinic.admin.service.*
 import com.dentalclinic.admin.util.*
 import com.dentalclinic.config.DBConfig
-import com.dentalclinic.user.route.*
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.plugins.*
@@ -183,21 +182,6 @@ fun Application.adminRouting() {
     val customerService = CustomerService()
 
     routing {
-        // User-end API (C-end patients)
-        userAuthRoutes()
-        userProfileRoutes()
-        userWalletRoutes()
-        userRechargeRoutes()
-        userAppointmentRoutes()
-        userMedicalRecordRoutes()
-        userConsumptionRoutes()
-        userPointsRoutes()
-        userReferralRoutes()
-        userCouponRoutes()
-        userNotificationRoutes()
-        fileUploadRoutes()
-        testReferralRoutes()
-
         // Admin API
         route("/api/admin") {
             install(AuditPlugin)

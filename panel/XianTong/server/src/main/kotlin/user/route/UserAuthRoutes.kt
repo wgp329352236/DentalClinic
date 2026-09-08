@@ -11,9 +11,7 @@ import kotlinx.serialization.Serializable
 /**
  * User-end authentication routes.
  */
-fun Application.userAuthRoutes() {
-    val authService = UserAuthService()
-
+fun Application.userAuthRoutes(authService: UserAuthService) {
     routing {
         route("/api/v1/auth") {
             /**

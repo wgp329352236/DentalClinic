@@ -1,86 +1,56 @@
 package com.dentalclinic.user
 
-import com.dentalclinic.admin.entity.Clinics
-import com.dentalclinic.admin.entity.Departments
-import com.dentalclinic.admin.entity.Doctors
-import com.dentalclinic.admin.entity.DoctorClinicRels
-import com.dentalclinic.admin.entity.DoctorSchedules
-import com.dentalclinic.admin.entity.Users
-import com.dentalclinic.admin.entity.UserWallets
-import com.dentalclinic.admin.entity.RechargeRecords
-import com.dentalclinic.admin.entity.MemberLevels
-import com.dentalclinic.admin.entity.UserMemberLevels
-import com.dentalclinic.admin.entity.ConsumptionRecords
-import com.dentalclinic.admin.entity.Appointments
-import com.dentalclinic.admin.entity.PointsRules
-import com.dentalclinic.admin.entity.PointsRecords
-import com.dentalclinic.admin.entity.UserPointsSummary
-import com.dentalclinic.admin.entity.ReferralRelations
-import com.dentalclinic.admin.entity.ReferralRewards
-import com.dentalclinic.admin.entity.CouponTemplates
-import com.dentalclinic.admin.entity.UserCoupons
-import com.dentalclinic.admin.entity.Notifications
-import com.dentalclinic.admin.entity.MessageTemplates
-import com.dentalclinic.admin.entity.UploadedFiles
-import com.dentalclinic.config.DBConfig
 import com.dentalclinic.user.route.*
+import com.dentalclinic.user.service.*
 import io.ktor.server.application.*
-import kotlinx.coroutines.runBlocking
-import org.jetbrains.exposed.v1.r2dbc.SchemaUtils
-import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
+import io.ktor.server.routing.*
 import org.slf4j.LoggerFactory
 
 private val logger = LoggerFactory.getLogger("UserModule")
 
 /**
- * User (Mini-program) Module Entry Point
+ * User (C-end patient) Module Entry Point.
+ *
+ * Responsibilities: register all user-facing routes.
+ * Table creation and StatusPages are managed by AdminModule (shared infrastructure).
  */
 fun Application.userModule() {
-    // Create user tables if not exist
-    runBlocking {
-        suspendTransaction(DBConfig.database) {
-            SchemaUtils.create(
-                Clinics,
-                Departments,
-                Doctors,
-                DoctorClinicRels,
-                DoctorSchedules,
-                Users,
-                UserWallets,
-                RechargeRecords,
-                MemberLevels,
-                UserMemberLevels,
-                ConsumptionRecords,
-                Appointments,
-                PointsRules,
-                PointsRecords,
-                UserPointsSummary,
-                ReferralRelations,
-                ReferralRewards,
-                CouponTemplates,
-                UserCoupons,
-                Notifications,
-                MessageTemplates,
-                UploadedFiles
-            )
-            logger.info("User tables created/verified.")
-        }
+    userRouting()
+    logger.info("User module initialized.")
+}
+
+/**
+ * User route registration — mirrors AdminModule.adminRouting() structure.
+ */
+fun Application.userRouting() {
+    // Service instances (consistent with AdminModule pattern)
+    val authService = UserAuthService()
+    val appointmentService = AppointmentService()
+    val medicalRecordService = MedicalRecordService()
+    val consumptionService = ConsumptionRecordService()
+    val rechargeService = RechargeService()
+    val pointsService = PointsService()
+    val referralService = ReferralService()
+    val couponService = CouponService()
+    val notificationService = NotificationService()
+    val fileUploadService = FileUploadService()
+
+    routing {
+        // Public auth endpoints
+        userAuthRoutes(authService)
+
+        // Protected user APIs
+        userProfileRoutes()
+        userWalletRoutes()
+        userRechargeRoutes(rechargeService)
+        userAppointmentRoutes(appointmentService)
+        userMedicalRecordRoutes(medicalRecordService)
+        userConsumptionRoutes(consumptionService)
+        userPointsRoutes(pointsService)
+        userReferralRoutes(referralService)
+        userCouponRoutes(couponService)
+        userNotificationRoutes(notificationService)
+        fileUploadRoutes(fileUploadService)
+        testReferralRoutes(referralService)
     }
-
-    // Register routes
-    userAuthRoutes()
-    userProfileRoutes()
-    userAppointmentRoutes()
-    userMedicalRecordRoutes()
-    userConsumptionRoutes()
-    userWalletRoutes()
-    userRechargeRoutes()
-    userPointsRoutes()
-    userReferralRoutes()
-    testReferralRoutes()
-    userCouponRoutes()
-    userNotificationRoutes()
-    fileUploadRoutes()
-
-    logger.info("User module initialized with all routes.")
 }

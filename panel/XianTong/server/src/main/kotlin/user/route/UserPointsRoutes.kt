@@ -13,9 +13,7 @@ import io.ktor.server.routing.*
 /**
  * User points routes (protected by JWT).
  */
-fun Application.userPointsRoutes() {
-    val pointsService = PointsService()
-
+fun Application.userPointsRoutes(pointsService: PointsService) {
     routing {
         route("/api/v1/points") {
             userAuthenticated {

@@ -12,9 +12,7 @@ import io.ktor.server.routing.*
 /**
  * User medical record routes (protected by JWT).
  */
-fun Application.userMedicalRecordRoutes() {
-    val medicalRecordService = MedicalRecordService()
-
+fun Application.userMedicalRecordRoutes(medicalRecordService: MedicalRecordService) {
     routing {
         route("/api/v1/medical-records") {
             userAuthenticated {

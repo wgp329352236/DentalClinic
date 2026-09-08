@@ -15,9 +15,7 @@ import java.math.BigDecimal
 /**
  * User recharge routes (protected by JWT).
  */
-fun Application.userRechargeRoutes() {
-    val rechargeService = RechargeService()
-
+fun Application.userRechargeRoutes(rechargeService: RechargeService) {
     routing {
         route("/api/v1/recharge") {
             /**

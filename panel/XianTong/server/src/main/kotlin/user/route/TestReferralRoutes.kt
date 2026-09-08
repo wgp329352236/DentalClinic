@@ -12,9 +12,7 @@ import io.ktor.server.routing.*
  * Test routes for referral first consumption reward.
  * In production, this would be triggered by payment callback.
  */
-fun Application.testReferralRoutes() {
-    val referralService = ReferralService()
-
+fun Application.testReferralRoutes(referralService: ReferralService) {
     routing {
         route("/api/v1/test") {
             userAuthenticated {

@@ -16,9 +16,7 @@ import java.io.File
 /**
  * File upload routes.
  */
-fun Application.fileUploadRoutes() {
-    val fileUploadService = FileUploadService()
-
+fun Application.fileUploadRoutes(fileUploadService: FileUploadService) {
     routing {
         route("/api/v1/files") {
             userAuthenticated {

@@ -12,9 +12,7 @@ import io.ktor.server.routing.*
 /**
  * User consumption record routes (protected by JWT).
  */
-fun Application.userConsumptionRoutes() {
-    val consumptionService = ConsumptionRecordService()
-
+fun Application.userConsumptionRoutes(consumptionService: ConsumptionRecordService) {
     routing {
         route("/api/v1/consumption") {
             userAuthenticated {

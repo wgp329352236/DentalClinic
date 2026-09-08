@@ -81,7 +81,7 @@ fun Application.userProfileRoutes() {
                     val request = call.receive<UpdateProfileRequest>()
 
                     // Validate phone format if provided
-                    if (request.phone != null && request.phone.isNotEmpty()) {
+                    if (!request.phone.isNullOrEmpty()) {
                         if (!request.phone.matches(Regex("^1[3-9]\\d{9}$"))) {
                             call.respond(ApiResponse<Unit>(code = 400, message = "手机号格式不正确"))
                             return@put
@@ -95,7 +95,7 @@ fun Application.userProfileRoutes() {
                     }
 
                     // Validate age
-                    if (request.age != null && (request.age < 0 || request.age > 150)) {
+                    if (request.age != null && (request.age !in 0..150)) {
                         call.respond(ApiResponse<Unit>(code = 400, message = "年龄值无效"))
                         return@put
                     }

@@ -13,9 +13,7 @@ import kotlinx.serialization.Serializable
 /**
  * User coupon routes (protected by JWT).
  */
-fun Application.userCouponRoutes() {
-    val couponService = CouponService()
-
+fun Application.userCouponRoutes(couponService: CouponService) {
     routing {
         route("/api/v1/coupons") {
             userAuthenticated {

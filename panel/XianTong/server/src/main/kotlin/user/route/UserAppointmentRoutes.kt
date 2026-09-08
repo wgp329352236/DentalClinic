@@ -1,11 +1,11 @@
 package com.dentalclinic.user.route
 
 import com.dentalclinic.admin.dto.response.ApiResponse
-import com.dentalclinic.user.auth.UserJwtConfig
+import com.dentalclinic.user.auth.userAuthenticated
+import com.dentalclinic.user.auth.userId
 import com.dentalclinic.user.service.AppointmentResult
 import com.dentalclinic.user.service.AppointmentService
 import com.dentalclinic.user.service.CreateAppointmentRequest
-import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
@@ -16,9 +16,7 @@ import java.time.LocalDate
 /**
  * User appointment routes.
  */
-fun Application.userAppointmentRoutes() {
-    val appointmentService = AppointmentService()
-
+fun Application.userAppointmentRoutes(appointmentService: AppointmentService) {
     routing {
         route("/api/v1") {
             // === Public routes (no auth required) ===
@@ -86,157 +84,107 @@ fun Application.userAppointmentRoutes() {
             }
 
             // === Protected routes (auth required) ===
+            userAuthenticated {
 
-            /**
-             * Create an appointment.
-             * POST /api/v1/appointments
-             */
-            post("/appointments") {
-                val authHeader = call.request.headers[HttpHeaders.Authorization]
-                if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-                    call.respond(ApiResponse<Unit>(code = 401, message = "缺少认证令牌"))
-                    return@post
+                /**
+                 * Create an appointment.
+                 * POST /api/v1/appointments
+                 */
+                post("/appointments") {
+                    val userId = call.userId()
+
+                    try {
+                        val request = call.receive<CreateAppointmentRequestDto>()
+                        val result = appointmentService.createAppointment(userId, CreateAppointmentRequest(
+                            clinicId = request.clinicId,
+                            doctorId = request.doctorId,
+                            departmentId = request.departmentId,
+                            appointmentDate = request.appointmentDate,
+                            startTime = request.startTime,
+                            remark = request.remark
+                        ))
+
+                        when (result) {
+                            is AppointmentResult.Success -> {
+                                call.respond(ApiResponse(
+                                    code = 0,
+                                    message = "预约成功",
+                                    data = CreateAppointmentResponseDto(result.appointmentId)
+                                ))
+                            }
+                            is AppointmentResult.Error -> {
+                                call.respond(ApiResponse<Unit>(code = 400, message = result.message))
+                            }
+                        }
+                    } catch (e: Exception) {
+                        call.respond(ApiResponse<Unit>(code = 500, message = "预约失败: ${e.message}"))
+                    }
                 }
 
-                val token = authHeader.removePrefix("Bearer ")
-                val decoded = UserJwtConfig.verifyAccessToken(token)
-                if (decoded == null) {
-                    call.respond(ApiResponse<Unit>(code = 401, message = "无效的访问令牌"))
-                    return@post
+                /**
+                 * Get my appointments.
+                 * GET /api/v1/appointments/my?status=pending
+                 */
+                get("/appointments/my") {
+                    val userId = call.userId()
+                    val status = call.request.queryParameters["status"]
+
+                    val appointments = appointmentService.getMyAppointments(userId, status)
+                    call.respond(ApiResponse(code = 0, message = "success", data = appointments))
                 }
 
-                val userId = decoded.subject.toLong()
+                /**
+                 * Cancel an appointment.
+                 * PUT /api/v1/appointments/{id}/cancel
+                 */
+                put("/appointments/{id}/cancel") {
+                    val userId = call.userId()
+                    val appointmentId = call.parameters["id"]?.toLongOrNull()
 
-                try {
-                    val request = call.receive<CreateAppointmentRequestDto>()
-                    val result = appointmentService.createAppointment(userId, CreateAppointmentRequest(
-                        clinicId = request.clinicId,
-                        doctorId = request.doctorId,
-                        departmentId = request.departmentId,
-                        appointmentDate = request.appointmentDate,
-                        startTime = request.startTime,
-                        remark = request.remark
-                    ))
+                    if (appointmentId == null) {
+                        call.respond(ApiResponse<Unit>(code = 400, message = "无效的预约ID"))
+                        return@put
+                    }
 
+                    val result = appointmentService.cancelAppointment(userId, appointmentId)
                     when (result) {
                         is AppointmentResult.Success -> {
-                            call.respond(ApiResponse(
-                                code = 0,
-                                message = "预约成功",
-                                data = CreateAppointmentResponseDto(result.appointmentId)
-                            ))
+                            call.respond(ApiResponse<Unit>(code = 0, message = "取消成功"))
                         }
                         is AppointmentResult.Error -> {
                             call.respond(ApiResponse<Unit>(code = 400, message = result.message))
                         }
                     }
-                } catch (e: Exception) {
-                    call.respond(ApiResponse<Unit>(code = 500, message = "预约失败: ${e.message}"))
-                }
-            }
-
-            /**
-             * Get my appointments.
-             * GET /api/v1/appointments/my?status=pending
-             */
-            get("/appointments/my") {
-                val authHeader = call.request.headers[HttpHeaders.Authorization]
-                if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-                    call.respond(ApiResponse<Unit>(code = 401, message = "缺少认证令牌"))
-                    return@get
                 }
 
-                val token = authHeader.removePrefix("Bearer ")
-                val decoded = UserJwtConfig.verifyAccessToken(token)
-                if (decoded == null) {
-                    call.respond(ApiResponse<Unit>(code = 401, message = "无效的访问令牌"))
-                    return@get
-                }
+                /**
+                 * Reschedule an appointment.
+                 * PUT /api/v1/appointments/{id}/reschedule
+                 */
+                put("/appointments/{id}/reschedule") {
+                    val userId = call.userId()
+                    val appointmentId = call.parameters["id"]?.toLongOrNull()
 
-                val userId = decoded.subject.toLong()
-                val status = call.request.queryParameters["status"]
-
-                val appointments = appointmentService.getMyAppointments(userId, status)
-                call.respond(ApiResponse(code = 0, message = "success", data = appointments))
-            }
-
-            /**
-             * Cancel an appointment.
-             * PUT /api/v1/appointments/{id}/cancel
-             */
-            put("/appointments/{id}/cancel") {
-                val authHeader = call.request.headers[HttpHeaders.Authorization]
-                if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-                    call.respond(ApiResponse<Unit>(code = 401, message = "缺少认证令牌"))
-                    return@put
-                }
-
-                val token = authHeader.removePrefix("Bearer ")
-                val decoded = UserJwtConfig.verifyAccessToken(token)
-                if (decoded == null) {
-                    call.respond(ApiResponse<Unit>(code = 401, message = "无效的访问令牌"))
-                    return@put
-                }
-
-                val userId = decoded.subject.toLong()
-                val appointmentId = call.parameters["id"]?.toLongOrNull()
-
-                if (appointmentId == null) {
-                    call.respond(ApiResponse<Unit>(code = 400, message = "无效的预约ID"))
-                    return@put
-                }
-
-                val result = appointmentService.cancelAppointment(userId, appointmentId)
-                when (result) {
-                    is AppointmentResult.Success -> {
-                        call.respond(ApiResponse<Unit>(code = 0, message = "取消成功"))
+                    if (appointmentId == null) {
+                        call.respond(ApiResponse<Unit>(code = 400, message = "无效的预约ID"))
+                        return@put
                     }
-                    is AppointmentResult.Error -> {
-                        call.respond(ApiResponse<Unit>(code = 400, message = result.message))
-                    }
-                }
-            }
 
-            /**
-             * Reschedule an appointment.
-             * PUT /api/v1/appointments/{id}/reschedule
-             */
-            put("/appointments/{id}/reschedule") {
-                val authHeader = call.request.headers[HttpHeaders.Authorization]
-                if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-                    call.respond(ApiResponse<Unit>(code = 401, message = "缺少认证令牌"))
-                    return@put
-                }
+                    try {
+                        val request = call.receive<RescheduleRequest>()
+                        val result = appointmentService.rescheduleAppointment(userId, appointmentId, request.appointmentDate, request.startTime)
 
-                val token = authHeader.removePrefix("Bearer ")
-                val decoded = UserJwtConfig.verifyAccessToken(token)
-                if (decoded == null) {
-                    call.respond(ApiResponse<Unit>(code = 401, message = "无效的访问令牌"))
-                    return@put
-                }
-
-                val userId = decoded.subject.toLong()
-                val appointmentId = call.parameters["id"]?.toLongOrNull()
-
-                if (appointmentId == null) {
-                    call.respond(ApiResponse<Unit>(code = 400, message = "无效的预约ID"))
-                    return@put
-                }
-
-                try {
-                    val request = call.receive<RescheduleRequest>()
-                    val result = appointmentService.rescheduleAppointment(userId, appointmentId, request.appointmentDate, request.startTime)
-
-                    when (result) {
-                        is AppointmentResult.Success -> {
-                            call.respond(ApiResponse<Unit>(code = 0, message = "改约成功"))
+                        when (result) {
+                            is AppointmentResult.Success -> {
+                                call.respond(ApiResponse<Unit>(code = 0, message = "改约成功"))
+                            }
+                            is AppointmentResult.Error -> {
+                                call.respond(ApiResponse<Unit>(code = 400, message = result.message))
+                            }
                         }
-                        is AppointmentResult.Error -> {
-                            call.respond(ApiResponse<Unit>(code = 400, message = result.message))
-                        }
+                    } catch (e: Exception) {
+                        call.respond(ApiResponse<Unit>(code = 500, message = "改约失败: ${e.message}"))
                     }
-                } catch (e: Exception) {
-                    call.respond(ApiResponse<Unit>(code = 500, message = "改约失败: ${e.message}"))
                 }
             }
         }

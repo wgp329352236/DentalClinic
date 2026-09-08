@@ -12,9 +12,7 @@ import io.ktor.server.routing.*
 /**
  * User notification routes (protected by JWT).
  */
-fun Application.userNotificationRoutes() {
-    val notificationService = NotificationService()
-
+fun Application.userNotificationRoutes(notificationService: NotificationService) {
     routing {
         route("/api/v1/messages") {
             userAuthenticated {
