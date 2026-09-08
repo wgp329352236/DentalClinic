@@ -30,7 +30,7 @@ fun Application.userRouting() {
     val consumptionService = ConsumptionRecordService()
     val rechargeService = RechargeService()
     val pointsService = PointsService()
-    val referralService = ReferralService()
+    val referralService = ReferralService(pointsService)
     val couponService = CouponService()
     val notificationService = NotificationService()
     val fileUploadService = FileUploadService()

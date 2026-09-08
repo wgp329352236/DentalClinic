@@ -179,7 +179,7 @@ fun Application.adminRouting() {
     val doctorService = DoctorService()
     val scheduleService = ScheduleService()
     val appointmentService = AppointmentAdminService()
-    val customerService = CustomerService()
+    val customerService = CustomerService(pointsService)
 
     routing {
         // Admin API

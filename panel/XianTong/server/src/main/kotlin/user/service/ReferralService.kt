@@ -16,7 +16,7 @@ import java.time.format.DateTimeFormatter
 /**
  * Referral service for user growth program.
  */
-class ReferralService : BaseService() {
+class ReferralService(private val pointsService: PointsService) : BaseService() {
 
     private val dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 
@@ -159,7 +159,7 @@ class ReferralService : BaseService() {
             val pointsEarned = rule[PointsRules.pointsPerUnit]
             val validityMonths = rule[PointsRules.validityMonths]
 
-            addPointsToUser(
+            pointsService.addPoints(
                 userId = referrerId,
                 amount = pointsEarned,
                 sourceType = "referral_registration",
@@ -207,7 +207,7 @@ class ReferralService : BaseService() {
             .singleOrNull()
         val pointsAmount = pointsRule?.get(PointsRules.pointsPerUnit) ?: 100
 
-        addPointsToUser(
+        pointsService.addPoints(
             userId = referrerId,
             amount = pointsAmount,
             sourceType = "referral_first_consumption",
@@ -296,7 +296,7 @@ class ReferralService : BaseService() {
                 .count() > 0
 
             if (!tierRewardExists) {
-                addPointsToUser(
+                pointsService.addPoints(
                     userId = referrerId,
                     amount = 200,
                     sourceType = "referral_tier_reward",
@@ -314,60 +314,6 @@ class ReferralService : BaseService() {
                     it[ReferralRewards.status] = "granted"
                     it[ReferralRewards.grantedAt] = LocalDateTime.now()
                 }
-            }
-        }
-    }
-
-    // ==================== Shared Helper ====================
-
-    /**
-     * Add points to a user: read current balance, insert record, update/create summary.
-     * Eliminates the repeated 14-line pattern across all reward methods.
-     */
-    private suspend fun addPointsToUser(
-        userId: Long,
-        amount: Int,
-        sourceType: String,
-        description: String,
-        validityMonths: Int
-    ) {
-        var currentBalance = UserPointsSummary.selectAll()
-            .where { UserPointsSummary.userId eq userId }
-            .toList()
-            .singleOrNull()
-            ?.get(UserPointsSummary.totalBalance) ?: 0
-
-        if (currentBalance == 0) {
-            currentBalance = PointsRecords.selectAll()
-                .where { PointsRecords.userId eq userId }
-                .toList()
-                .sumOf { it[PointsRecords.changeAmount] }
-        }
-
-        val newBalance = currentBalance + amount
-        val expiresAt = LocalDateTime.now().plusMonths(validityMonths.toLong())
-
-        PointsRecords.insert {
-            it[PointsRecords.userId] = userId
-            it[PointsRecords.changeAmount] = amount
-            it[PointsRecords.balanceAfter] = newBalance
-            it[PointsRecords.sourceType] = sourceType
-            it[PointsRecords.description] = description
-            it[PointsRecords.expiresAt] = expiresAt
-        }
-
-        val summaryExists = UserPointsSummary.selectAll()
-            .where { UserPointsSummary.userId eq userId }
-            .count() > 0
-
-        if (summaryExists) {
-            UserPointsSummary.update({ UserPointsSummary.userId eq userId }) {
-                it[UserPointsSummary.totalBalance] = newBalance
-            }
-        } else {
-            UserPointsSummary.insert {
-                it[UserPointsSummary.userId] = userId
-                it[UserPointsSummary.totalBalance] = newBalance
             }
         }
     }

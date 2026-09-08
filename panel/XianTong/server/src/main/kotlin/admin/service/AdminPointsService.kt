@@ -3,10 +3,7 @@ package com.dentalclinic.admin.service
 import com.dentalclinic.admin.entity.PointsRecords
 import com.dentalclinic.admin.entity.PointsRules
 import com.dentalclinic.admin.entity.UserPointsSummary
-import com.dentalclinic.config.DBConfig
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.toList
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
@@ -15,7 +12,6 @@ import org.jetbrains.exposed.v1.core.greaterEq
 import org.jetbrains.exposed.v1.core.lessEq
 import org.jetbrains.exposed.v1.r2dbc.insert
 import org.jetbrains.exposed.v1.r2dbc.selectAll
-import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
 import org.jetbrains.exposed.v1.r2dbc.update
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -23,14 +19,13 @@ import java.time.format.DateTimeFormatter
 /**
  * Admin points management service.
  */
-class AdminPointsService {
+class AdminPointsService : BaseService() {
 
     /**
      * Get all points rules.
      */
-    suspend fun getPointsRules(): List<PointsRuleDto> = withContext(Dispatchers.IO) {
-        suspendTransaction(DBConfig.database) {
-            PointsRules.selectAll()
+    suspend fun getPointsRules(): List<PointsRuleDto> = dbQuery {
+        PointsRules.selectAll()
                 .orderBy(PointsRules.id, SortOrder.ASC)
                 .toList()
                 .map { row ->
@@ -47,15 +42,13 @@ class AdminPointsService {
                         status = row[PointsRules.status]
                     )
                 }
-        }
     }
 
     /**
      * Create a new points rule.
      */
-    suspend fun createPointsRule(request: CreatePointsRuleRequest): Long = withContext(Dispatchers.IO) {
-        suspendTransaction(DBConfig.database) {
-            PointsRules.insert {
+    suspend fun createPointsRule(request: CreatePointsRuleRequest): Long = dbQuery {
+        PointsRules.insert {
                 it[ruleName] = request.ruleName
                 it[ruleType] = request.ruleType
                 it[actionType] = request.actionType
@@ -66,15 +59,13 @@ class AdminPointsService {
                 it[validityMonths] = request.validityMonths
                 it[status] = request.status
             } get PointsRules.id
-        }
     }
 
     /**
      * Update an existing points rule.
      */
-    suspend fun updatePointsRule(id: Long, request: UpdatePointsRuleRequest): Unit = withContext(Dispatchers.IO) {
-        suspendTransaction(DBConfig.database) {
-            PointsRules.update({ PointsRules.id eq id }) {
+    suspend fun updatePointsRule(id: Long, request: UpdatePointsRuleRequest): Unit = dbQuery {
+        PointsRules.update({ PointsRules.id eq id }) {
                 it[ruleName] = request.ruleName
                 it[ruleType] = request.ruleType
                 it[actionType] = request.actionType
@@ -85,65 +76,54 @@ class AdminPointsService {
                 it[validityMonths] = request.validityMonths
                 it[status] = request.status
             }
-        }
     }
 
     /**
-     * Adjust user's points manually.
+     * Add points to a user. Public API for other admin services to call.
+     * Delegates to BaseService.addPointsToUser for the core logic.
+     *
+     * @return the new balance after adjustment
      */
-    suspend fun adjustUserPoints(userId: Long, amount: Int, reason: String, operator: String): Unit = withContext(Dispatchers.IO) {
-        suspendTransaction(DBConfig.database) {
-            // Get current balance
-            var currentBalance = UserPointsSummary.selectAll()
-                .where { UserPointsSummary.userId eq userId }
-                .toList()
-                .singleOrNull()
-                ?.get(UserPointsSummary.totalBalance) ?: 0
+    suspend fun addPoints(
+        userId: Long,
+        amount: Int,
+        sourceType: String,
+        description: String,
+        validityMonths: Int = 12
+    ): Int = addPointsToUser(userId, amount, sourceType, description, validityMonths)
 
-            // If no summary exists, calculate from records
-            if (currentBalance == 0) {
-                currentBalance = PointsRecords.selectAll()
-                    .where { PointsRecords.userId eq userId }
-                    .toList()
-                    .sumOf { it[PointsRecords.changeAmount] }
-            }
-
-            val newBalance = currentBalance + amount
-
-            // Validate: balance cannot be negative
-            if (newBalance < 0) {
-                throw IllegalArgumentException("积分余额不足，当前余额：$currentBalance")
-            }
-
-            // Calculate expiresAt (default 12 months from now)
-            val expiresAt = LocalDateTime.now().plusMonths(12)
-
-            // Insert points record
-            PointsRecords.insert {
-                it[PointsRecords.userId] = userId
-                it[PointsRecords.changeAmount] = amount
-                it[PointsRecords.balanceAfter] = newBalance
-                it[PointsRecords.sourceType] = "admin_adjust"
-                it[PointsRecords.description] = "管理员手动调整：$reason（操作人：$operator）"
-                it[PointsRecords.expiresAt] = expiresAt
-            }
-
-            // Update or insert summary
-            val summaryExists = UserPointsSummary.selectAll()
-                .where { UserPointsSummary.userId eq userId }
-                .count() > 0
-
-            if (summaryExists) {
-                UserPointsSummary.update({ UserPointsSummary.userId eq userId }) {
-                    it[UserPointsSummary.totalBalance] = newBalance
-                }
-            } else {
-                UserPointsSummary.insert {
-                    it[UserPointsSummary.userId] = userId
-                    it[UserPointsSummary.totalBalance] = newBalance
-                }
-            }
+    /**
+     * Adjust user's points manually (admin operation with validation).
+     */
+    suspend fun adjustUserPoints(userId: Long, amount: Int, reason: String, operator: String): Unit = dbQuery {
+        // Pre-check: validate balance won't go negative
+        val currentBalance = getCurrentPointsBalance(userId)
+        val newBalance = currentBalance + amount
+        if (newBalance < 0) {
+            throw IllegalArgumentException("积分余额不足，当前余额：$currentBalance")
         }
+
+        addPoints(
+            userId = userId,
+            amount = amount,
+            sourceType = "admin_adjust",
+            description = "管理员手动调整：$reason（操作人：$operator）"
+        )
+    }
+
+    /** Read current points balance for a user (summary or fallback to records sum). */
+    private suspend fun getCurrentPointsBalance(userId: Long): Int {
+        val summary = UserPointsSummary.selectAll()
+            .where { UserPointsSummary.userId eq userId }
+            .toList()
+            .singleOrNull()
+            ?.get(UserPointsSummary.totalBalance)
+        if (summary != null && summary != 0) return summary
+
+        return PointsRecords.selectAll()
+            .where { PointsRecords.userId eq userId }
+            .toList()
+            .sumOf { it[PointsRecords.changeAmount] }
     }
 
     /**
@@ -156,9 +136,8 @@ class AdminPointsService {
         endDate: String?,
         page: Int,
         pageSize: Int
-    ): PointsRecordsResponse = withContext(Dispatchers.IO) {
-        suspendTransaction(DBConfig.database) {
-            var query = PointsRecords.selectAll()
+    ): PointsRecordsResponse = dbQuery {
+        var query = PointsRecords.selectAll()
 
             if (userId != null) {
                 query = query.where { PointsRecords.userId eq userId }
@@ -205,7 +184,6 @@ class AdminPointsService {
                 page = page,
                 pageSize = pageSize
             )
-        }
     }
 }
 

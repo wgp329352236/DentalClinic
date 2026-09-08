@@ -407,7 +407,7 @@ class AppointmentAdminService : BaseService() {
 /**
  * 客户管理（Admin 端）
  */
-class CustomerService : BaseService() {
+class CustomerService(private val pointsService: AdminPointsService) : BaseService() {
 
     suspend fun listCustomers(
         keyword: String?, clinicId: Long?
@@ -449,7 +449,7 @@ class CustomerService : BaseService() {
                 .associateBy { it[UserMemberLevels.userId] }
         } else emptyMap()
 
-        val levelIds = umlMap.values.mapNotNull { it[UserMemberLevels.levelId] }.distinct()
+        val levelIds = umlMap.values.map { it[UserMemberLevels.levelId] }.distinct()
         val levelsMap = if (levelIds.isNotEmpty()) {
             MemberLevels.selectAll()
                 .where { MemberLevels.id inList levelIds }
@@ -574,57 +574,11 @@ class CustomerService : BaseService() {
         }
     }
 
-    suspend fun adjustPoints(userId: Long, req: PointsAdjustRequest, operator: String): Unit = dbQuery {
+    suspend fun adjustPoints(userId: Long, req: PointsAdjustRequest, operator: String) {
         if (req.reason.isBlank()) {
             throw ValidationException("调整原因不能为空")
         }
-
-        // Get current balance
-        var currentBalance = UserPointsSummary.selectAll()
-            .where { UserPointsSummary.userId eq userId }
-            .toList()
-            .singleOrNull()
-            ?.get(UserPointsSummary.totalBalance) ?: 0
-
-        // If no summary exists, calculate from records
-        if (currentBalance == 0) {
-            currentBalance = PointsRecords.selectAll()
-                .where { PointsRecords.userId eq userId }
-                .toList()
-                .sumOf { it[PointsRecords.changeAmount] }
-        }
-
-        val newBalance = currentBalance + req.amount
-        if (newBalance < 0) {
-            throw ValidationException("积分余额不足，当前余额：$currentBalance")
-        }
-
-        val expiresAt = LocalDateTime.now().plusMonths(12)
-
-        // Insert points record
-        PointsRecords.insert {
-            it[PointsRecords.userId] = userId
-            it[PointsRecords.changeAmount] = req.amount
-            it[PointsRecords.balanceAfter] = newBalance
-            it[PointsRecords.sourceType] = "admin_adjust"
-            it[PointsRecords.description] = "管理员手动调整：${req.reason}（操作人：$operator）"
-            it[PointsRecords.expiresAt] = expiresAt
-        }
-
-        // Update or insert summary
-        val summaryExists = UserPointsSummary.selectAll()
-            .where { UserPointsSummary.userId eq userId }
-            .count() > 0
-
-        if (summaryExists) {
-            UserPointsSummary.update({ UserPointsSummary.userId eq userId }) {
-                it[UserPointsSummary.totalBalance] = newBalance
-            }
-        } else {
-            UserPointsSummary.insert {
-                it[UserPointsSummary.userId] = userId
-                it[UserPointsSummary.totalBalance] = newBalance
-            }
-        }
+        // Delegate to AdminPointsService for the actual points operation
+        pointsService.adjustUserPoints(userId, req.amount, req.reason, operator)
     }
 }
