@@ -2,20 +2,17 @@ package com.dentalclinic.user.service
 
 import com.dentalclinic.admin.entity.RechargeRecords
 import com.dentalclinic.admin.entity.UserWallets
-import com.dentalclinic.config.DBConfig
-import kotlinx.coroutines.Dispatchers
+import com.dentalclinic.common.BaseService
 import kotlinx.coroutines.flow.toList
-import kotlinx.coroutines.withContext
 import org.jetbrains.exposed.v1.core.*
 import org.jetbrains.exposed.v1.r2dbc.*
-import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
 import java.math.BigDecimal
 import java.time.LocalDateTime
 
 /**
  * Recharge service for user wallet top-up.
  */
-class RechargeService {
+class RechargeService : BaseService() {
 
     /**
      * Create a recharge order and simulate payment success.
@@ -29,40 +26,38 @@ class RechargeService {
             return RechargeResult.Error("单笔充值不能超过5000元")
         }
 
-        return withContext(Dispatchers.IO) {
-            suspendTransaction(DBConfig.database) {
-                // Calculate bonus based on tier rules
-                val bonusAmount = calculateBonus(amount)
+        return dbQuery {
+            // Calculate bonus based on tier rules
+            val bonusAmount = calculateBonus(amount)
 
-                // Create recharge record
-                val recordId = RechargeRecords.insert {
-                    it[RechargeRecords.userId] = userId
-                    it[RechargeRecords.clinicId] = clinicId
-                    it[RechargeRecords.amount] = amount
-                    it[RechargeRecords.bonusAmount] = bonusAmount
-                    it[RechargeRecords.paymentMethod] = "wechat"
-                    it[RechargeRecords.status] = "pending"
-                } get RechargeRecords.id
+            // Create recharge record
+            val recordId = RechargeRecords.insert {
+                it[RechargeRecords.userId] = userId
+                it[RechargeRecords.clinicId] = clinicId
+                it[RechargeRecords.amount] = amount
+                it[RechargeRecords.bonusAmount] = bonusAmount
+                it[RechargeRecords.paymentMethod] = "wechat"
+                it[RechargeRecords.status] = "pending"
+            } get RechargeRecords.id
 
-                // Simulate successful payment
-                val paidAt = LocalDateTime.now()
-                RechargeRecords.update({ RechargeRecords.id eq recordId }) {
-                    it[RechargeRecords.status] = "success"
-                    it[RechargeRecords.paidAt] = paidAt
-                    it[RechargeRecords.wechatOrderId] = "MOCK_WX_${System.currentTimeMillis()}"
-                }
-
-                // Update wallet balance with optimistic locking
-                updateWalletBalance(userId, amount, bonusAmount)
-
-                RechargeResult.Success(
-                    recordId = recordId,
-                    amount = amount.toDouble(),
-                    bonusAmount = bonusAmount.toDouble(),
-                    totalAdded = amount.add(bonusAmount).toDouble(),
-                    paidAt = paidAt.toString()
-                )
+            // Simulate successful payment
+            val paidAt = LocalDateTime.now()
+            RechargeRecords.update({ RechargeRecords.id eq recordId }) {
+                it[RechargeRecords.status] = "success"
+                it[RechargeRecords.paidAt] = paidAt
+                it[RechargeRecords.wechatOrderId] = "MOCK_WX_${System.currentTimeMillis()}"
             }
+
+            // Update wallet balance with optimistic locking
+            updateWalletBalance(userId, amount, bonusAmount)
+
+            RechargeResult.Success(
+                recordId = recordId,
+                amount = amount.toDouble(),
+                bonusAmount = bonusAmount.toDouble(),
+                totalAdded = amount.add(bonusAmount).toDouble(),
+                paidAt = paidAt.toString()
+            )
         }
     }
 

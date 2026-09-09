@@ -1,4 +1,4 @@
-package com.dentalclinic.admin.service
+package com.dentalclinic.common
 
 import com.dentalclinic.admin.entity.PointsRecords
 import com.dentalclinic.admin.entity.UserPointsSummary

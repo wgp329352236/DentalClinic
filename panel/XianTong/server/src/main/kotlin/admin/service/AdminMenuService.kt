@@ -5,6 +5,7 @@ import com.dentalclinic.admin.entity.AdminMenus
 import com.dentalclinic.admin.entity.AdminRoleMenus
 import com.dentalclinic.admin.util.NotFoundException
 import com.dentalclinic.admin.util.ValidationException
+import com.dentalclinic.common.BaseService
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.singleOrNull
 import kotlinx.coroutines.flow.toList

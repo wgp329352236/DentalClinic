@@ -8,6 +8,7 @@ import com.dentalclinic.admin.util.ConflictException
 import com.dentalclinic.admin.util.NotFoundException
 import com.dentalclinic.admin.util.ValidationException
 import com.dentalclinic.admin.util.toDisplayString
+import com.dentalclinic.common.BaseService
 import kotlinx.coroutines.flow.toList
 import org.jetbrains.exposed.v1.core.JoinType
 import org.jetbrains.exposed.v1.core.SortOrder

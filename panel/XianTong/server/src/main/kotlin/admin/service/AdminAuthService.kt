@@ -6,6 +6,7 @@ import com.dentalclinic.admin.auth.PasswordEncoder
 import com.dentalclinic.admin.dto.response.*
 import com.dentalclinic.admin.entity.*
 import com.dentalclinic.admin.util.AuthenticationException
+import com.dentalclinic.common.BaseService
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.toList
 import org.jetbrains.exposed.v1.core.JoinType

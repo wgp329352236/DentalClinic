@@ -1,14 +1,13 @@
 package com.dentalclinic.user.service
 
 import com.dentalclinic.admin.entity.UploadedFiles
-import com.dentalclinic.config.DBConfig
+import com.dentalclinic.common.BaseService
 import io.ktor.http.content.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withContext
 import org.jetbrains.exposed.v1.core.*
 import org.jetbrains.exposed.v1.r2dbc.*
-import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Paths
@@ -19,7 +18,7 @@ import java.util.*
 /**
  * File upload service for local storage.
  */
-class FileUploadService {
+class FileUploadService : BaseService() {
 
     private val uploadDir = System.getProperty("user.dir") + "/uploads"
     private val baseUrl = "/api/v1/files"
@@ -63,7 +62,7 @@ class FileUploadService {
                 val url = "$baseUrl/$newFileName"
 
                 // Record in database
-                suspendTransaction(DBConfig.database) {
+                dbQuery {
                     UploadedFiles.insert {
                         it[UploadedFiles.userId] = userId
                         it[UploadedFiles.fileName] = newFileName
@@ -86,16 +85,14 @@ class FileUploadService {
      */
     suspend fun deleteFile(userId: Long, fileName: String): FileDeleteResult {
         // Pre-check ownership
-        val fileRecord = withContext(Dispatchers.IO) {
-            suspendTransaction(DBConfig.database) {
-                UploadedFiles.selectAll()
-                    .where {
-                        (UploadedFiles.fileName eq fileName) and
-                        (UploadedFiles.userId eq userId)
-                    }
-                    .toList()
-                    .singleOrNull()
-            }
+        val fileRecord = dbQuery {
+            UploadedFiles.selectAll()
+                .where {
+                    (UploadedFiles.fileName eq fileName) and
+                    (UploadedFiles.userId eq userId)
+                }
+                .toList()
+                .singleOrNull()
         }
 
         if (fileRecord == null) {
@@ -111,7 +108,7 @@ class FileUploadService {
             }
 
             // Delete from database
-            suspendTransaction(DBConfig.database) {
+            dbQuery {
                 UploadedFiles.deleteWhere {
                     (UploadedFiles.fileName eq fileName) and
                     (UploadedFiles.userId eq userId)

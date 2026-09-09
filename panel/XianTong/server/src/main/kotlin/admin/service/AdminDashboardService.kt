@@ -2,6 +2,7 @@ package com.dentalclinic.admin.service
 
 import com.dentalclinic.admin.dto.response.*
 import com.dentalclinic.admin.entity.*
+import com.dentalclinic.common.BaseService
 import kotlinx.coroutines.flow.toList
 import org.jetbrains.exposed.v1.core.*
 import org.jetbrains.exposed.v1.r2dbc.selectAll

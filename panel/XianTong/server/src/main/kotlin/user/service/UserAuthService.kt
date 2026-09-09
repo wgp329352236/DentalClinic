@@ -2,30 +2,27 @@ package com.dentalclinic.user.service
 
 import com.dentalclinic.admin.entity.Users
 import com.dentalclinic.admin.entity.UserWallets
-import com.dentalclinic.config.DBConfig
+import com.dentalclinic.common.BaseService
 import com.dentalclinic.user.auth.UserJwtConfig
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.toList
-import kotlinx.coroutines.withContext
 import org.jetbrains.exposed.v1.core.*
 import org.jetbrains.exposed.v1.r2dbc.*
-import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
 import java.time.LocalDateTime
 
 /**
  * User authentication service for C-end patients.
  */
-class UserAuthService {
+class UserAuthService : BaseService() {
 
     /**
      * Login/register via WeChat code (simulated for testing).
      */
-    suspend fun wechatLogin(code: String): WechatLoginResponse = withContext(Dispatchers.IO) {
+    suspend fun wechatLogin(code: String): WechatLoginResponse {
         // Simulate WeChat code-to-openid exchange
         val openid = "mock_openid_${code}"
         val unionid: String? = null
 
-        suspendTransaction(DBConfig.database) {
+        return dbQuery {
             // Check if user exists
             val existingRow = Users.selectAll()
                 .where { Users.openid eq openid }
@@ -89,14 +86,12 @@ class UserAuthService {
 
         val userId = decoded.subject.toLong()
         // Get openid from user record since refresh token doesn't contain it
-        val openid = withContext(Dispatchers.IO) {
-            suspendTransaction(DBConfig.database) {
-                Users.selectAll()
-                    .where { Users.id eq userId }
-                    .toList()
-                    .singleOrNull()
-                    ?.get(Users.openid)
-            }
+        val openid = dbQuery {
+            Users.selectAll()
+                .where { Users.id eq userId }
+                .toList()
+                .singleOrNull()
+                ?.get(Users.openid)
         } ?: return null
 
         return UserJwtConfig.generateAccessToken(userId, openid)

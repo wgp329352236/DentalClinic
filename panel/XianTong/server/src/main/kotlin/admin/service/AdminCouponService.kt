@@ -2,7 +2,7 @@ package com.dentalclinic.admin.service
 
 import com.dentalclinic.admin.entity.CouponTemplates
 import com.dentalclinic.admin.entity.UserCoupons
-import com.dentalclinic.admin.entity.Users
+import com.dentalclinic.common.BaseService
 import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.SortOrder

@@ -3,7 +3,7 @@ package com.dentalclinic.user.service
 import com.dentalclinic.admin.entity.PointsRecords
 import com.dentalclinic.admin.entity.PointsRules
 import com.dentalclinic.admin.entity.UserPointsSummary
-import com.dentalclinic.admin.service.BaseService
+import com.dentalclinic.common.BaseService
 import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.SortOrder

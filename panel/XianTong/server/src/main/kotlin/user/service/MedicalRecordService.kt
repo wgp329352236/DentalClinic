@@ -5,7 +5,7 @@ import com.dentalclinic.admin.entity.Clinics
 import com.dentalclinic.admin.entity.ConsumptionRecords
 import com.dentalclinic.admin.entity.Departments
 import com.dentalclinic.admin.entity.Doctors
-import com.dentalclinic.admin.service.BaseService
+import com.dentalclinic.common.BaseService
 import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.SortOrder

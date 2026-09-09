@@ -1,7 +1,7 @@
 package com.dentalclinic.user.service
 
 import com.dentalclinic.admin.entity.*
-import com.dentalclinic.admin.service.BaseService
+import com.dentalclinic.common.BaseService
 import kotlinx.coroutines.flow.toList
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
