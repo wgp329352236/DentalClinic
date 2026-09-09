@@ -2,7 +2,7 @@ package com.dentalclinic.common
 
 import com.dentalclinic.admin.entity.PointsRecords
 import com.dentalclinic.admin.entity.UserPointsSummary
-import com.dentalclinic.config.DBConfig
+import com.dentalclinic.common.config.DBConfig
 import kotlinx.coroutines.flow.toList
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.r2dbc.insert

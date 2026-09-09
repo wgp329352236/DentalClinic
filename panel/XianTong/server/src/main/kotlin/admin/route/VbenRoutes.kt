@@ -4,7 +4,7 @@ import com.dentalclinic.admin.auth.adminPrincipal
 import com.dentalclinic.admin.auth.authenticated
 import com.dentalclinic.admin.entity.*
 import com.dentalclinic.admin.util.ok
-import com.dentalclinic.config.DBConfig
+import com.dentalclinic.common.config.DBConfig
 import io.ktor.server.routing.*
 import kotlinx.coroutines.flow.single
 import kotlinx.coroutines.flow.toList

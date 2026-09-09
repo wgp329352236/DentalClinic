@@ -1,6 +1,6 @@
 package com.dentalclinic.admin.auth
 
-import com.dentalclinic.config.GlobalConfig.appConfig
+import com.dentalclinic.common.config.GlobalConfig.appConfig
 import io.lettuce.core.RedisClient
 import io.lettuce.core.api.StatefulRedisConnection
 import io.lettuce.core.api.sync.RedisCommands

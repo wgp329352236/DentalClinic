@@ -1,4 +1,4 @@
-package com.dentalclinic.config
+package com.dentalclinic.common.config
 
 import io.ktor.server.config.*
 

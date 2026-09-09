@@ -1,7 +1,7 @@
 package com.dentalclinic.admin.service
 
 import com.dentalclinic.admin.entity.*
-import com.dentalclinic.config.DBConfig
+import com.dentalclinic.common.config.DBConfig
 import kotlinx.coroutines.flow.toList
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq

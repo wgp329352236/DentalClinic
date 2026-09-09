@@ -1,6 +1,6 @@
-package com.dentalclinic.config
+package com.dentalclinic.common.config
 
-import com.dentalclinic.config.GlobalConfig.appConfig
+import com.dentalclinic.common.config.GlobalConfig.appConfig
 import io.ktor.server.config.ApplicationConfig
 import org.jetbrains.exposed.v1.r2dbc.R2dbcDatabase
 import org.koin.core.error.MissingPropertyException

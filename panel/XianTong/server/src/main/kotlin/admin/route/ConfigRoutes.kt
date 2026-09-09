@@ -13,7 +13,7 @@ import com.dentalclinic.admin.entity.AdminNotificationHistories
 import com.dentalclinic.admin.entity.AdminNotificationRules
 import com.dentalclinic.admin.entity.AdminSystemConfigs
 import com.dentalclinic.admin.util.*
-import com.dentalclinic.config.DBConfig
+import com.dentalclinic.common.config.DBConfig
 import io.ktor.server.request.*
 import io.ktor.server.routing.*
 import kotlinx.coroutines.flow.map

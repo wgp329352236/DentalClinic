@@ -2,7 +2,7 @@ package com.dentalclinic.admin.util
 
 import com.dentalclinic.admin.auth.AdminPrincipalKey
 import com.dentalclinic.admin.entity.AdminAuditLogs
-import com.dentalclinic.config.DBConfig
+import com.dentalclinic.common.config.DBConfig
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*

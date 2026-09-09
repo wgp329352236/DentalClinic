@@ -1,7 +1,7 @@
 package com.dentalclinic.admin.service
 
 import com.dentalclinic.admin.entity.AdminAuditLogs
-import com.dentalclinic.config.DBConfig
+import com.dentalclinic.common.config.DBConfig
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.exposed.v1.core.LessOp
 import org.jetbrains.exposed.v1.core.QueryParameter

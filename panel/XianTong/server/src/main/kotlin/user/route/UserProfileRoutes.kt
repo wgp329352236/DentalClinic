@@ -3,7 +3,7 @@ package com.dentalclinic.user.route
 import com.dentalclinic.admin.dto.response.ApiResponse
 import com.dentalclinic.admin.entity.Users
 import com.dentalclinic.admin.entity.UserWallets
-import com.dentalclinic.config.DBConfig
+import com.dentalclinic.common.config.DBConfig
 import com.dentalclinic.user.auth.userAuthenticated
 import com.dentalclinic.user.auth.userId
 import io.ktor.server.application.*
