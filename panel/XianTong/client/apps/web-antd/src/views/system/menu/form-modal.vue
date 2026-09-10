@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, computed } from 'vue';
+import { computed, ref } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
 
@@ -13,7 +13,9 @@ const emit = defineEmits<{ success: [] }>();
 const mode = ref<'create' | 'edit'>('create');
 const editingId = ref<number>(0);
 
-const title = computed(() => mode.value === 'create' ? '新建菜单' : '编辑菜单');
+const title = computed(() =>
+  mode.value === 'create' ? '新建菜单' : '编辑菜单',
+);
 
 const [Form, formApi] = useVbenForm({
   showDefaultActions: false,
@@ -60,7 +62,7 @@ const [Form, formApi] = useVbenForm({
       component: 'Input',
       fieldName: 'permissionCode',
       label: '权限编码',
-      componentProps: { placeholder: 'game:list' },
+      componentProps: { placeholder: 'system:user:list' },
     },
     {
       component: 'Input',
@@ -81,7 +83,7 @@ const [Modal, modalApi] = useVbenModal({
   async onOpenChange(isOpen) {
     if (isOpen) {
       const data = modalApi.getData<{ mode: string; row?: any }>();
-      mode.value = data?.mode as any || 'create';
+      mode.value = (data?.mode as any) || 'create';
 
       if (mode.value === 'edit' && data?.row) {
         editingId.value = data.row.id;
@@ -92,6 +94,9 @@ const [Modal, modalApi] = useVbenModal({
     }
   },
   async onConfirm() {
+    // 表单声明了 required 规则，提交前必须校验，否则空表单会直接打到后端
+    const { valid } = await formApi.validate();
+    if (!valid) return;
     const values = await formApi.getValues();
     if (mode.value === 'create') {
       await createMenu(values);

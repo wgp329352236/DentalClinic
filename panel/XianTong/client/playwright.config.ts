@@ -1,6 +1,7 @@
-import { defineConfig, devices } from '@playwright/test';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { defineConfig, devices } from '@playwright/test';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,7 +28,7 @@ export default defineConfig({
 
   /* Expect timeout */
   expect: {
-    timeout: 5_000,
+    timeout: 5000,
   },
 
   /* Run tests in files in parallel */

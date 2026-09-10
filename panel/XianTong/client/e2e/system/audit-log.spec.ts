@@ -1,4 +1,5 @@
-import { test, expect } from '../fixtures/playwright-base';
+import { expectTableColumns } from '../fixtures/grid';
+import { expect, test } from '../fixtures/playwright-base';
 
 /**
  * Audit Log E2E Tests
@@ -11,6 +12,11 @@ import { test, expect } from '../fixtures/playwright-base';
  * - Filter by username, operation type, target resource
  * - Detail modal: click "详情", verify requestParams and userAgent displayed
  * - Pagination
+ *
+ * `reload` 一律用 `domcontentloaded`：Vite dev server 的按需编译与 HMR websocket
+ * 会让网络一直有活动，`networkidle` 实测会把 reload 卡到超时（notification
+ * 的 Req 16.3 就是这么红的，本文件这几处只是运气好）。每处后面都紧跟着
+ * `.vxe-table--body` 的显式等待，数据就绪与否由它判定。
  */
 
 const AUDIT_LOG_PATH = '/system/audit';
@@ -32,25 +38,20 @@ test.describe('Audit Log Page - Table Display', () => {
   test.beforeEach(async ({ base }) => {
     await base.navigateTo(AUDIT_LOG_PATH);
     // Wait for the vxe-table to load
-    await base.page.locator('.vxe-table--body').waitFor({ state: 'visible', timeout: 15000 });
+    await base.page
+      .locator('.vxe-table--body')
+      .waitFor({ state: 'visible', timeout: 15_000 });
   });
 
-  test('should display all expected table columns (Req 14.1)', async ({ base }) => {
-    // vxe-table renders column headers in .vxe-header--column elements
-    const headerCells = base.page.locator('.vxe-table--header .vxe-header--column .vxe-cell');
-    const count = await headerCells.count();
-    const columnTexts: string[] = [];
-    for (let i = 0; i < count; i++) {
-      const text = (await headerCells.nth(i).textContent())?.trim() ?? '';
-      if (text) columnTexts.push(text);
-    }
-
-    for (const expected of EXPECTED_COLUMNS) {
-      expect(columnTexts).toContain(expected);
-    }
+  test('should display all expected table columns (Req 14.1)', async ({
+    base,
+  }) => {
+    await expectTableColumns(base.page, EXPECTED_COLUMNS);
   });
 
-  test('should display red tag for "delete" operation type (Req 14.2)', async ({ base }) => {
+  test('should display red tag for "delete" operation type (Req 14.2)', async ({
+    base,
+  }) => {
     // Intercept the API to inject a row with operationType = 'delete'
     await base.page.route('**/api/admin/audit/logs**', async (route) => {
       const response = await route.fetch();
@@ -59,16 +60,31 @@ test.describe('Audit Log Page - Table Display', () => {
         json.data.list[0].operationType = 'delete';
       } else {
         json.data = {
-          list: [{ id: 1, username: 'admin', operationType: 'delete', targetResource: 'game', targetId: '1', responseCode: 200, ipAddress: '127.0.0.1', createdAt: '2024-01-01 12:00:00' }],
+          list: [
+            {
+              id: 1,
+              username: 'admin',
+              operationType: 'delete',
+              targetResource: 'game',
+              targetId: '1',
+              responseCode: 200,
+              ipAddress: '127.0.0.1',
+              createdAt: '2024-01-01 12:00:00',
+            },
+          ],
           total: 1,
         };
       }
       await route.fulfill({ json });
     });
-    await base.page.reload({ waitUntil: 'networkidle' });
-    await base.page.locator('.vxe-table--body').waitFor({ state: 'visible', timeout: 15000 });
+    await base.page.reload({ waitUntil: 'domcontentloaded' });
+    await base.page
+      .locator('.vxe-table--body')
+      .waitFor({ state: 'visible', timeout: 15_000 });
 
-    const firstRow = base.page.locator('.vxe-table--body .vxe-body--row').first();
+    const firstRow = base.page
+      .locator('.vxe-table--body .vxe-body--row')
+      .first();
     // operationType is 3rd column (index 2)
     const opTypeCell = firstRow.locator('.vxe-body--column').nth(2);
     const tag = opTypeCell.locator('.ant-tag');
@@ -78,7 +94,9 @@ test.describe('Audit Log Page - Table Display', () => {
     await expect(tag).toHaveClass(/ant-tag-error/);
   });
 
-  test('should display green tag for "create" operation type (Req 14.3)', async ({ base }) => {
+  test('should display green tag for "create" operation type (Req 14.3)', async ({
+    base,
+  }) => {
     await base.page.route('**/api/admin/audit/logs**', async (route) => {
       const response = await route.fetch();
       const json = await response.json();
@@ -86,16 +104,31 @@ test.describe('Audit Log Page - Table Display', () => {
         json.data.list[0].operationType = 'create';
       } else {
         json.data = {
-          list: [{ id: 1, username: 'admin', operationType: 'create', targetResource: 'user', targetId: '2', responseCode: 200, ipAddress: '127.0.0.1', createdAt: '2024-01-01 12:00:00' }],
+          list: [
+            {
+              id: 1,
+              username: 'admin',
+              operationType: 'create',
+              targetResource: 'user',
+              targetId: '2',
+              responseCode: 200,
+              ipAddress: '127.0.0.1',
+              createdAt: '2024-01-01 12:00:00',
+            },
+          ],
           total: 1,
         };
       }
       await route.fulfill({ json });
     });
-    await base.page.reload({ waitUntil: 'networkidle' });
-    await base.page.locator('.vxe-table--body').waitFor({ state: 'visible', timeout: 15000 });
+    await base.page.reload({ waitUntil: 'domcontentloaded' });
+    await base.page
+      .locator('.vxe-table--body')
+      .waitFor({ state: 'visible', timeout: 15_000 });
 
-    const firstRow = base.page.locator('.vxe-table--body .vxe-body--row').first();
+    const firstRow = base.page
+      .locator('.vxe-table--body .vxe-body--row')
+      .first();
     const opTypeCell = firstRow.locator('.vxe-body--column').nth(2);
     const tag = opTypeCell.locator('.ant-tag');
     await expect(tag).toBeVisible();
@@ -104,7 +137,9 @@ test.describe('Audit Log Page - Table Display', () => {
     await expect(tag).toHaveClass(/ant-tag-success/);
   });
 
-  test('should display blue tag for other operation types (Req 14.4)', async ({ base }) => {
+  test('should display blue tag for other operation types (Req 14.4)', async ({
+    base,
+  }) => {
     await base.page.route('**/api/admin/audit/logs**', async (route) => {
       const response = await route.fetch();
       const json = await response.json();
@@ -112,16 +147,31 @@ test.describe('Audit Log Page - Table Display', () => {
         json.data.list[0].operationType = 'update';
       } else {
         json.data = {
-          list: [{ id: 1, username: 'admin', operationType: 'update', targetResource: 'config', targetId: '3', responseCode: 200, ipAddress: '127.0.0.1', createdAt: '2024-01-01 12:00:00' }],
+          list: [
+            {
+              id: 1,
+              username: 'admin',
+              operationType: 'update',
+              targetResource: 'config',
+              targetId: '3',
+              responseCode: 200,
+              ipAddress: '127.0.0.1',
+              createdAt: '2024-01-01 12:00:00',
+            },
+          ],
           total: 1,
         };
       }
       await route.fulfill({ json });
     });
-    await base.page.reload({ waitUntil: 'networkidle' });
-    await base.page.locator('.vxe-table--body').waitFor({ state: 'visible', timeout: 15000 });
+    await base.page.reload({ waitUntil: 'domcontentloaded' });
+    await base.page
+      .locator('.vxe-table--body')
+      .waitFor({ state: 'visible', timeout: 15_000 });
 
-    const firstRow = base.page.locator('.vxe-table--body .vxe-body--row').first();
+    const firstRow = base.page
+      .locator('.vxe-table--body .vxe-body--row')
+      .first();
     const opTypeCell = firstRow.locator('.vxe-body--column').nth(2);
     const tag = opTypeCell.locator('.ant-tag');
     await expect(tag).toBeVisible();
@@ -134,7 +184,9 @@ test.describe('Audit Log Page - Table Display', () => {
 test.describe('Audit Log Page - Filters', () => {
   test.beforeEach(async ({ base }) => {
     await base.navigateTo(AUDIT_LOG_PATH);
-    await base.page.locator('.vxe-table--body').waitFor({ state: 'visible', timeout: 15000 });
+    await base.page
+      .locator('.vxe-table--body')
+      .waitFor({ state: 'visible', timeout: 15_000 });
   });
 
   test('should filter by username (Req 14.5)', async ({ base }) => {
@@ -143,8 +195,10 @@ test.describe('Audit Log Page - Filters', () => {
     await expect(usernameInput).toBeVisible();
 
     // Listen for the API request to verify the username filter is sent
-    const requestPromise = base.page.waitForRequest((req) =>
-      req.url().includes('/api/admin/audit/logs') && req.url().includes('username'),
+    const requestPromise = base.page.waitForRequest(
+      (req) =>
+        req.url().includes('/api/admin/audit/logs') &&
+        req.url().includes('username'),
     );
 
     await usernameInput.fill('admin');
@@ -154,19 +208,26 @@ test.describe('Audit Log Page - Filters', () => {
     expect(request.url()).toContain('username=admin');
 
     // Wait for table to update
-    await base.page.waitForResponse((res) =>
-      res.url().includes('/api/admin/audit/logs') && res.status() === 200,
+    await base.page.waitForResponse(
+      (res) =>
+        res.url().includes('/api/admin/audit/logs') && res.status() === 200,
     );
   });
 
   test('should filter by operation type (Req 14.6)', async ({ base }) => {
     // Find the operation type select
-    const selectTrigger = base.page.locator('.ant-select').filter({ hasText: '全部' }).first();
+    const selectTrigger = base.page
+      .locator('.ant-select')
+      .filter({ hasText: '全部' })
+      .first();
 
     // If not found by text, try by the form field
     const operationTypeSelect = selectTrigger.isVisible()
       ? selectTrigger
-      : base.page.locator('.ant-form-item').filter({ hasText: '操作类型' }).locator('.ant-select');
+      : base.page
+          .locator('.ant-form-item')
+          .filter({ hasText: '操作类型' })
+          .locator('.ant-select');
 
     await operationTypeSelect.click();
 
@@ -175,11 +236,16 @@ test.describe('Audit Log Page - Filters', () => {
     await dropdown.waitFor({ state: 'visible', timeout: 5000 });
 
     // Listen for the API request with operationType filter
-    const requestPromise = base.page.waitForRequest((req) =>
-      req.url().includes('/api/admin/audit/logs') && req.url().includes('operationType'),
+    const requestPromise = base.page.waitForRequest(
+      (req) =>
+        req.url().includes('/api/admin/audit/logs') &&
+        req.url().includes('operationType'),
     );
 
-    await dropdown.locator('.ant-select-item').filter({ hasText: '创建' }).click();
+    await dropdown
+      .locator('.ant-select-item')
+      .filter({ hasText: '创建' })
+      .click();
 
     const request = await requestPromise;
     expect(request.url()).toContain('operationType=create');
@@ -191,8 +257,10 @@ test.describe('Audit Log Page - Filters', () => {
     await expect(resourceInput).toBeVisible();
 
     // Listen for the API request to verify the targetResource filter is sent
-    const requestPromise = base.page.waitForRequest((req) =>
-      req.url().includes('/api/admin/audit/logs') && req.url().includes('targetResource'),
+    const requestPromise = base.page.waitForRequest(
+      (req) =>
+        req.url().includes('/api/admin/audit/logs') &&
+        req.url().includes('targetResource'),
     );
 
     await resourceInput.fill('game');
@@ -202,8 +270,9 @@ test.describe('Audit Log Page - Filters', () => {
     expect(request.url()).toContain('targetResource=game');
 
     // Wait for table to update
-    await base.page.waitForResponse((res) =>
-      res.url().includes('/api/admin/audit/logs') && res.status() === 200,
+    await base.page.waitForResponse(
+      (res) =>
+        res.url().includes('/api/admin/audit/logs') && res.status() === 200,
     );
   });
 });
@@ -211,49 +280,54 @@ test.describe('Audit Log Page - Filters', () => {
 test.describe('Audit Log Page - Detail Modal', () => {
   test.beforeEach(async ({ base }) => {
     await base.navigateTo(AUDIT_LOG_PATH);
-    await base.page.locator('.vxe-table--body').waitFor({ state: 'visible', timeout: 15000 });
+    await base.page
+      .locator('.vxe-table--body')
+      .waitFor({ state: 'visible', timeout: 15_000 });
   });
 
-  test('should open detail modal with requestParams and userAgent when clicking "详情" (Req 14.8)', async ({ base }) => {
+  test('should open detail modal with requestParams and userAgent when clicking "详情" (Req 14.8)', async ({
+    base,
+  }) => {
     // Intercept the detail API to ensure we have known data
     await base.page.route('**/api/admin/audit/logs/*', async (route) => {
       // Only intercept GET requests for detail (not the list endpoint)
       const url = route.request().url();
-      if (route.request().method() === 'GET' && /\/audit\/logs\/\d+$/.test(url)) {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            code: 0,
-            data: {
-              id: 1,
-              username: 'admin',
-              operationType: 'create',
-              targetResource: 'game',
-              targetId: '100',
-              responseCode: 200,
-              ipAddress: '192.168.1.1',
-              userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
-              requestParams: '{"code":"TEST_GAME","name":"Test Game"}',
-              createdAt: '2024-06-15 10:30:00',
-            },
-            message: 'success',
-          }),
-        });
-      } else {
-        await route.continue();
-      }
+      await (route.request().method() === 'GET' &&
+      /\/audit\/logs\/\d+$/.test(url)
+        ? route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              code: 0,
+              data: {
+                id: 1,
+                username: 'admin',
+                operationType: 'create',
+                targetResource: 'game',
+                targetId: '100',
+                responseCode: 200,
+                ipAddress: '192.168.1.1',
+                userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+                requestParams: '{"code":"TEST_GAME","name":"Test Game"}',
+                createdAt: '2024-06-15 10:30:00',
+              },
+              message: 'success',
+            }),
+          })
+        : route.continue());
     });
 
     // Click the "详情" button on the first row
-    const firstRow = base.page.locator('.vxe-table--body .vxe-body--row').first();
+    const firstRow = base.page
+      .locator('.vxe-table--body .vxe-body--row')
+      .first();
     const detailBtn = firstRow.getByRole('button', { name: '详情' });
     await expect(detailBtn).toBeVisible();
     await detailBtn.click();
 
     // Wait for the modal to appear
     const modal = base.page.locator('[role="dialog"]').last();
-    await modal.waitFor({ state: 'visible', timeout: 10000 });
+    await modal.waitFor({ state: 'visible', timeout: 10_000 });
 
     // Verify modal title
     await expect(modal).toContainText('审计日志详情');
@@ -271,18 +345,23 @@ test.describe('Audit Log Page - Detail Modal', () => {
 test.describe('Audit Log Page - Pagination', () => {
   test.beforeEach(async ({ base }) => {
     await base.navigateTo(AUDIT_LOG_PATH);
-    await base.page.locator('.vxe-table--body').waitFor({ state: 'visible', timeout: 15000 });
+    await base.page
+      .locator('.vxe-table--body')
+      .waitFor({ state: 'visible', timeout: 15_000 });
   });
 
-  test('should update data when clicking pagination controls (Req 14.9)', async ({ base }) => {
+  test('should update data when clicking pagination controls (Req 14.9)', async ({
+    base,
+  }) => {
     // Check if pagination exists (requires more than one page of data)
     const pager = base.page.locator('.vxe-pager');
     const pagerVisible = await pager.isVisible().catch(() => false);
 
     if (pagerVisible) {
       // Listen for API request with page parameter
-      const responsePromise = base.page.waitForResponse((res) =>
-        res.url().includes('/api/admin/audit/logs') && res.status() === 200,
+      const responsePromise = base.page.waitForResponse(
+        (res) =>
+          res.url().includes('/api/admin/audit/logs') && res.status() === 200,
       );
 
       // Click next page button
@@ -300,15 +379,20 @@ test.describe('Audit Log Page - Pagination', () => {
     }
   });
 
-  test('should display paginated audit logs in descending time order (Req 14.9, 14.10)', async ({ base }) => {
+  test('should display paginated audit logs in descending time order (Req 14.9, 14.10)', async ({
+    base,
+  }) => {
     // Intercept the API to verify the response structure
-    const responsePromise = base.page.waitForResponse((res) =>
-      res.url().includes('/api/admin/audit/logs') && res.status() === 200,
+    const responsePromise = base.page.waitForResponse(
+      (res) =>
+        res.url().includes('/api/admin/audit/logs') && res.status() === 200,
     );
 
     // Trigger a fresh data load
-    await base.page.reload({ waitUntil: 'networkidle' });
-    await base.page.locator('.vxe-table--body').waitFor({ state: 'visible', timeout: 15000 });
+    await base.page.reload({ waitUntil: 'domcontentloaded' });
+    await base.page
+      .locator('.vxe-table--body')
+      .waitFor({ state: 'visible', timeout: 15_000 });
 
     const response = await responsePromise;
     const json = await response.json();

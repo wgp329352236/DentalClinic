@@ -79,7 +79,7 @@ fun Route.configRoutes() {
                                 isEnabled = row[AdminNotificationRules.isEnabled],
                                 createdAt = row[AdminNotificationRules.createdAt].toDisplayString() ?: ""
                             )
-                        }
+                        }.toList()
                     }
                     call.ok(rules)
                 }

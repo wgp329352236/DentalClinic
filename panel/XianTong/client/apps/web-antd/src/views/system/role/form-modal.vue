@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, computed } from 'vue';
+import { computed, ref } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
 
@@ -15,7 +15,9 @@ const editingId = ref<number>(0);
 const permTree = ref<any[]>([]);
 const checkedKeys = ref<number[]>([]);
 
-const title = computed(() => mode.value === 'create' ? '新建角色' : '编辑角色');
+const title = computed(() =>
+  mode.value === 'create' ? '新建角色' : '编辑角色',
+);
 
 const [Form, formApi] = useVbenForm({
   showDefaultActions: false,
@@ -47,7 +49,7 @@ const [Modal, modalApi] = useVbenModal({
   async onOpenChange(isOpen) {
     if (isOpen) {
       const data = modalApi.getData<{ mode: string; row?: any }>();
-      mode.value = data?.mode as any || 'create';
+      mode.value = (data?.mode as any) || 'create';
 
       // 加载权限树
       const groups = await getAllPermissions();
@@ -75,8 +77,13 @@ const [Modal, modalApi] = useVbenModal({
     }
   },
   async onConfirm() {
+    // 表单声明了 required 规则，提交前必须校验，否则空表单会直接打到后端
+    const { valid } = await formApi.validate();
+    if (!valid) return;
     const values = await formApi.getValues();
-    const permissionIds = checkedKeys.value.filter(k => typeof k === 'number');
+    const permissionIds = checkedKeys.value.filter(
+      (k) => typeof k === 'number',
+    );
 
     if (mode.value === 'create') {
       await createRole({ ...values, permissionIds });
@@ -97,7 +104,7 @@ const [Modal, modalApi] = useVbenModal({
     <div class="mt-4">
       <div class="mb-2 font-medium">权限分配</div>
       <Tree
-        v-model:checkedKeys="checkedKeys"
+        v-model:checked-keys="checkedKeys"
         :tree-data="permTree"
         checkable
         default-expand-all

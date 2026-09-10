@@ -1,4 +1,8 @@
-import { test, expect, API_BASE_URL } from '../fixtures/playwright-base';
+import type { Page } from '@playwright/test';
+
+import { dialog, dialogConfirmButton } from '../fixtures/dialog';
+import { expectTableColumns, gridRows, waitGridReady } from '../fixtures/grid';
+import { expect, test } from '../fixtures/playwright-base';
 
 /**
  * Role Management E2E Tests
@@ -13,45 +17,66 @@ import { test, expect, API_BASE_URL } from '../fixtures/playwright-base';
  * - Non-system role delete confirmation and deletion
  * - Permission count tag (blue Tag)
  * - System role tag (red Tag for system, default for non-system)
+ *
+ * 登录统一交给 `base` fixture（经 authenticatedPage 已带登录态）。这里曾经自带
+ * 一个 `authenticateAndNavigate`，手工跑一遍 login 再写 localStorage，存在三个
+ * 问题：把 Pinia namespace `vben-web-antd-5.7.0-dev` 写死（版本号一变就默默
+ * 失效）、把 dev server 地址写死、并用 `reload({ waitUntil: 'networkidle' })`
+ * 收尾——Vite dev server 下网络永远不会空闲，实测就是它把 Req 10.1 / 10.11 /
+ * 10.3 全部卡在 beforeEach 超时。
  */
 
 const ROLE_MANAGEMENT_PATH = '/system/role';
 
 /**
- * Helper to authenticate and inject tokens into the correct localStorage key.
- * The Vben Admin app uses Pinia persisted state with key: `vben-web-antd-5.7.0-dev-core-access`
+ * mock 出「一个系统角色 + 一个非系统角色」。
+ *
+ * 种子库里只有 super_admin 一个角色，而它是系统角色（`isSystem` 为真时删除键
+ * 本就 disabled）。于是非系统角色相关的断言在真实数据下永远无法执行：Req 10.8
+ * 长期挂在 `test.skip()` 上、一次都没真跑过，Req 10.11 的
+ * `foundSystemRole || foundNonSystemRole` 也只验证了前一半。这里给两个用例铺上
+ * 确定的数据，让它们真的跑起来。
  */
-async function authenticateAndNavigate(base: any, path: string) {
-  const loginResp = await base.page.request.post(`${API_BASE_URL}/api/admin/auth/login`, {
-    data: { username: 'admin', password: 'admin123' },
+async function mockRoleList(page: Page): Promise<void> {
+  await page.route('**/api/admin/roles', async (route) => {
+    await (route.request().method() === 'GET'
+      ? route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: [
+              {
+                id: 1,
+                roleCode: 'super_admin',
+                roleName: '超级管理员',
+                description: '拥有所有权限',
+                permissions: ['system:user:list', 'system:role:list'],
+                isSystem: true,
+                createdAt: '2026-08-28 18:45:48',
+              },
+              {
+                id: 2,
+                roleCode: 'editor',
+                roleName: '内容编辑',
+                description: 'E2E 用的非系统角色',
+                permissions: ['system:user:list'],
+                isSystem: false,
+                createdAt: '2026-08-28 18:46:00',
+              },
+            ],
+            message: 'success',
+          }),
+        })
+      : route.continue());
   });
-  const loginBody = await loginResp.json();
-  const token = loginBody.data.accessToken;
-  const refreshToken = loginBody.data.refreshToken;
+}
 
-  // Navigate to the app to set localStorage
-  await base.page.goto('http://localhost:5666', { waitUntil: 'domcontentloaded' });
-  await base.page.waitForTimeout(500);
-
-  // Inject tokens into localStorage with the correct Pinia persisted state key
-  await base.page.evaluate(
-    ({ accessToken, refresh }: { accessToken: string; refresh: string }) => {
-      const namespace = 'vben-web-antd-5.7.0-dev';
-      localStorage.setItem(
-        `${namespace}-core-access`,
-        JSON.stringify({ accessToken, refreshToken: refresh, accessCodes: [] }),
-      );
-    },
-    { accessToken: token, refresh: refreshToken },
-  );
-
-  // Reload to pick up the tokens
-  await base.page.reload({ waitUntil: 'networkidle' });
-
-  // Navigate to the target page
-  await base.navigateTo(path);
-  // Wait for the vxe-grid table to load
-  await base.page.locator('.vxe-table--body').first().waitFor({ state: 'visible', timeout: 15000 });
+/** 系统角色列（index 4）渲染的 Tag，文案是「是」/「否」。 */
+function rowsBySystemFlag(page: Page, flag: '否' | '是') {
+  return gridRows(page).filter({
+    has: page.locator('.ant-tag', { hasText: flag }),
+  });
 }
 
 // Expected column headers per Requirement 10.1
@@ -67,27 +92,26 @@ const EXPECTED_COLUMNS = [
 
 test.describe('Role Management Page - Table Display', () => {
   test.beforeEach(async ({ base }) => {
-    await authenticateAndNavigate(base, ROLE_MANAGEMENT_PATH);
+    await mockRoleList(base.page);
+    await base.navigateTo(ROLE_MANAGEMENT_PATH);
+    await waitGridReady(base.page);
   });
 
-  test('should display all expected table columns (Req 10.1)', async ({ base }) => {
-    // vxe-table renders column headers in .vxe-header--column elements
-    const headerCells = base.page.locator('.vxe-table--header .vxe-header--column .vxe-cell');
-    const count = await headerCells.count();
-    const columnTexts: string[] = [];
-    for (let i = 0; i < count; i++) {
-      const text = (await headerCells.nth(i).textContent())?.trim() ?? '';
-      if (text) columnTexts.push(text);
-    }
-
-    for (const expected of EXPECTED_COLUMNS) {
-      expect(columnTexts).toContain(expected);
-    }
+  test('should display all expected table columns (Req 10.1)', async ({
+    base,
+  }) => {
+    // 旧写法先 `headerCells.count()` 再逐个 `nth(i).textContent()` 收集文案：
+    // mock 数据到达后 vxe 会把 `fixed:'right'` 的操作列拆进冻结表、多出一份
+    // 表头副本，count 读到的瞬时数量因此可能大于最终数量，nth(i) 就永远等不到。
+    await expectTableColumns(base.page, EXPECTED_COLUMNS);
   });
 
-  test('should display blue Tag with permission count (Req 10.10)', async ({ base }) => {
+  test('should display blue Tag with permission count (Req 10.10)', async ({
+    base,
+  }) => {
     // The permission count column uses a blue Tag to display the count
-    const firstRow = base.page.locator('.vxe-table--body .vxe-body--row').first();
+    const firstRow = gridRows(base.page).first();
+    await expect(firstRow).toBeVisible();
     // permissions column is the 4th column (index 3)
     const permCountCell = firstRow.locator('.vxe-body--column').nth(3);
     const tag = permCountCell.locator('.ant-tag');
@@ -100,53 +124,49 @@ test.describe('Role Management Page - Table Display', () => {
     expect(text?.trim()).toMatch(/^\d+$/);
   });
 
-  test('should display red Tag for system roles and default for non-system (Req 10.11)', async ({ base }) => {
-    const rows = base.page.locator('.vxe-table--body .vxe-body--row');
-    const rowCount = await rows.count();
+  test('should display red Tag for system roles and default for non-system (Req 10.11)', async ({
+    base,
+  }) => {
+    // 旧写法手动遍历行，行定位又用了 `.vxe-table--body .vxe-body--row`、且
+    // `count()` 不会自动等待；断言还是 `foundSystemRole || foundNonSystemRole`，
+    // 意味着两类角色只要命中一类就算过。现在数据是确定的（mockRoleList），
+    // 两类都必须验到。
+    const systemTag = rowsBySystemFlag(base.page, '是')
+      .first()
+      .locator('.vxe-body--column')
+      .nth(4)
+      .locator('.ant-tag');
+    await expect(systemTag).toBeVisible();
+    await expect(systemTag).toHaveAttribute('class', /ant-tag-red/);
 
-    let foundSystemRole = false;
-    let foundNonSystemRole = false;
-
-    for (let i = 0; i < rowCount; i++) {
-      const row = rows.nth(i);
-      // isSystem column is the 5th column (index 4)
-      const isSystemCell = row.locator('.vxe-body--column').nth(4);
-      const tag = isSystemCell.locator('.ant-tag');
-      const tagText = await tag.textContent();
-
-      if (tagText?.trim() === '是') {
-        // System role should have red tag
-        await expect(tag).toHaveAttribute('class', /ant-tag-red/);
-        foundSystemRole = true;
-      } else if (tagText?.trim() === '否') {
-        // Non-system role should have default tag (no color class or 'default')
-        const classAttr = await tag.getAttribute('class') ?? '';
-        expect(classAttr).not.toMatch(/ant-tag-red/);
-        foundNonSystemRole = true;
-      }
-
-      if (foundSystemRole && foundNonSystemRole) break;
-    }
-
-    // At least one type should be found in the data
-    expect(foundSystemRole || foundNonSystemRole).toBe(true);
+    const normalTag = rowsBySystemFlag(base.page, '否')
+      .first()
+      .locator('.vxe-body--column')
+      .nth(4)
+      .locator('.ant-tag');
+    await expect(normalTag).toBeVisible();
+    const classAttr = (await normalTag.getAttribute('class')) ?? '';
+    expect(classAttr).not.toMatch(/ant-tag-red/);
   });
 });
 
 test.describe('Role Management Page - Create Role Modal', () => {
   test.beforeEach(async ({ base }) => {
-    await authenticateAndNavigate(base, ROLE_MANAGEMENT_PATH);
+    await base.navigateTo(ROLE_MANAGEMENT_PATH);
+    await waitGridReady(base.page);
   });
 
-  test('should open create modal with form fields and permission tree (Req 10.2, 10.3)', async ({ base }) => {
+  test('should open create modal with form fields and permission tree (Req 10.2, 10.3)', async ({
+    base,
+  }) => {
     // Click the "新建角色" button
     const createBtn = base.page.getByRole('button', { name: '新建角色' });
     await expect(createBtn).toBeVisible();
     await createBtn.click();
 
     // Wait for modal to appear
-    const modal = base.page.locator('[role="dialog"]').last();
-    await modal.waitFor({ state: 'visible', timeout: 10000 });
+    const modal = dialog(base.page);
+    await modal.waitFor({ state: 'visible', timeout: 10_000 });
 
     // Verify modal title
     await expect(modal).toContainText('新建角色');
@@ -163,25 +183,29 @@ test.describe('Role Management Page - Create Role Modal', () => {
     await expect(tree).toBeVisible();
   });
 
-  test('should fill form and submit to create a role (Req 10.3)', async ({ base }) => {
+  test('should fill form and submit to create a role (Req 10.3)', async ({
+    base,
+  }) => {
     // Intercept create API to simulate success
     await base.page.route('**/api/admin/roles', async (route) => {
-      if (route.request().method() === 'POST') {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ code: 0, data: { id: 999 }, message: 'success' }),
-        });
-      } else {
-        await route.continue();
-      }
+      await (route.request().method() === 'POST'
+        ? route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              code: 0,
+              data: { id: 999 },
+              message: 'success',
+            }),
+          })
+        : route.continue());
     });
 
     // Click the "新建角色" button
     await base.page.getByRole('button', { name: '新建角色' }).click();
 
-    const modal = base.page.locator('[role="dialog"]').last();
-    await modal.waitFor({ state: 'visible', timeout: 10000 });
+    const modal = dialog(base.page);
+    await modal.waitFor({ state: 'visible', timeout: 10_000 });
 
     // Fill roleCode
     const roleCodeInput = modal.locator('input[placeholder="如 editor"]');
@@ -196,43 +220,59 @@ test.describe('Role Management Page - Create Role Modal', () => {
     await descInput.fill('E2E测试用角色');
 
     // Select some permissions from the tree (click first checkbox)
+    // 旧写法用 `if (checkboxCount > 0)` 包着，权限树没渲染时就静默跳过，
+    // 用例照样「通过」，实际一个权限都没勾。
     const treeCheckboxes = modal.locator('.ant-tree-checkbox');
-    const checkboxCount = await treeCheckboxes.count();
-    if (checkboxCount > 0) {
-      await treeCheckboxes.first().click();
-    }
+    await expect(treeCheckboxes.first()).toBeVisible();
+    await treeCheckboxes.first().click();
 
     // Listen for the list refresh after modal closes
-    const refreshPromise = base.page.waitForResponse((res) =>
-      res.url().includes('/api/admin/roles') && res.request().method() === 'GET',
+    const refreshPromise = base.page.waitForResponse(
+      (res) =>
+        res.url().includes('/api/admin/roles') &&
+        res.request().method() === 'GET',
+      { timeout: 10_000 },
     );
 
-    // Submit the form via the modal confirm button
-    const confirmBtn = modal.getByRole('button', { name: /确定|确认/ });
-    await confirmBtn.click();
+    // Submit the form via the modal confirm button。antd Button 会在两个中文
+    // 字符之间插空格，确认键的可访问名是「确 认」，`/确定|确认/` 匹配不到。
+    await dialogConfirmButton(modal).click();
 
     // Verify success message
-    await base.page.locator('.ant-message-success').waitFor({ state: 'visible', timeout: 5000 });
+    await base.page
+      .locator('.ant-message-success')
+      .waitFor({ state: 'visible', timeout: 5000 });
 
-    // Verify list refresh was triggered
-    const refreshResponse = await refreshPromise.catch(() => null);
-    if (refreshResponse) {
-      expect(refreshResponse.url()).toContain('/api/admin/roles');
-    }
+    // 列表必须真的重新拉过数据。旧写法 `.catch(() => null)` 再加 `if` 把超时
+    // 变成静默通过，等于没测。
+    const refreshResponse = await refreshPromise;
+    expect(refreshResponse.url()).toContain('/api/admin/roles');
   });
 });
 
 test.describe('Role Management Page - Edit Role Modal', () => {
   test.beforeEach(async ({ base }) => {
-    await authenticateAndNavigate(base, ROLE_MANAGEMENT_PATH);
+    await base.navigateTo(ROLE_MANAGEMENT_PATH);
+    await waitGridReady(base.page);
   });
 
-  test('should open edit modal with pre-filled data and selected permissions (Req 10.4)', async ({ base }) => {
-    const firstRow = base.page.locator('.vxe-table--body .vxe-body--row').first();
+  test('should open edit modal with pre-filled data and selected permissions (Req 10.4)', async ({
+    base,
+  }) => {
+    const firstRow = gridRows(base.page).first();
+    await expect(firstRow).toBeVisible();
 
     // Get the role data from the first row for verification
-    const roleCode = (await firstRow.locator('.vxe-body--column').nth(0).textContent())?.trim();
-    const roleName = (await firstRow.locator('.vxe-body--column').nth(1).textContent())?.trim();
+    const roleCodeRaw = await firstRow
+      .locator('.vxe-body--column')
+      .nth(0)
+      .textContent();
+    const roleCode = roleCodeRaw?.trim();
+    const roleNameRaw = await firstRow
+      .locator('.vxe-body--column')
+      .nth(1)
+      .textContent();
+    const roleName = roleNameRaw?.trim();
 
     // Click the "编辑" button in the first row
     const editBtn = firstRow.getByRole('button', { name: '编辑' });
@@ -240,8 +280,8 @@ test.describe('Role Management Page - Edit Role Modal', () => {
     await editBtn.click();
 
     // Wait for modal to appear
-    const modal = base.page.locator('[role="dialog"]').last();
-    await modal.waitFor({ state: 'visible', timeout: 10000 });
+    const modal = dialog(base.page);
+    await modal.waitFor({ state: 'visible', timeout: 10_000 });
 
     // Verify modal title
     await expect(modal).toContainText('编辑角色');
@@ -253,90 +293,76 @@ test.describe('Role Management Page - Edit Role Modal', () => {
     const roleNameInput = modal.locator('input[placeholder="请输入角色名称"]');
     await expect(roleNameInput).toHaveValue(roleName ?? '');
 
-    // Verify permission tree is visible and has checked items
+    // Verify permission tree is visible and really rendered checkable nodes
     const tree = modal.locator('.ant-tree');
     await expect(tree).toBeVisible();
+    const checkboxCount = await modal.locator('.ant-tree-checkbox').count();
+    expect(checkboxCount).toBeGreaterThan(0);
 
-    // Check that some permissions are pre-selected (checked checkboxes)
-    const checkedNodes = modal.locator('.ant-tree-checkbox-checked');
-    const checkedCount = await checkedNodes.count();
-    // A role with permissions should have at least one checked node
-    // (unless it's a role with 0 permissions)
-    expect(checkedCount).toBeGreaterThanOrEqual(0);
+    // 表格里「权限数」列写的就是这个角色分到的权限数量，大于 0 时弹窗里就
+    // 应该有勾选节点。旧写法断言 `checkedCount >= 0`——任何非负数都成立，
+    // 等于没断言。（不断言两者相等：勾满一个模块时 antd Tree 会额外给父节点
+    // 加上 checked，而父节点的 key 是字符串、不计入权限数。）
+    const permCountText = await firstRow
+      .locator('.vxe-body--column')
+      .nth(3)
+      .textContent();
+    const permCount = Number(permCountText?.trim() ?? '0');
+    const checkedCount = await modal
+      .locator('.ant-tree-checkbox-checked')
+      .count();
+    if (permCount > 0) {
+      expect(checkedCount).toBeGreaterThan(0);
+    }
   });
 });
 
 test.describe('Role Management Page - System Role Delete Disabled', () => {
   test.beforeEach(async ({ base }) => {
-    await authenticateAndNavigate(base, ROLE_MANAGEMENT_PATH);
+    await base.navigateTo(ROLE_MANAGEMENT_PATH);
+    await waitGridReady(base.page);
   });
 
-  test('should disable delete button for system roles (isSystem=true) (Req 10.6)', async ({ base }) => {
-    const rows = base.page.locator('.vxe-table--body .vxe-body--row');
-    const rowCount = await rows.count();
+  test('should disable delete button for system roles (isSystem=true) (Req 10.6)', async ({
+    base,
+  }) => {
+    // 旧写法先 `rows.count()` 再手动遍历：`count()` 是即时快照、不会自动等待，
+    // 而 waitGridReady 只保证表头渲染完（数据要等 XHR），读到 0 时循环一次都
+    // 不进，最后 `expect(foundSystemRole).toBe(true)` 必然失败——实测就是这么红的。
+    const systemRow = rowsBySystemFlag(base.page, '是').first();
+    await expect(systemRow).toBeVisible();
 
-    let foundSystemRole = false;
-
-    for (let i = 0; i < rowCount; i++) {
-      const row = rows.nth(i);
-      // isSystem column is the 5th column (index 4)
-      const isSystemCell = row.locator('.vxe-body--column').nth(4);
-      const tagText = await isSystemCell.locator('.ant-tag').textContent();
-
-      if (tagText?.trim() === '是') {
-        // Found a system role - verify delete button is disabled
-        const deleteBtn = row.getByRole('button', { name: '删除' });
-        await expect(deleteBtn).toBeVisible();
-        await expect(deleteBtn).toBeDisabled();
-        foundSystemRole = true;
-        break;
-      }
-    }
-
-    // Ensure we found at least one system role to test
-    expect(foundSystemRole).toBe(true);
+    // index.vue 的删除键绑了 `:disabled="!!row.isSystem"`
+    const deleteBtn = systemRow.getByRole('button', { name: '删除' });
+    await expect(deleteBtn).toBeVisible();
+    await expect(deleteBtn).toBeDisabled();
   });
 });
 
 test.describe('Role Management Page - Non-System Role Delete', () => {
   test.beforeEach(async ({ base }) => {
-    await authenticateAndNavigate(base, ROLE_MANAGEMENT_PATH);
+    await mockRoleList(base.page);
+    await base.navigateTo(ROLE_MANAGEMENT_PATH);
+    await waitGridReady(base.page);
   });
 
-  test('should show confirmation and delete non-system role (Req 10.8)', async ({ base }) => {
-    const rows = base.page.locator('.vxe-table--body .vxe-body--row');
-    const rowCount = await rows.count();
-
-    let targetRow: ReturnType<typeof rows.nth> | null = null;
-
-    for (let i = 0; i < rowCount; i++) {
-      const row = rows.nth(i);
-      // isSystem column is the 5th column (index 4)
-      const isSystemCell = row.locator('.vxe-body--column').nth(4);
-      const tagText = await isSystemCell.locator('.ant-tag').textContent();
-
-      if (tagText?.trim() === '否') {
-        targetRow = row;
-        break;
-      }
-    }
-
-    if (!targetRow) {
-      test.skip();
-      return;
-    }
+  test('should show confirmation and delete non-system role (Req 10.8)', async ({
+    base,
+  }) => {
+    // 同 Req 10.6：不再用 `count()` + 遍历 + 找不到就 `test.skip()`。那个兜底让
+    // 这条用例在只有 super_admin 的种子数据下永久跳过，看着没红，其实从未执行。
+    const targetRow = rowsBySystemFlag(base.page, '否').first();
+    await expect(targetRow).toBeVisible();
 
     // Intercept delete API to simulate success
     await base.page.route('**/api/admin/roles/*', async (route) => {
-      if (route.request().method() === 'DELETE') {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ code: 0, data: null, message: 'success' }),
-        });
-      } else {
-        await route.continue();
-      }
+      await (route.request().method() === 'DELETE'
+        ? route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ code: 0, data: null, message: 'success' }),
+          })
+        : route.continue());
     });
 
     // Click the "删除" button on the non-system role
@@ -352,25 +378,32 @@ test.describe('Role Management Page - Non-System Role Delete', () => {
     await expect(confirmModal).toContainText('删除角色');
     await expect(confirmModal).toContainText('确定删除');
 
-    // Verify the OK button has danger type
-    const okBtn = confirmModal.locator('.ant-btn-dangerous, .ant-btn-primary');
-    await expect(okBtn.first()).toBeVisible();
+    // onDelete 用的是 okType: 'danger'，渲染出来是 `ant-btn ant-btn-default
+    // ant-btn-dangerous`，**不带** ant-btn-primary。旧写法断言时用了
+    // `.ant-btn-dangerous, .ant-btn-primary` 的或选择器（danger 丢了也能过），
+    // 点击时却只找 `.ant-btn-primary`——这条用例只要没被 skip 就必然超时。
+    const okBtn = dialogConfirmButton(confirmModal);
+    await expect(okBtn).toBeVisible();
+    await expect(okBtn).toHaveClass(/ant-btn-dangerous/);
 
     // Listen for list refresh
-    const refreshPromise = base.page.waitForResponse((res) =>
-      res.url().includes('/api/admin/roles') && res.request().method() === 'GET',
+    const refreshPromise = base.page.waitForResponse(
+      (res) =>
+        res.url().includes('/api/admin/roles') &&
+        res.request().method() === 'GET',
+      { timeout: 10_000 },
     );
 
     // Click confirm to delete
-    await confirmModal.locator('.ant-btn-primary').click();
+    await okBtn.click();
 
     // Verify success message
-    await base.page.locator('.ant-message-success').waitFor({ state: 'visible', timeout: 5000 });
+    await base.page
+      .locator('.ant-message-success')
+      .waitFor({ state: 'visible', timeout: 5000 });
 
-    // Verify list refresh was triggered
-    const refreshResponse = await refreshPromise.catch(() => null);
-    if (refreshResponse) {
-      expect(refreshResponse.url()).toContain('/api/admin/roles');
-    }
+    // 同 Req 10.3：不把超时吞成静默通过
+    const refreshResponse = await refreshPromise;
+    expect(refreshResponse.url()).toContain('/api/admin/roles');
   });
 });

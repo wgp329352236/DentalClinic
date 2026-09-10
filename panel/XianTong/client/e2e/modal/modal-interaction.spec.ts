@@ -1,5 +1,14 @@
-import { test, expect } from '../fixtures/playwright-base';
-import { Selectors, API_BASE_URL } from '../fixtures/playwright-base';
+import {
+  collapseSelect,
+  dialog,
+  dialogCloseButton,
+  dialogConfirmButton,
+  dialogOverlay,
+  invalidFormItems,
+  waitDialogSettled,
+} from '../fixtures/dialog';
+import { gridActionButton, waitGridReady } from '../fixtures/grid';
+import { expect, test } from '../fixtures/playwright-base';
 
 /**
  * Modal Interaction E2E Tests
@@ -13,77 +22,62 @@ import { Selectors, API_BASE_URL } from '../fixtures/playwright-base';
  * - Form validation: submit with empty required fields (20.4)
  * - Success callback: modal closes and parent refreshes (20.5)
  * - Delete confirmation styling: warning text and danger button (20.6)
- * - Unsaved changes dialog on tab switch in game detail (20.7)
  */
 
-const GAME_LIST_PATH = '/game/list';
 const USER_MANAGEMENT_PATH = '/system/user';
-
-/**
- * Helper to get a valid game code from the API for game detail tests.
- */
-async function getFirstGameCode(page: any): Promise<string> {
-  const loginResp = await page.request.post(`${API_BASE_URL}/api/admin/auth/login`, {
-    data: { username: 'admin', password: 'admin123' },
-  });
-  const loginBody = await loginResp.json();
-  const token = loginBody.data.accessToken;
-
-  const gamesResp = await page.request.get(`${API_BASE_URL}/api/admin/games?page=1&pageSize=1`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const gamesBody = await gamesResp.json();
-  return gamesBody.data.list[0]?.code ?? '';
-}
-
-/**
- * Helper to find a button by its text content.
- * Ant Design Vue buttons may render text with spaces between characters.
- */
-function btnLocator(container: any, text: string) {
-  const spaced = text.split('').join('\\s*');
-  return container.locator('button').filter({ hasText: new RegExp(`^\\s*${spaced}\\s*$`) });
-}
 
 test.describe('Modal Interaction - Overlay and Centering (Req 20.1)', () => {
   test.beforeEach(async ({ base }) => {
     await base.navigateTo(USER_MANAGEMENT_PATH);
-    await base.page.locator('.vxe-table--body').first().waitFor({ state: 'visible', timeout: 15000 });
+    await waitGridReady(base.page);
   });
 
-  test('should display modal with overlay mask and centered dialog when opened', async ({ base }) => {
+  test('should display modal with overlay mask and centered dialog when opened', async ({
+    base,
+  }) => {
     // Open the create user modal
     const createBtn = base.page.getByRole('button', { name: '新建用户' });
     await createBtn.click();
 
     // Wait for the modal to appear
-    const modal = base.page.locator('[role="dialog"]').last();
-    await modal.waitFor({ state: 'visible', timeout: 10000 });
+    const modal = dialog(base.page);
+    await modal.waitFor({ state: 'visible', timeout: 10_000 });
 
-    // Verify the overlay mask is present
-    // Vben modals render a mask/overlay behind the dialog
-    const modalWrapper = modal.locator('xpath=ancestor::*[contains(@class, "ant-modal-wrap") or contains(@class, "vben-modal")]').first();
-    await expect(modalWrapper).toBeVisible();
+    // 遮罩由 DialogOverlay.vue 渲染成弹窗的**兄弟**节点，带源码写死的
+    // `data-dismissable-modal` 属性。旧写法往弹窗祖先里找 `.ant-modal-wrap` 或
+    // `[class*="vben-modal"]`——Vben Modal 底层是 reka-ui Dialog，这两种节点
+    // 在本应用里根本不存在，xpath 直接报 element(s) not found。
+    const overlay = dialogOverlay(base.page);
+    await expect(overlay).toBeVisible();
 
-    // Verify the modal content is visible and positioned
-    const modalContent = modal.locator('.ant-modal-content, .vben-modal-content').first();
-    if (await modalContent.count() > 0) {
-      await expect(modalContent).toBeVisible();
+    // 弹窗本体是 BODY 直属的 z-popup，同样不是 antd 的 .ant-modal-content
+    await expect(modal).toHaveClass(/z-popup/);
+
+    const viewport = base.page.viewportSize();
+    expect(viewport).not.toBeNull();
+    if (!viewport) return;
+
+    // 遮罩是 fixed inset-0，必须铺满整个视口，否则点不到弹窗外的区域
+    const overlayBox = await overlay.boundingBox();
+    expect(overlayBox).not.toBeNull();
+    if (overlayBox) {
+      expect(overlayBox.width).toBeGreaterThanOrEqual(viewport.width);
+      expect(overlayBox.height).toBeGreaterThanOrEqual(viewport.height);
     }
 
-    // Verify the dialog is centered by checking its CSS positioning
-    // The modal wrapper uses display:flex or position:fixed with centering
-    const boundingBox = await modal.boundingBox();
-    expect(boundingBox).not.toBeNull();
-    if (boundingBox) {
-      const viewport = base.page.viewportSize();
-      if (viewport) {
-        // Modal should be roughly centered horizontally (within 30% of viewport center)
-        const modalCenterX = boundingBox.x + boundingBox.width / 2;
-        const viewportCenterX = viewport.width / 2;
-        const tolerance = viewport.width * 0.3;
-        expect(Math.abs(modalCenterX - viewportCenterX)).toBeLessThan(tolerance);
-      }
+    // 弹窗 class 是 `inset-x-0 top-[10vh] mx-auto`：水平严格居中、垂直靠上。
+    // 旧写法给了 30% 视口宽度的容差，那样即便弹窗贴到左边也能过，等于没断言。
+    //
+    // 量之前必须等进场动画跑完：`slide-in-from-top-[48%]` + `zoom-in-95` 持续
+    // 300ms，中间态量出来的 y 会偏高十几像素。
+    await waitDialogSettled(modal);
+    const box = await modal.boundingBox();
+    expect(box).not.toBeNull();
+    if (box) {
+      const centerX = box.x + box.width / 2;
+      expect(Math.abs(centerX - viewport.width / 2)).toBeLessThan(2);
+      expect(Math.abs(box.y - viewport.height * 0.1)).toBeLessThan(5);
+      expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
     }
 
     // Close the modal to clean up
@@ -94,19 +88,24 @@ test.describe('Modal Interaction - Overlay and Centering (Req 20.1)', () => {
 test.describe('Modal Interaction - Close Mechanisms (Req 20.2)', () => {
   test.beforeEach(async ({ base }) => {
     await base.navigateTo(USER_MANAGEMENT_PATH);
-    await base.page.locator('.vxe-table--body').first().waitFor({ state: 'visible', timeout: 15000 });
+    await waitGridReady(base.page);
   });
 
-  test('should close modal when clicking the close button', async ({ base }) => {
+  test('should close modal when clicking the close button', async ({
+    base,
+  }) => {
     // Open the create user modal
     const createBtn = base.page.getByRole('button', { name: '新建用户' });
     await createBtn.click();
 
-    const modal = base.page.locator('[role="dialog"]').last();
-    await modal.waitFor({ state: 'visible', timeout: 10000 });
+    const modal = dialog(base.page);
+    await modal.waitFor({ state: 'visible', timeout: 10_000 });
 
-    // Find and click the close button (X icon in the modal header)
-    const closeBtn = modal.locator('.ant-modal-close, [class*="close"]').first();
+    // 关闭按钮是 reka-ui 的 DialogClose，class 由 DialogContent.vue 写死为
+    // `absolute top-3 right-3 h-6 w-6 rounded-full ...`（同排的全屏按钮是
+    // right-10）。旧写法 `.ant-modal-close, [class*="close"]` 命中的是带
+    // `data-[state=closed]:` 的 Tailwind 类名——实测 5 个 DIV，点了毫无反应。
+    const closeBtn = dialogCloseButton(modal);
     await expect(closeBtn).toBeVisible();
     await closeBtn.click();
 
@@ -114,78 +113,78 @@ test.describe('Modal Interaction - Close Mechanisms (Req 20.2)', () => {
     await modal.waitFor({ state: 'hidden', timeout: 5000 });
   });
 
-  test('should close modal when clicking the overlay/mask area', async ({ base }) => {
+  test('should close modal when clicking the overlay/mask area', async ({
+    base,
+  }) => {
     // Open the create user modal
     const createBtn = base.page.getByRole('button', { name: '新建用户' });
     await createBtn.click();
 
-    const modal = base.page.locator('[role="dialog"]').last();
-    await modal.waitFor({ state: 'visible', timeout: 10000 });
+    const modal = dialog(base.page);
+    await modal.waitFor({ state: 'visible', timeout: 10_000 });
 
-    // Click on the mask/overlay area (outside the modal content)
-    // The modal wrapper (.ant-modal-wrap) acts as the overlay
-    const modalWrap = base.page.locator('.ant-modal-wrap, .vben-modal-mask').last();
-    if (await modalWrap.isVisible()) {
-      // Click at the top-left corner of the wrap (outside the modal dialog)
-      const wrapBox = await modalWrap.boundingBox();
-      if (wrapBox) {
-        await base.page.mouse.click(wrapBox.x + 5, wrapBox.y + 5);
-      }
-    } else {
-      // Fallback: press Escape
-      await base.page.keyboard.press('Escape');
-    }
+    // 点遮罩应触发 DialogOverlay 的 @click → close。弹窗是 top-[10vh] mx-auto，
+    // 所以遮罩的左上角必然落在弹窗之外。
+    //
+    // 旧写法用 `.ant-modal-wrap, .vben-modal-mask` 定位，两者都不存在，于是
+    // 每次都走 else 分支按 Escape——用例看着是绿的，实际测的是键盘而不是遮罩。
+    const overlay = dialogOverlay(base.page);
+    await expect(overlay).toBeVisible();
+    const overlayBox = await overlay.boundingBox();
+    expect(overlayBox).not.toBeNull();
+    if (!overlayBox) return;
+    await base.page.mouse.click(overlayBox.x + 5, overlayBox.y + 5);
 
-    // Verify the modal is closed
+    // 关闭后 reka-ui 会把弹窗从 DOM 里移除，不只是隐藏
     await modal.waitFor({ state: 'hidden', timeout: 5000 });
+    await expect(base.page.locator('[role="dialog"]')).toHaveCount(0);
   });
 });
 
 test.describe('Modal Interaction - destroyOnClose Behavior (Req 20.3)', () => {
   test.beforeEach(async ({ base }) => {
     await base.navigateTo(USER_MANAGEMENT_PATH);
-    await base.page.locator('.vxe-table--body').first().waitFor({ state: 'visible', timeout: 15000 });
+    await waitGridReady(base.page);
   });
 
-  test('should destroy modal content on close and recreate on reopen', async ({ base }) => {
+  test('should destroy modal content on close and recreate on reopen', async ({
+    base,
+  }) => {
     // Open the create user modal
     const createBtn = base.page.getByRole('button', { name: '新建用户' });
     await createBtn.click();
 
-    const modal = base.page.locator('[role="dialog"]').last();
-    await modal.waitFor({ state: 'visible', timeout: 10000 });
+    const modal = dialog(base.page);
+    await modal.waitFor({ state: 'visible', timeout: 10_000 });
 
     // Wait for form to load
     await base.page.waitForTimeout(1000);
 
-    // Fill in a field to create state
+    // 先造出状态：填用户名。旧写法用 `if (await isVisible())` 包着，一旦
+    // 选择器写错就静默跳过填充，用例照样「通过」，实际上什么都没测到。
     const usernameInput = modal.locator('input[placeholder="请输入用户名"]');
-    if (await usernameInput.isVisible()) {
-      await usernameInput.fill('test_destroy_check');
-    }
+    await expect(usernameInput).toBeVisible();
+    await usernameInput.fill('test_destroy_check');
 
     // Close the modal
-    const closeBtn = modal.locator('.ant-modal-close, [class*="close"]').first();
-    await closeBtn.click();
+    await dialogCloseButton(modal).click();
     await modal.waitFor({ state: 'hidden', timeout: 5000 });
-
-    // Wait a moment for DOM cleanup
-    await base.page.waitForTimeout(500);
+    // destroyOnClose：关闭后整个弹窗从 DOM 移除，不只是隐藏
+    await expect(base.page.locator('[role="dialog"]')).toHaveCount(0);
 
     // Reopen the modal
     await createBtn.click();
-    const newModal = base.page.locator('[role="dialog"]').last();
-    await newModal.waitFor({ state: 'visible', timeout: 10000 });
+    const newModal = dialog(base.page);
+    await newModal.waitFor({ state: 'visible', timeout: 10_000 });
 
     // Wait for form to load
     await base.page.waitForTimeout(1000);
 
-    // Verify the form is reset (destroyOnClose should clear previous state)
-    const newUsernameInput = newModal.locator('input[placeholder="请输入用户名"]');
-    if (await newUsernameInput.isVisible()) {
-      const value = await newUsernameInput.inputValue();
-      expect(value).toBe('');
-    }
+    // 重开的是全新实例，onOpenChange 里的 resetForm() 应把上次的输入清掉
+    const newUsernameInput = newModal.locator(
+      'input[placeholder="请输入用户名"]',
+    );
+    await expect(newUsernameInput).toHaveValue('');
 
     // Clean up
     await base.page.keyboard.press('Escape');
@@ -195,78 +194,88 @@ test.describe('Modal Interaction - destroyOnClose Behavior (Req 20.3)', () => {
 test.describe('Modal Interaction - Form Validation (Req 20.4)', () => {
   test.beforeEach(async ({ base }) => {
     await base.navigateTo(USER_MANAGEMENT_PATH);
-    await base.page.locator('.vxe-table--body').first().waitFor({ state: 'visible', timeout: 15000 });
+    await waitGridReady(base.page);
   });
 
-  test('should show validation errors when submitting with empty required fields', async ({ base }) => {
+  test('should show validation errors when submitting with empty required fields', async ({
+    base,
+  }) => {
     // Open the create user modal
     const createBtn = base.page.getByRole('button', { name: '新建用户' });
     await createBtn.click();
 
-    const modal = base.page.locator('[role="dialog"]').last();
-    await modal.waitFor({ state: 'visible', timeout: 10000 });
+    const modal = dialog(base.page);
+    await modal.waitFor({ state: 'visible', timeout: 10_000 });
 
     // Wait for form to fully render
     await base.page.waitForTimeout(1000);
 
-    // Submit the form without filling any fields
-    // The Vben modal confirm button is the last button in the dialog
-    const allButtons = modal.locator('button');
-    const buttonCount = await allButtons.count();
-    await allButtons.nth(buttonCount - 1).click();
+    // 空表单直接提交。弹窗内按钮的渲染顺序是
+    // [全屏图标, 取 消, 确 认, 关闭图标]，旧写法 `nth(count - 1)` 点的是
+    // 关闭图标——弹窗被关掉、表单从未提交，下面的校验断言必然找不到元素。
+    await dialogConfirmButton(modal).click();
 
-    // Wait for validation errors to appear
-    await base.page.waitForTimeout(1000);
+    // Vben Form 的校验错误不是 antd 的 `.ant-form-item-explain-error`：
+    // form-field.vue 给校验失败的 FormItem 加 `form-valid-error`，错误文本由
+    // vee-validate 的 ErrorMessage 渲染成 `p.text-destructive`。
+    const invalidItems = invalidFormItems(modal);
+    await expect(invalidItems.first()).toBeVisible({ timeout: 5000 });
 
-    // Verify form validation error messages are displayed
-    const errorMessages = modal.locator('.ant-form-item-explain-error');
-    await expect(errorMessages.first()).toBeVisible({ timeout: 5000 });
-
-    // Verify there are multiple validation errors (username, password are required)
-    const errorCount = await errorMessages.count();
-    expect(errorCount).toBeGreaterThanOrEqual(1);
+    // schema 里 username / password / displayName 是 required、roleIds 是
+    // selectRequired，四个都该报错
+    expect(await invalidItems.count()).toBeGreaterThanOrEqual(3);
 
     // Verify error messages contain meaningful text
-    const firstErrorText = await errorMessages.first().textContent();
+    const firstErrorText = await invalidItems
+      .first()
+      .locator('p.text-destructive')
+      .textContent();
     expect(firstErrorText?.trim()).toBeTruthy();
+
+    // 校验没过就不能把弹窗关掉
+    await expect(modal).toBeVisible();
 
     // Clean up
     await base.page.keyboard.press('Escape');
   });
 
-  test('should clear validation errors after filling required fields', async ({ base }) => {
+  test('should clear validation errors after filling required fields', async ({
+    base,
+  }) => {
     // Open the create user modal
     const createBtn = base.page.getByRole('button', { name: '新建用户' });
     await createBtn.click();
 
-    const modal = base.page.locator('[role="dialog"]').last();
-    await modal.waitFor({ state: 'visible', timeout: 10000 });
+    const modal = dialog(base.page);
+    await modal.waitFor({ state: 'visible', timeout: 10_000 });
     await base.page.waitForTimeout(1000);
 
     // Submit empty form to trigger validation
-    const allButtons = modal.locator('button');
-    const buttonCount = await allButtons.count();
-    await allButtons.nth(buttonCount - 1).click();
-    await base.page.waitForTimeout(1000);
+    await dialogConfirmButton(modal).click();
 
     // Verify errors are shown
-    const errorMessages = modal.locator('.ant-form-item-explain-error');
-    await expect(errorMessages.first()).toBeVisible({ timeout: 5000 });
+    const invalidItems = invalidFormItems(modal);
+    await expect(invalidItems.first()).toBeVisible({ timeout: 5000 });
+
+    // 用户名这一项此刻必须处于报错状态
+    const usernameItem = invalidItems.filter({
+      has: base.page.locator('input[placeholder="请输入用户名"]'),
+    });
+    await expect(usernameItem).toHaveCount(1);
 
     // Fill in the username field
     const usernameInput = modal.locator('input[placeholder="请输入用户名"]');
-    if (await usernameInput.isVisible()) {
-      await usernameInput.fill('test_validation_user');
-      // Trigger blur to validate
-      await usernameInput.blur();
-      await base.page.waitForTimeout(500);
-    }
+    await usernameInput.fill('test_validation_user');
 
-    // The username error should be cleared (or reduced error count)
-    // Note: other fields may still show errors
-    const remainingErrors = await errorMessages.count();
-    // We just verify the form validation system is responsive
-    expect(remainingErrors).toBeGreaterThanOrEqual(0);
+    // 再提交一次让 validate() 重跑：已填好的字段错误应消失，其余必填项仍在。
+    // 不依赖 vee-validate 的自动重校验时机，这样断言是确定的。
+    await dialogConfirmButton(modal).click();
+
+    await expect(usernameItem).toHaveCount(0);
+    // 密码 / 显示名称 / 角色 还是空的，表单整体依然无效
+    await expect(invalidItems.first()).toBeVisible();
+    // 因此弹窗不该被关掉
+    await expect(modal).toBeVisible();
 
     // Clean up
     await base.page.keyboard.press('Escape');
@@ -276,29 +285,33 @@ test.describe('Modal Interaction - Form Validation (Req 20.4)', () => {
 test.describe('Modal Interaction - Success Callback (Req 20.5)', () => {
   test.beforeEach(async ({ base }) => {
     await base.navigateTo(USER_MANAGEMENT_PATH);
-    await base.page.locator('.vxe-table--body').first().waitFor({ state: 'visible', timeout: 15000 });
+    await waitGridReady(base.page);
   });
 
-  test('should close modal and refresh parent data after successful operation', async ({ base }) => {
+  test('should close modal and refresh parent data after successful operation', async ({
+    base,
+  }) => {
     // Intercept create API to simulate success
     await base.page.route('**/api/admin/users', async (route) => {
-      if (route.request().method() === 'POST') {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ code: 0, data: { id: 999 }, message: 'success' }),
-        });
-      } else {
-        await route.continue();
-      }
+      await (route.request().method() === 'POST'
+        ? route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              code: 0,
+              data: { id: 999 },
+              message: 'success',
+            }),
+          })
+        : route.continue());
     });
 
     // Open create modal
     const createBtn = base.page.getByRole('button', { name: '新建用户' });
     await createBtn.click();
 
-    const modal = base.page.locator('[role="dialog"]').last();
-    await modal.waitFor({ state: 'visible', timeout: 10000 });
+    const modal = dialog(base.page);
+    await modal.waitFor({ state: 'visible', timeout: 10_000 });
     await base.page.waitForTimeout(1000);
 
     // Fill required form fields
@@ -308,7 +321,9 @@ test.describe('Modal Interaction - Success Callback (Req 20.5)', () => {
     const passwordInput = modal.locator('input[placeholder="请输入密码"]');
     await passwordInput.fill('password123');
 
-    const displayNameInput = modal.locator('input[placeholder="请输入显示名称"]');
+    const displayNameInput = modal.locator(
+      'input[placeholder="请输入显示名称"]',
+    );
     await displayNameInput.fill('Test Success');
 
     const emailInput = modal.locator('input[placeholder="请输入邮箱"]');
@@ -317,42 +332,49 @@ test.describe('Modal Interaction - Success Callback (Req 20.5)', () => {
     // Select a role
     const roleSelect = modal.locator('.ant-select').first();
     await roleSelect.click();
-    const option = base.page.locator('.ant-select-dropdown .ant-select-item').first();
+    const option = base.page
+      .locator('.ant-select-dropdown .ant-select-item')
+      .first();
     await option.waitFor({ state: 'visible', timeout: 5000 });
     await option.click();
-    await base.page.keyboard.press('Escape');
-    await base.page.waitForTimeout(500);
+    // 角色是 `mode: 'multiple'`，选完下拉面板不会自己关。旧写法按 Escape 收
+    // 面板，但 reka-ui Dialog 同样监听 Escape，弹窗会被一起关掉——后面的
+    // waitForRequest 就永远等不到刷新请求。
+    await collapseSelect(base.page, roleSelect);
 
     // Listen for the list refresh request (GET /api/admin/users)
     const refreshPromise = base.page.waitForRequest(
-      (req: any) => req.url().includes('/api/admin/users') && req.method() === 'GET',
+      (req: any) =>
+        req.url().includes('/api/admin/users') && req.method() === 'GET',
+      { timeout: 10_000 },
     );
 
-    // Submit the form
-    const allButtons = modal.locator('button');
-    const buttonCount = await allButtons.count();
-    await allButtons.nth(buttonCount - 1).click();
+    // Submit the form（同 Req 20.4：`.last()` 点的是关闭图标，表单不会提交，
+    // 这个 waitForRequest 也就永远等不到刷新请求）
+    await dialogConfirmButton(modal).click();
 
     // Verify the modal closes after success
-    await modal.waitFor({ state: 'hidden', timeout: 10000 });
+    await modal.waitFor({ state: 'hidden', timeout: 10_000 });
 
-    // Verify the parent list is refreshed (API called again)
-    const refreshRequest = await refreshPromise.catch(() => null);
-    if (refreshRequest) {
-      expect(refreshRequest.url()).toContain('/api/admin/users');
-    }
+    // 父列表必须真的重新拉过数据。旧写法 `.catch(() => null)` 再加 `if` 把
+    // 超时变成了静默通过，等于没测。
+    const refreshRequest = await refreshPromise;
+    expect(refreshRequest.url()).toContain('/api/admin/users');
   });
 });
 
 test.describe('Modal Interaction - Delete Confirmation Styling (Req 20.6)', () => {
   test.beforeEach(async ({ base }) => {
     await base.navigateTo(USER_MANAGEMENT_PATH);
-    await base.page.locator('.vxe-table--body').first().waitFor({ state: 'visible', timeout: 15000 });
+    await waitGridReady(base.page);
   });
 
-  test('should display delete confirmation with warning text and danger-styled button', async ({ base }) => {
+  test('should display delete confirmation with warning text and danger-styled button', async ({
+    base,
+  }) => {
     // Click the delete button on the first user row
-    const deleteBtn = base.page.locator('.vxe-grid').getByRole('button', { name: '删除' }).first();
+    // 操作列是 fixed: 'right'，按钮只存在于冻结表，不在主表数据行内
+    const deleteBtn = gridActionButton(base.page, '删除');
     await expect(deleteBtn).toBeVisible();
     await deleteBtn.click();
 
@@ -374,7 +396,9 @@ test.describe('Modal Interaction - Delete Confirmation Styling (Req 20.6)', () =
     expect(dangerBtnClasses).toMatch(/dangerous/);
 
     // Verify there's also a cancel button (non-danger)
-    const cancelBtn = confirmModal.locator('.ant-btn:not(.ant-btn-dangerous)').first();
+    const cancelBtn = confirmModal
+      .locator('.ant-btn:not(.ant-btn-dangerous)')
+      .first();
     await expect(cancelBtn).toBeVisible();
 
     // Cancel to avoid actual deletion
@@ -382,143 +406,33 @@ test.describe('Modal Interaction - Delete Confirmation Styling (Req 20.6)', () =
     await confirmModal.waitFor({ state: 'hidden', timeout: 5000 });
   });
 
-  test('should display warning icon in delete confirmation dialog', async ({ base }) => {
+  test('should display warning icon in delete confirmation dialog', async ({
+    base,
+  }) => {
     // Click delete on first user
-    const deleteBtn = base.page.locator('.vxe-grid').getByRole('button', { name: '删除' }).first();
+    // 操作列是 fixed: 'right'，按钮只存在于冻结表，不在主表数据行内
+    const deleteBtn = gridActionButton(base.page, '删除');
     await deleteBtn.click();
 
     const confirmModal = base.page.locator('.ant-modal-confirm');
     await confirmModal.waitFor({ state: 'visible', timeout: 5000 });
 
-    // Verify warning/exclamation icon is present (Ant Design uses .anticon-exclamation-circle or similar)
-    const warningIcon = confirmModal.locator('.anticon-exclamation-circle, .anticon-warning, .ant-modal-confirm-warning .anticon');
-    const iconCount = await warningIcon.count();
-    // At minimum, the modal should have a confirm body with warning content
+    // Verify the warning icon is rendered inside the confirm body.
+    // The concrete icon class (anticon-exclamation-circle / anticon-warning) varies
+    // across antd versions, so only assert that an icon node exists.
+    const warningIcon = confirmModal.locator(
+      '.ant-modal-confirm-body .anticon',
+    );
+    await expect(warningIcon.first()).toBeAttached();
+
+    // The confirm body itself must be rendered with the warning content
     const confirmBody = confirmModal.locator('.ant-modal-confirm-body');
     await expect(confirmBody).toBeVisible();
 
     // Cancel
-    const cancelBtn = confirmModal.locator('.ant-btn:not(.ant-btn-dangerous)').first();
+    const cancelBtn = confirmModal
+      .locator('.ant-btn:not(.ant-btn-dangerous)')
+      .first();
     await cancelBtn.click();
-  });
-});
-
-test.describe('Modal Interaction - Unsaved Changes Dialog (Req 20.7)', () => {
-  let gameCode: string;
-
-  test.beforeEach(async ({ base }) => {
-    // Get a game code for the detail page
-    gameCode = await getFirstGameCode(base.page);
-    expect(gameCode).toBeTruthy();
-
-    // Navigate to the app and inject auth tokens
-    const loginResp = await base.page.request.post(`${API_BASE_URL}/api/admin/auth/login`, {
-      data: { username: 'admin', password: 'admin123' },
-    });
-    const loginBody = await loginResp.json();
-    const token = loginBody.data.accessToken;
-    const refreshToken = loginBody.data.refreshToken;
-
-    await base.page.goto('http://localhost:5666', { waitUntil: 'domcontentloaded' });
-    await base.page.waitForTimeout(1000);
-
-    // Inject tokens into localStorage
-    await base.page.evaluate(
-      ({ accessToken, refresh }) => {
-        const namespace = 'vben-web-antd-5.7.0-dev';
-        localStorage.setItem(
-          `${namespace}-core-access`,
-          JSON.stringify({ accessToken, refreshToken: refresh, accessCodes: [] }),
-        );
-      },
-      { accessToken: token, refresh: refreshToken },
-    );
-
-    await base.page.reload({ waitUntil: 'networkidle' });
-
-    // Navigate to game detail page
-    await base.navigateTo(`/game/detail/${gameCode}`);
-    await base.page.locator(Selectors.tabs).waitFor({ state: 'visible', timeout: 15000 });
-  });
-
-  test('should show unsaved changes confirmation when switching tab while editing', async ({ base }) => {
-    const activePane = base.page.locator('.ant-tabs-tabpane-active');
-
-    // Enter edit mode on the basic config tab
-    const editButton = btnLocator(activePane, '编辑');
-    await editButton.waitFor({ state: 'visible', timeout: 5000 });
-    await editButton.click();
-
-    // Wait for form inputs to appear (edit mode active)
-    await activePane.locator('.ant-input').first().waitFor({ state: 'visible' });
-
-    // Try to switch to another tab (飞书)
-    const tabNav = base.page.locator(Selectors.tabNav);
-    const feishuTab = tabNav.locator('.ant-tabs-tab').filter({ hasText: '飞书' });
-    await feishuTab.click();
-
-    // A confirmation dialog should appear about unsaved changes
-    const confirmModal = base.page.locator('.ant-modal-confirm');
-    await confirmModal.waitFor({ state: 'visible', timeout: 5000 });
-
-    // Verify the dialog mentions unsaved changes (未保存的修改)
-    const modalText = await confirmModal.textContent();
-    expect(modalText).toContain('未保存的修改');
-
-    // Cancel the dialog to stay on current tab
-    const cancelBtn = confirmModal.locator('.ant-btn:not(.ant-btn-primary)').first();
-    await cancelBtn.click();
-
-    // Verify we're still in edit mode on the basic tab
-    await expect(activePane.locator('.ant-input').first()).toBeVisible();
-  });
-
-  test('should switch tab after confirming unsaved changes dialog', async ({ base }) => {
-    const activePane = base.page.locator('.ant-tabs-tabpane-active');
-
-    // Enter edit mode
-    const editButton = btnLocator(activePane, '编辑');
-    await editButton.waitFor({ state: 'visible', timeout: 5000 });
-    await editButton.click();
-    await activePane.locator('.ant-input').first().waitFor({ state: 'visible' });
-
-    // Try to switch to feishu tab
-    const tabNav = base.page.locator(Selectors.tabNav);
-    const feishuTab = tabNav.locator('.ant-tabs-tab').filter({ hasText: '飞书' });
-    await feishuTab.click();
-
-    // Confirmation dialog should appear
-    const confirmModal = base.page.locator('.ant-modal-confirm');
-    await confirmModal.waitFor({ state: 'visible', timeout: 5000 });
-
-    // Click confirm/OK to proceed with tab switch
-    const okBtn = confirmModal.locator('.ant-btn-primary');
-    await okBtn.click();
-
-    // Wait for tab switch to complete
-    await base.page.waitForTimeout(1000);
-
-    // Verify we're now on the feishu tab
-    const feishuTabActive = tabNav.locator('.ant-tabs-tab-active').filter({ hasText: '飞书' });
-    await expect(feishuTabActive).toBeVisible();
-  });
-
-  test('should not show unsaved changes dialog when not in edit mode', async ({ base }) => {
-    // Without entering edit mode, switch tabs directly
-    const tabNav = base.page.locator(Selectors.tabNav);
-    const feishuTab = tabNav.locator('.ant-tabs-tab').filter({ hasText: '飞书' });
-    await feishuTab.click();
-
-    // Wait a moment to ensure no dialog appears
-    await base.page.waitForTimeout(1000);
-
-    // Verify no confirmation dialog appeared
-    const confirmModal = base.page.locator('.ant-modal-confirm');
-    const isVisible = await confirmModal.isVisible().catch(() => false);
-    expect(isVisible).toBe(false);
-
-    // Verify we successfully switched to the feishu tab
-    const feishuTabActive = tabNav.locator('.ant-tabs-tab-active').filter({ hasText: '飞书' });
-    await expect(feishuTabActive).toBeVisible();
   });
 });

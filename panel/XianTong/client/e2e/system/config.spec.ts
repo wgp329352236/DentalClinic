@@ -1,4 +1,5 @@
-import { test, expect } from '../fixtures/playwright-base';
+import { expectTableColumns } from '../fixtures/grid';
+import { expect, test } from '../fixtures/playwright-base';
 
 /**
  * System Config E2E Tests
@@ -20,7 +21,15 @@ import { test, expect } from '../fixtures/playwright-base';
 const CONFIG_PATH = '/system/config';
 
 // Expected column headers per Requirement 15.1
-const EXPECTED_COLUMNS = ['分类', '配置项', '描述', '值', '类型', '热更新', '操作'];
+const EXPECTED_COLUMNS = [
+  '分类',
+  '配置项',
+  '描述',
+  '值',
+  '类型',
+  '热更新',
+  '操作',
+];
 
 // Mock config data for controlled testing
 const MOCK_CONFIG_RESPONSE = {
@@ -97,35 +106,29 @@ test.describe('System Config Page - Table Display', () => {
   test.beforeEach(async ({ base }) => {
     // Intercept config API to provide controlled test data
     await base.page.route('**/api/admin/config', async (route) => {
-      if (route.request().method() === 'GET') {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify(MOCK_CONFIG_RESPONSE),
-        });
-      } else {
-        await route.continue();
-      }
+      await (route.request().method() === 'GET'
+        ? route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(MOCK_CONFIG_RESPONSE),
+          })
+        : route.continue());
     });
     await base.navigateTo(CONFIG_PATH);
-    await base.page.locator('.ant-table-tbody').waitFor({ state: 'visible', timeout: 15000 });
+    await base.page
+      .locator('.ant-table-tbody')
+      .waitFor({ state: 'visible', timeout: 15_000 });
   });
 
-  test('should display all expected table columns (Req 15.1)', async ({ base }) => {
-    const headerCells = base.page.locator('.ant-table-thead th');
-    const count = await headerCells.count();
-    const columnTexts: string[] = [];
-    for (let i = 0; i < count; i++) {
-      const text = (await headerCells.nth(i).textContent())?.trim() ?? '';
-      if (text) columnTexts.push(text);
-    }
-
-    for (const expected of EXPECTED_COLUMNS) {
-      expect(columnTexts, `Missing column: ${expected}`).toContain(expected);
-    }
+  test('should display all expected table columns (Req 15.1)', async ({
+    base,
+  }) => {
+    await expectTableColumns(base.page, EXPECTED_COLUMNS);
   });
 
-  test('should mask sensitive config values in view mode (Req 15.2)', async ({ base }) => {
+  test('should mask sensitive config values in view mode (Req 15.2)', async ({
+    base,
+  }) => {
     // The sensitive config "app.secret" with value "mysecretkey1234" should be masked
     // maskSensitive shows "••••••••" + last 4 chars
     const row = getRowByKey(base.page, 'app.secret');
@@ -142,7 +145,9 @@ test.describe('System Config Page - Table Display', () => {
     expect(valueText?.trim()).not.toBe('mysecretkey1234');
   });
 
-  test('should display green "热更新" tag for reloadType=hot (Req 15.3)', async ({ base }) => {
+  test('should display green "热更新" tag for reloadType=hot (Req 15.3)', async ({
+    base,
+  }) => {
     // app.name has reloadType=hot
     const row = getRowByKey(base.page, 'app.name');
     await expect(row).toBeVisible();
@@ -154,7 +159,9 @@ test.describe('System Config Page - Table Display', () => {
     await expect(tag).toHaveClass(/green/);
   });
 
-  test('should display default "需重启" tag for reloadType != hot (Req 15.4)', async ({ base }) => {
+  test('should display default "需重启" tag for reloadType != hot (Req 15.4)', async ({
+    base,
+  }) => {
     // app.secret has reloadType=restart
     const row = getRowByKey(base.page, 'app.secret');
     await expect(row).toBeVisible();
@@ -171,21 +178,23 @@ test.describe('System Config Page - Table Display', () => {
 test.describe('System Config Page - Edit Controls by Type', () => {
   test.beforeEach(async ({ base }) => {
     await base.page.route('**/api/admin/config', async (route) => {
-      if (route.request().method() === 'GET') {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify(MOCK_CONFIG_RESPONSE),
-        });
-      } else {
-        await route.continue();
-      }
+      await (route.request().method() === 'GET'
+        ? route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(MOCK_CONFIG_RESPONSE),
+          })
+        : route.continue());
     });
     await base.navigateTo(CONFIG_PATH);
-    await base.page.locator('.ant-table-tbody').waitFor({ state: 'visible', timeout: 15000 });
+    await base.page
+      .locator('.ant-table-tbody')
+      .waitFor({ state: 'visible', timeout: 15_000 });
   });
 
-  test('should show Input control for string type config (Req 15.5)', async ({ base }) => {
+  test('should show Input control for string type config (Req 15.5)', async ({
+    base,
+  }) => {
     // app.name is string type
     const row = getRowByKey(base.page, 'app.name');
     await expect(row).toBeVisible();
@@ -200,7 +209,9 @@ test.describe('System Config Page - Edit Controls by Type', () => {
     await expect(input).toBeVisible();
   });
 
-  test('should show InputNumber control for number type config (Req 15.5)', async ({ base }) => {
+  test('should show InputNumber control for number type config (Req 15.5)', async ({
+    base,
+  }) => {
     // app.maxRetries is int type → number
     const row = getRowByKey(base.page, 'app.maxRetries');
     await expect(row).toBeVisible();
@@ -215,7 +226,9 @@ test.describe('System Config Page - Edit Controls by Type', () => {
     await expect(inputNumber).toBeVisible();
   });
 
-  test('should show Switch control for boolean type config (Req 15.5)', async ({ base }) => {
+  test('should show Switch control for boolean type config (Req 15.5)', async ({
+    base,
+  }) => {
     // app.debug is bool type → boolean
     const row = getRowByKey(base.page, 'app.debug');
     await expect(row).toBeVisible();
@@ -234,21 +247,23 @@ test.describe('System Config Page - Edit Controls by Type', () => {
 test.describe('System Config Page - Save and Cancel', () => {
   test.beforeEach(async ({ base }) => {
     await base.page.route('**/api/admin/config', async (route) => {
-      if (route.request().method() === 'GET') {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify(MOCK_CONFIG_RESPONSE),
-        });
-      } else {
-        await route.continue();
-      }
+      await (route.request().method() === 'GET'
+        ? route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(MOCK_CONFIG_RESPONSE),
+          })
+        : route.continue());
     });
     await base.navigateTo(CONFIG_PATH);
-    await base.page.locator('.ant-table-tbody').waitFor({ state: 'visible', timeout: 15000 });
+    await base.page
+      .locator('.ant-table-tbody')
+      .waitFor({ state: 'visible', timeout: 15_000 });
   });
 
-  test('should save config value and show success message (Req 15.6)', async ({ base }) => {
+  test('should save config value and show success message (Req 15.6)', async ({
+    base,
+  }) => {
     // Intercept the PUT request for config update
     let capturedBody: any = null;
     await base.page.route('**/api/admin/config/*', async (route) => {
@@ -290,7 +305,9 @@ test.describe('System Config Page - Save and Cancel', () => {
     expect(capturedBody).toHaveProperty('value', 'Nova BI Updated');
   });
 
-  test('should cancel edit without saving changes (Req 15.9)', async ({ base }) => {
+  test('should cancel edit without saving changes (Req 15.9)', async ({
+    base,
+  }) => {
     // Find the "app.name" row and click edit
     const row = getRowByKey(base.page, 'app.name');
     await expect(row).toBeVisible();

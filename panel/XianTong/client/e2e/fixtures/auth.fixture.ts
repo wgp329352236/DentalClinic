@@ -31,11 +31,6 @@ const AUTH_STATE_PATH = path.resolve(
 export interface AuthFixtures {
   /** A page that is already authenticated as the default admin user. */
   authenticatedPage: Page;
-  /**
-   * Authenticate with custom credentials and return the page.
-   * Useful for testing different permission levels.
-   */
-  loginAs: (username: string, password: string) => Promise<Page>;
 }
 
 /**
@@ -144,25 +139,12 @@ export const test = base.extend<AuthFixtures>({
       await saveAuthState(page);
     }
 
-    // Reload to let the app pick up the stored tokens
-    await page.reload({ waitUntil: 'networkidle' });
+    // Reload to let the app pick up the stored tokens.
+    // 不等 networkidle：Vite dev server 的按需编译与 HMR websocket 会让网络
+    // 一直有活动，而这个 fixture 每个用例都要跑一次，等不到就是白耗超时。
+    await page.reload({ waitUntil: 'domcontentloaded' });
 
     await use(page);
-  },
-
-  loginAs: async ({ browser }, use) => {
-    const loginAsUser = async (
-      username: string,
-      password: string,
-    ): Promise<Page> => {
-      const context = await browser.newContext();
-      const page = await context.newPage();
-      await authenticateViaApi(page, username, password);
-      await page.reload({ waitUntil: 'networkidle' });
-      return page;
-    };
-
-    await use(loginAsUser);
   },
 });
 
