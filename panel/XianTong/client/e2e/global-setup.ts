@@ -1,7 +1,12 @@
-import { chromium, type FullConfig } from '@playwright/test';
-import path from 'node:path';
+import type { FullConfig } from '@playwright/test';
+
 import fs from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { chromium } from '@playwright/test';
+
+import { ACCESS_STORE_KEY, buildAccessState } from './fixtures/app-storage';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -75,9 +80,7 @@ async function globalSetup(_config: FullConfig) {
 
   if (body.code !== 0) {
     await browser.close();
-    throw new Error(
-      `Global setup: Login API error: ${body.message}`,
-    );
+    throw new Error(`Global setup: Login API error: ${body.message}`);
   }
 
   const { accessToken, refreshToken } = body.data;
@@ -90,23 +93,17 @@ async function globalSetup(_config: FullConfig) {
   // Navigate to the frontend origin to set localStorage
   await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
 
-  // Inject tokens into localStorage matching the Vben Admin storage format
+  // Inject the access store under the exact key the app reads on boot. A wrong
+  // key here does not fail loudly: the app simply treats the session as logged
+  // out and bounces every test to /auth/login.
   await page.evaluate(
-    ({ token, refresh }) => {
-      const namespace = 'vben-web-antd';
-
-      // Set the access token in the Vben access store persisted state
-      localStorage.setItem(
-        `${namespace}-access-store`,
-        JSON.stringify({ accessToken: token }),
-      );
-
-      // Set refreshToken for token refresh flow
-      if (refresh) {
-        localStorage.setItem('refreshToken', refresh);
-      }
+    ({ key, state }) => {
+      localStorage.setItem(key, JSON.stringify(state));
     },
-    { token: accessToken, refresh: refreshToken },
+    {
+      key: ACCESS_STORE_KEY,
+      state: buildAccessState(accessToken, refreshToken),
+    },
   );
 
   // Save the authenticated storage state for reuse by all test projects

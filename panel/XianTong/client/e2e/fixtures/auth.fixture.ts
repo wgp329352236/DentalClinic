@@ -1,7 +1,10 @@
-import { test as base, type Page } from '@playwright/test';
+import { test as base } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+
+import { ACCESS_STORE_KEY, buildAccessState } from './app-storage';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -45,9 +48,12 @@ async function authenticateViaApi(
   password: string,
 ): Promise<void> {
   // Call the login API directly
-  const response = await page.request.post(`${API_BASE_URL}/api/admin/auth/login`, {
-    data: { username, password },
-  });
+  const response = await page.request.post(
+    `${API_BASE_URL}/api/admin/auth/login`,
+    {
+      data: { username, password },
+    },
+  );
 
   if (!response.ok()) {
     throw new Error(
@@ -72,27 +78,17 @@ async function authenticateViaApi(
   // Navigate to the app origin so we can set localStorage
   await page.goto('http://localhost:5666', { waitUntil: 'domcontentloaded' });
 
-  // Inject tokens into the browser storage to match the frontend auth flow
+  // Inject the access store under the exact key the app reads on boot. This has
+  // to stay in sync with global-setup.ts, which is why both go through the
+  // shared app-storage helper instead of spelling the key out locally.
   await page.evaluate(
-    ({ token, refresh }) => {
-      // The Vben Admin access store persists the token via its own mechanism.
-      // We set localStorage keys that the app reads on initialization.
-      const namespace = 'vben-web-antd';
-
-      // Set the access token in the Vben access store persisted state
-      const accessStoreKey = `${namespace}-preferences`;
-      // Direct token storage used by the request interceptor
-      localStorage.setItem(
-        `${namespace}-access-store`,
-        JSON.stringify({ accessToken: token }),
-      );
-
-      // Set refreshToken (used by refreshTokenApi)
-      if (refresh) {
-        localStorage.setItem('refreshToken', refresh);
-      }
+    ({ key, state }) => {
+      localStorage.setItem(key, JSON.stringify(state));
     },
-    { token: accessToken, refresh: refreshToken },
+    {
+      key: ACCESS_STORE_KEY,
+      state: buildAccessState(accessToken, refreshToken),
+    },
   );
 }
 
@@ -129,13 +125,18 @@ export const test = base.extend<AuthFixtures>({
       // Reuse saved state by navigating with existing storage
       const stateData = JSON.parse(fs.readFileSync(AUTH_STATE_PATH, 'utf-8'));
       // Apply stored localStorage entries
-      await page.goto('http://localhost:5666', { waitUntil: 'domcontentloaded' });
+      await page.goto('http://localhost:5666', {
+        waitUntil: 'domcontentloaded',
+      });
       if (stateData.origins?.[0]?.localStorage) {
-        await page.evaluate((entries: Array<{ name: string; value: string }>) => {
-          for (const entry of entries) {
-            localStorage.setItem(entry.name, entry.value);
-          }
-        }, stateData.origins[0].localStorage);
+        await page.evaluate(
+          (entries: Array<{ name: string; value: string }>) => {
+            for (const entry of entries) {
+              localStorage.setItem(entry.name, entry.value);
+            }
+          },
+          stateData.origins[0].localStorage,
+        );
       }
     } else {
       // Perform fresh login
@@ -150,7 +151,10 @@ export const test = base.extend<AuthFixtures>({
   },
 
   loginAs: async ({ browser }, use) => {
-    const loginAsUser = async (username: string, password: string): Promise<Page> => {
+    const loginAsUser = async (
+      username: string,
+      password: string,
+    ): Promise<Page> => {
       const context = await browser.newContext();
       const page = await context.newPage();
       await authenticateViaApi(page, username, password);
