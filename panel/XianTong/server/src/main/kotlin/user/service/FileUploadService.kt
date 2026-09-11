@@ -3,6 +3,7 @@ package com.dentalclinic.user.service
 import com.dentalclinic.admin.entity.UploadedFiles
 import com.dentalclinic.common.BaseService
 import io.ktor.http.content.*
+import io.ktor.utils.io.toByteArray
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withContext
@@ -38,8 +39,12 @@ class FileUploadService : BaseService() {
     suspend fun saveFile(userId: Long, part: PartData.FileItem): FileUploadResult {
         return withContext(Dispatchers.IO) {
             // Validate file size
-            val inputStream = part.streamProvider()
-            val bytes = inputStream.readBytes()
+            // 改用非阻塞的 provider()：已废弃的 streamProvider() 把上传流包成阻塞式
+            // InputStream，读它时线程会一直卡在 socket 上；toByteArray() 是
+            // ByteReadChannel 的 suspend 扩展，等数据时能让出线程。
+            // 注意 withContext(Dispatchers.IO) 不能随之去掉：下面的 Files.write
+            // 仍是阻塞文件 IO。
+            val bytes = part.provider().toByteArray()
             val size = bytes.size.toLong()
             
             if (size > maxSizeBytes) {

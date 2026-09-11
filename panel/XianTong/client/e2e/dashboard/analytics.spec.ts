@@ -319,7 +319,10 @@ test.describe('Dashboard Analytics - Home Path', () => {
     // preferences.ts sets defaultHomePath to /dashboard and the seeded menu
     // redirects that directory to its first child.
     await base.navigateTo('/');
-    await base.page.waitForLoadState('networkidle');
+    // navigateTo 只等 domcontentloaded，返回时 SPA 的路由守卫还没跑完，URL 仍是 "/"。
+    // 这条用例要等的信号本来就是「守卫把根路径重定向到看板」，所以直接等 URL；
+    // 原来的 networkidle 只是间接等到了它，一旦页面有轮询或长连接就会等到超时。
+    await base.page.waitForURL(/\/dashboard/, { timeout: 15_000 });
 
     expect(
       base.page.url(),

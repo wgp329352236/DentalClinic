@@ -51,6 +51,34 @@
 
 两点需要说明。其一，lint / check / test:unit / e2e 四道门扫描的都是磁盘文件而非 git 暂存区，因此它们在本节这批未跟踪文件在场的情况下就已经通过；后端两道门则是本次专门为入库补跑的，第一次执行 `compileKotlin` 时返回 `UP-TO-DATE`（复用缓存产物、等于没验证），改用 `cleanCompileKotlin` 强制重编后才算数。其二，新增的 10 个业务模块目前**没有 e2e 覆盖**（现有 94 个用例集中在 dashboard / system / modal / routing / ui-state），其正确性只有 typecheck、lint 与后端编译/测试保证，功能层面未经浏览器实测。
 
+### G. 清掉 F-6 记下的两项遗留
+
+#### G-1. `FileUploadService.saveFile` 改用非阻塞的 `provider()`
+
+- **改了什么**：`server/src/main/kotlin/user/service/FileUploadService.kt` 中读上传字节的两行（原为 `val inputStream = part.streamProvider()` 加 `val bytes = inputStream.readBytes()`）改为单行 `val bytes = part.provider().toByteArray()`，并新增 `import io.ktor.utils.io.toByteArray`。
+- **原因**：`streamProvider` 在 Ktor 3.5.0 已废弃，告警原文是「This API uses blocking InputStream. Please use provider() directly」。它把上传流包成阻塞式 `InputStream`，读的时候线程会一直卡在 socket 上；`provider()` 返回 `ByteReadChannel`，`toByteArray()` 是它的 suspend 扩展，等数据时能让出线程。API 选型是从 Gradle 缓存里的 `ktor-io-jvm-3.5.0.jar` 反编译确认的：`readRemaining()` 在 3.5.0 返回的是 `kotlinx.io.Source`（不是 okio，Ktor 3.x 已换 IO 库），凭印象写 `.buffer().readByteArray()` 会编译失败；而 `ByteReadChannelOperationsKt` 里本来就有 `toByteArray(ByteReadChannel, Continuation)`，直接用最省事。
+- **影响范围**：仅 C 端上传端点 `POST /api/v1/files/upload`。`withContext(Dispatchers.IO)` 保留未动——读取虽已非阻塞，但同函数内的 `Files.write(filePath, bytes)` 仍是阻塞文件 IO，去掉会让它跑到默认调度器上。`FileUploadRoutes.kt` 里 `part.release()` 在 `saveFile` 之后调用，读取时机安全，无需改动。
+
+#### G-2. 看板首页用例改等 URL 而非网络静默
+
+- **改了什么**：`client/e2e/dashboard/analytics.spec.ts` 的 `should land on the dashboard when opening the app root`，把 `await base.page.waitForLoadState('networkidle')` 换成 `await base.page.waitForURL(/\/dashboard/, { timeout: 15_000 })`。
+- **原因**：这条用例要等的信号本来就是「路由守卫把根路径重定向到看板」，`networkidle` 只是间接等到了它，一旦页面有轮询或长连接就会一直等到超时——E-4 里 notification 16.3 与 route-guard 19.3 正是这么被打红的。取证发现 `playwright-base.ts` 的 `navigateTo` 用的是 `waitUntil: 'domcontentloaded'`，返回时 SPA 守卫还没跑完、URL 仍是 `/`，所以这里的等待是必需的，不能直接删。
+- **影响范围**：单个用例。改完该用例耗时从 3.9s 降到 2.1s，因为 `networkidle` 必须额外等满 500ms 的网络静默窗口，而 URL 一变即可返回。后面那句 `expect(page.url()).toContain('/dashboard')` 保留：逻辑上已被 `waitForURL` 蕴含，但它承载的是业务断言与中文失败消息，`waitForURL` 只表达等待条件。
+
+#### G-3. 验证结果与一个验证边界
+
+| 验证项 | 命令 | 结果 |
+| --- | --- | --- |
+| 后端编译 | `./gradlew :server:cleanCompileKotlin :server:compileKotlin` | BUILD SUCCESSFUL，**F-3 记的那条 deprecation 告警已消失**（日志无任何 `w:` 行） |
+| 上传端到端 | curl 走 mock 微信登录取 token 后真实上传 | 上传返回 `size=70` 与原文件一致（字节无截断）；GET 回来的 md5 与原文件逐字节相同；6MB 文件被正确挡下（`文件大小不能超过5MB`）；随后 DELETE 清理成功 |
+| 代码风格 | `pnpm run lint` | EXIT=0 |
+| 依赖与类型 | `pnpm run check` | EXIT=0（cspell 475 文件 0 issues） |
+| 端到端 | `pnpm exec playwright test` | 94 passed / 0 failed / 0 skipped，用例分布与 F 节基线完全一致 |
+
+两点说明。其一，微信登录在 `UserAuthService.wechatLogin` 里是 mock 的（`openid = "mock_openid_${code}"`），任意 code 都会自动建号发 token，因此上传链路可以真实跑通而不必依赖微信侧凭证。这也是本节改上传读取方式的底气：不止编译通过，字节正确性是实测过的。其二，`pnpm run check` 里的 typecheck 这次是 `FULL TURBO` 缓存命中（125ms），原因是 `@vben/web-antd:typecheck` 只扫描 `apps/web-antd/`，而 `client/e2e/` 不在该包内——**本次对 e2e 的改动并未被静态类型检查覆盖**，其正确性靠运行时（94 passed）与 IDE 语言服务验证。`waitForURL` 接 RegExp 加 options 是 Playwright 的合法重载，但这一层保证不如编译强，值得后续补一个覆盖 `e2e/` 的 typecheck 任务。
+
+本节开始时后端与前端 dev server 均已停止（8080 无监听，进程列表里只剩 Gradle 与 Kotlin 编译守护进程），后端按 `./gradlew :server:run` 重新拉起；前端由 `playwright.config.ts` 的 `webServer`（`pnpm dev:antd`，端口 5666，`reuseExistingServer: true`）自动启动，无需手动干预。启动日志中另有一条既有告警：`[Referral]: 未配置 referral.shareBaseUrl，分享链接仍指向占位域名 https://example.com/register，上线前必须替换`，属 F-3 入库代码的配置项，本次未动。
+
 ## 2026-09-10
 
 本轮集中修复「工程链路可运行性」与「测试有效性」，共四项（B/D/C/A），并顺带修复两个真实缺陷。
