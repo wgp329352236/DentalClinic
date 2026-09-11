@@ -3,6 +3,9 @@ package com.dentalclinic.admin.service
 import com.dentalclinic.admin.entity.PointsRecords
 import com.dentalclinic.admin.entity.PointsRules
 import com.dentalclinic.admin.entity.UserPointsSummary
+import com.dentalclinic.admin.util.ConflictException
+import com.dentalclinic.admin.util.NotFoundException
+import com.dentalclinic.admin.util.ValidationException
 import com.dentalclinic.common.BaseService
 import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.Serializable
@@ -10,11 +13,13 @@ import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greaterEq
 import org.jetbrains.exposed.v1.core.lessEq
+import org.jetbrains.exposed.v1.r2dbc.andWhere
 import org.jetbrains.exposed.v1.r2dbc.insert
 import org.jetbrains.exposed.v1.r2dbc.selectAll
 import org.jetbrains.exposed.v1.r2dbc.update
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 
 /**
  * Admin points management service.
@@ -48,6 +53,7 @@ class AdminPointsService : BaseService() {
      * Create a new points rule.
      */
     suspend fun createPointsRule(request: CreatePointsRuleRequest): Long = dbQuery {
+        assertActionTypeAvailable(request.actionType)
         PointsRules.insert {
                 it[ruleName] = request.ruleName
                 it[ruleType] = request.ruleType
@@ -65,6 +71,11 @@ class AdminPointsService : BaseService() {
      * Update an existing points rule.
      */
     suspend fun updatePointsRule(id: Long, request: UpdatePointsRuleRequest): Unit = dbQuery {
+        val exists = PointsRules.selectAll()
+            .where { PointsRules.id eq id }
+            .count() > 0
+        if (!exists) throw NotFoundException("积分规则不存在")
+        assertActionTypeAvailable(request.actionType, excludeId = id)
         PointsRules.update({ PointsRules.id eq id }) {
                 it[ruleName] = request.ruleName
                 it[ruleType] = request.ruleType
@@ -79,9 +90,31 @@ class AdminPointsService : BaseService() {
     }
 
     /**
+     * 校验 actionType 尚未被其它规则占用。
+     *
+     * points_rule.action_type 上有唯一索引（见 SchemaMigration），直接撞索引会抛数据库异常变成 500，
+     * 这里提前拦下给出可读的 409。业务语义是「一个 actionType 只能对应一条规则」，
+     * 多行时消费/推荐等链路取哪一条取决于查询顺序，积分额度会漂移。
+     *
+     * @param excludeId 更新场景下排除自身
+     */
+    private suspend fun assertActionTypeAvailable(actionType: String, excludeId: Long? = null) {
+        val conflict = PointsRules.selectAll()
+            .where { PointsRules.actionType eq actionType }
+            .toList()
+            .firstOrNull { it[PointsRules.id] != excludeId }
+        if (conflict != null) {
+            throw ConflictException(
+                "积分规则类型「$actionType」已存在（规则ID ${conflict[PointsRules.id]}），同一类型只能配置一条"
+            )
+        }
+    }
+
+    /**
      * Add points to a user. Public API for other admin services to call.
      * Delegates to BaseService.addPointsToUser for the core logic.
      *
+     * @param sourceId 业务来源ID（如消费记录ID），写入积分流水便于溯源
      * @return the new balance after adjustment
      */
     suspend fun addPoints(
@@ -89,8 +122,9 @@ class AdminPointsService : BaseService() {
         amount: Int,
         sourceType: String,
         description: String,
-        validityMonths: Int = 12
-    ): Int = addPointsToUser(userId, amount, sourceType, description, validityMonths)
+        validityMonths: Int = 12,
+        sourceId: Long? = null
+    ): Int = addPointsToUser(userId, amount, sourceType, description, validityMonths, sourceId)
 
     /**
      * Adjust user's points manually (admin operation with validation).
@@ -100,7 +134,10 @@ class AdminPointsService : BaseService() {
         val currentBalance = getCurrentPointsBalance(userId)
         val newBalance = currentBalance + amount
         if (newBalance < 0) {
-            throw IllegalArgumentException("积分余额不足，当前余额：$currentBalance")
+            // 积分不足是可预期的业务校验，必须抛 ValidationException 走 400：
+            // 抛 IllegalArgumentException 会落入 StatusPages 的 exception<Exception> 兜底，
+            // 管理员只看到「服务器内部错误」而丢失了余额提示，日志还被记成未处理异常。
+            throw ValidationException("积分余额不足，当前余额：$currentBalance")
         }
 
         addPoints(
@@ -110,6 +147,21 @@ class AdminPointsService : BaseService() {
             description = "管理员手动调整：$reason（操作人：$operator）"
         )
     }
+
+    /**
+     * 解析 yyyy-MM-dd 的日期筛选参数。
+     *
+     * 格式非法时抛 ValidationException（400），而不是让 DateTimeParseException
+     * 落入 500 兜底：传错日期是调用方的输入问题，不是服务器故障。
+     *
+     * @param endOfDay true 补 23:59:59（含当天），false 补 00:00:00
+     */
+    private fun parseDateFilter(date: String, endOfDay: Boolean): LocalDateTime =
+        try {
+            LocalDateTime.parse(date + if (endOfDay) "T23:59:59" else "T00:00:00")
+        } catch (e: DateTimeParseException) {
+            throw ValidationException("日期格式应为 yyyy-MM-dd，收到：$date")
+        }
 
     /** Read current points balance for a user (summary or fallback to records sum). */
     private suspend fun getCurrentPointsBalance(userId: Long): Int {
@@ -140,21 +192,21 @@ class AdminPointsService : BaseService() {
         var query = PointsRecords.selectAll()
 
             if (userId != null) {
-                query = query.where { PointsRecords.userId eq userId }
+                query = query.andWhere { PointsRecords.userId eq userId }
             }
 
             if (sourceType != null) {
-                query = query.where { PointsRecords.sourceType eq sourceType }
+                query = query.andWhere { PointsRecords.sourceType eq sourceType }
             }
 
             if (startDate != null) {
-                val startDateTime = LocalDateTime.parse(startDate + "T00:00:00")
-                query = query.where { PointsRecords.createdAt greaterEq startDateTime }
+                val startDateTime = parseDateFilter(startDate, endOfDay = false)
+                query = query.andWhere { PointsRecords.createdAt greaterEq startDateTime }
             }
 
             if (endDate != null) {
-                val endDateTime = LocalDateTime.parse(endDate + "T23:59:59")
-                query = query.where { PointsRecords.createdAt lessEq endDateTime }
+                val endDateTime = parseDateFilter(endDate, endOfDay = true)
+                query = query.andWhere { PointsRecords.createdAt lessEq endDateTime }
             }
 
             val total = query.count()

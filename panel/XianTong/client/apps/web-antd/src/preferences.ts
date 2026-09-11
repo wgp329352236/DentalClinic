@@ -19,6 +19,9 @@ export const overridesPreferences = defineOverridesPreferences({
   // overrides
   app: {
     accessMode: 'backend',
+    // 首页指向工作台（数据看板），与需求 4.10「管理端首页展示核心运营数据看板」一致，
+    // 也与后端 VbenRoutes 下发的 userInfo.homePath="/dashboard" 对齐：
+    // 两者不一致时，根路径的重定向与登录后跳转会落到两个不同页面。
     defaultHomePath: '/dashboard',
     enableRefreshToken: true,
     name: import.meta.env.VITE_APP_TITLE,

@@ -51,8 +51,8 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
   async function doRefreshToken() {
     const accessStore = useAccessStore();
     const resp = await refreshTokenApi();
-    // 后端返回 {code: 0, data: "newToken"}，baseRequestClient 返回原始响应
-    const newToken = resp.data?.data || resp.data;
+    // baseRequestClient 为 raw 模式：resp 是 AxiosResponse，resp.data 是后端 {code,data,message} 包装，新 token 在 resp.data.data
+    const newToken = resp.data.data;
     accessStore.setAccessToken(newToken);
     return newToken;
   }

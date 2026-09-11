@@ -9,6 +9,9 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
+import org.slf4j.LoggerFactory
+
+private val logger = LoggerFactory.getLogger("UserCouponRoutes")
 
 /**
  * User coupon routes (protected by JWT).
@@ -77,7 +80,11 @@ fun Application.userCouponRoutes(couponService: CouponService) {
                         }
                     }
                 } catch (e: Exception) {
-                    call.respond(ApiResponse<Unit>(code = 500, message = "核销失败: ${e.message}"))
+                    // 业务错误已由 CouponRedeemResult.Error 走 400 分支，落到这里的只能是底层异常
+                    val (code, message) = translateApiError(
+                        logger, "[Coupon]: 用户 $userId 核销", "核销失败，请稍后重试", e
+                    )
+                    call.respond(ApiResponse<Unit>(code = code, message = message))
                 }
             }
 
@@ -115,7 +122,13 @@ fun Application.userCouponRoutes(couponService: CouponService) {
                         }
                     }
                 } catch (e: Exception) {
-                    call.respond(ApiResponse<Unit>(code = 500, message = "领取失败: ${e.message}"))
+                    val (code, message) = translateApiError(
+                        logger,
+                        "[Coupon]: 用户 $userId 领取优惠券, templateId=$templateId",
+                        "领取失败，请稍后重试",
+                        e
+                    )
+                    call.respond(ApiResponse<Unit>(code = code, message = message))
                 }
             }
             }

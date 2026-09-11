@@ -2,6 +2,7 @@ package com.dentalclinic.admin.service
 
 import com.dentalclinic.admin.dto.response.*
 import com.dentalclinic.admin.entity.*
+import com.dentalclinic.admin.util.ConflictException
 import com.dentalclinic.admin.util.ValidationException
 import com.dentalclinic.common.BaseService
 import kotlinx.coroutines.flow.toList
@@ -9,10 +10,16 @@ import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.inList
+import org.jetbrains.exposed.v1.core.like
+import org.jetbrains.exposed.v1.core.lowerCase
+import org.jetbrains.exposed.v1.core.or
+import org.jetbrains.exposed.v1.r2dbc.andWhere
 import org.jetbrains.exposed.v1.r2dbc.deleteWhere
 import org.jetbrains.exposed.v1.r2dbc.insert
 import org.jetbrains.exposed.v1.r2dbc.selectAll
 import org.jetbrains.exposed.v1.r2dbc.update
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.time.LocalDateTime
 
 /**
@@ -238,23 +245,37 @@ class ScheduleService : BaseService() {
  */
 class AppointmentAdminService : BaseService() {
 
+    /**
+     * 预约列表。
+     *
+     * page/pageSize 均为可选：不传时返回全量（下拉选择器等场景需一次拿全），
+     * 传了才分页。分页时 total 是符合筛选条件的总行数，而非当页行数。
+     */
     suspend fun listAppointments(
-        status: String?, clinicId: Long?, doctorId: Long?
-    ): Map<String, Any> = dbQuery {
+        status: String?, clinicId: Long?, doctorId: Long?, userId: Long? = null,
+        page: Int? = null, pageSize: Int? = null
+    ): AppointmentListResponse = dbQuery {
         var query = Appointments.selectAll()
         if (!status.isNullOrBlank()) {
-            query = query.where { Appointments.status eq status }
+            query = query.andWhere { Appointments.status eq status }
         }
         if (clinicId != null) {
-            query = query.where { Appointments.clinicId eq clinicId }
+            query = query.andWhere { Appointments.clinicId eq clinicId }
         }
         if (doctorId != null) {
-            query = query.where { Appointments.doctorId eq doctorId }
+            query = query.andWhere { Appointments.doctorId eq doctorId }
+        }
+        // 按客户过滤：供「录入消费」弹窗联动该客户的预约
+        if (userId != null) {
+            query = query.andWhere { Appointments.userId eq userId }
         }
 
-        val allRows = query
-            .orderBy(Appointments.createdAt, SortOrder.DESC)
-            .toList()
+        val total = query.count()
+        var rowsQuery = query.orderBy(Appointments.createdAt, SortOrder.DESC)
+        if (page != null && pageSize != null) {
+            rowsQuery = rowsQuery.limit(pageSize).offset(((page - 1) * pageSize).toLong())
+        }
+        val allRows = rowsQuery.toList()
 
         // Batch load reference data to avoid N+1 queries
         val userIds = allRows.map { it[Appointments.userId] }.distinct()
@@ -309,7 +330,9 @@ class AppointmentAdminService : BaseService() {
             )
         }
 
-        mapOf("list" to list, "total" to list.size)
+        // 用可序列化 DTO 包装：原先返回 Map<String, Any>，Any 无序列化器，
+        // 会在响应阶段抛 SerializationException 使整个接口 400。
+        AppointmentListResponse(list = list, total = total, page = page, pageSize = pageSize)
     }
 
     suspend fun getAppointmentDetail(id: Long): AppointmentDetailResponse = dbQuery {
@@ -410,32 +433,42 @@ class AppointmentAdminService : BaseService() {
  */
 class CustomerService(private val pointsService: AdminPointsService) : BaseService() {
 
+    /**
+     * 客户列表。
+     *
+     * page/pageSize 均为可选：不传时返回全量（下拉选择器等场景需一次拿全），
+     * 传了才分页。分页时 total 是符合筛选条件的总行数，而非当页行数。
+     */
     suspend fun listCustomers(
-        keyword: String?, clinicId: Long?
-    ): Map<String, Any> = dbQuery {
+        keyword: String?, clinicId: Long?,
+        page: Int? = null, pageSize: Int? = null
+    ): CustomerListResponse = dbQuery {
         var query = Users.selectAll()
         if (clinicId != null) {
-            query = query.where { Users.primaryClinicId eq clinicId }
+            query = query.andWhere { Users.primaryClinicId eq clinicId }
         }
-        val allUsers = query
-            .orderBy(Users.createdAt, SortOrder.DESC)
-            .toList()
-
-        // Filter by keyword in memory (R2DBC doesn't support like)
-        val filteredUsers = if (!keyword.isNullOrBlank()) {
-            val kw = keyword.lowercase()
-            allUsers.filter { user ->
-                val phone = user[Users.phone]?.lowercase() ?: ""
-                val nickname = user[Users.nickname]?.lowercase() ?: ""
-                val realName = user[Users.realName]?.lowercase() ?: ""
-                phone.contains(kw) || nickname.contains(kw) || realName.contains(kw)
+        // keyword 下推到 SQL：原先是「全表捞出再内存过滤」，客户量增长后每翻一页都要扫全表，
+        // 且内存过滤使分页无法在数据库层完成（total 与当页数据必须同源）。
+        // PostgreSQL 的 LIKE 大小写敏感，而原内存过滤用 lowercase() 不敏感，
+        // 故两侧都 lowerCase() 保持原行为，不造成功能退化。
+        if (!keyword.isNullOrBlank()) {
+            val pattern = "%${keyword.trim().lowercase()}%"
+            query = query.andWhere {
+                (Users.phone.lowerCase() like pattern) or
+                    (Users.nickname.lowerCase() like pattern) or
+                    (Users.realName.lowerCase() like pattern)
             }
-        } else {
-            allUsers
         }
+
+        val total = query.count()
+        var rowsQuery = query.orderBy(Users.createdAt, SortOrder.DESC)
+        if (page != null && pageSize != null) {
+            rowsQuery = rowsQuery.limit(pageSize).offset(((page - 1) * pageSize).toLong())
+        }
+        val pagedUsers = rowsQuery.toList()
 
         // Batch load wallets and member levels
-        val userIds = filteredUsers.map { it[Users.id] }
+        val userIds = pagedUsers.map { it[Users.id] }
         val walletsMap = if (userIds.isNotEmpty()) {
             UserWallets.selectAll()
                 .where { UserWallets.userId inList userIds }
@@ -458,7 +491,22 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
                 .associateBy { it[MemberLevels.id] }
         } else emptyMap()
 
-        val list = filteredUsers.map { user ->
+        // 累计消费：取折后金额（ConsumptionRecords.amount），与营收看板口径一致；
+        // 已退款记录不计入。一次查询 + 内存聚合，避免逐客户 N+1。
+        val consumptionMap = if (userIds.isNotEmpty()) {
+            ConsumptionRecords.selectAll()
+                .where {
+                    (ConsumptionRecords.userId inList userIds) and
+                        (ConsumptionRecords.status eq "success")
+                }
+                .toList()
+                .groupBy { it[ConsumptionRecords.userId] }
+                .mapValues { (_, records) ->
+                    records.sumOf { it[ConsumptionRecords.amount].toDouble() }
+                }
+        } else emptyMap()
+
+        val list = pagedUsers.map { user ->
             val wallet = walletsMap[user[Users.id]]
             val uml = umlMap[user[Users.id]]
             val levelId = uml?.get(UserMemberLevels.levelId)
@@ -477,12 +525,14 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
                 bonusBalance = wallet?.get(UserWallets.bonusBalance)?.toDouble() ?: 0.0,
                 memberLevel = ml?.get(MemberLevels.levelCode),
                 levelName = ml?.get(MemberLevels.levelName),
-                totalConsumption = 0.0, // TODO: calculate from consumption records
+                totalConsumption = consumptionMap[user[Users.id]] ?: 0.0,
                 createdAt = user[Users.createdAt].toString()
             )
         }
 
-        mapOf("list" to list, "total" to list.size)
+        // 用可序列化 DTO 包装：原先返回 Map<String, Any>，Any 无序列化器，
+        // 会在响应阶段抛 SerializationException 使整个接口 400。
+        CustomerListResponse(list = list, total = total, page = page, pageSize = pageSize)
     }
 
     suspend fun getCustomerDetail(id: Long): CustomerDetailResponse = dbQuery {
@@ -531,23 +581,104 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
         )
     }
 
-    suspend fun adjustWallet(userId: Long, amount: Double): Unit = dbQuery {
+    /**
+     * 管理端人工调整客户余额。
+     *
+     * 三项此前缺失的保障：
+     * - 乐观锁：与充值、消费扣款一致地按 version 更新，避免并发调整互相覆盖丢失其中一笔；
+     * - reason 必填并落流水：资金调整必须留痕。不能只依赖 admin_audit_log，
+     *   它会被 AdminCleanupService 清理 90 天前的记录，而账目需长期可追溯；
+     * - 余额不可为负：扣减额超过现有余额时直接拒绝，而不是把钱包调成负数。
+     *
+     * 调整只作用于本金余额（balance），赠送余额（bonusBalance）由充值赠送与推荐奖励产生，
+     * 不开放人工修改，避免绕过营销规则凭空造赠送金额。
+     *
+     * @param amount 正数=入账，负数=出账
+     * @param operator 操作员（管理端账号），写入资金流水
+     */
+    suspend fun adjustWallet(
+        userId: Long,
+        amount: Double,
+        reason: String,
+        operator: String
+    ): WalletAdjustResult = dbQuery {
+        if (reason.isBlank()) {
+            throw ValidationException("调整原因不能为空")
+        }
+        val change = amount.toBigDecimal().setScale(2, RoundingMode.HALF_UP)
+        if (change == BigDecimal.ZERO.setScale(2)) {
+            throw ValidationException("调整金额不能为0")
+        }
+
         val wallet = UserWallets.selectAll()
             .where { UserWallets.userId eq userId }
             .toList().firstOrNull()
 
+        // 钱包缺失时允许管理端直接开户，但只能入账：没有钱包等于余额为 0，扣减必然为负
         if (wallet == null) {
+            if (change < BigDecimal.ZERO) {
+                throw ValidationException("客户尚无钱包（余额为0），无法扣减 ${change.negate()} 元")
+            }
             UserWallets.insert {
                 it[UserWallets.userId] = userId
-                it[balance] = amount.toBigDecimal()
-                it[bonusBalance] = 0.toBigDecimal()
-                it[version] = 1
+                it[balance] = change
+                it[bonusBalance] = BigDecimal.ZERO
+                it[version] = 0
+                it[updatedAt] = LocalDateTime.now()
             }
-        } else {
-            UserWallets.update({ UserWallets.userId eq userId }) {
-                it[balance] = wallet[UserWallets.balance] + amount.toBigDecimal()
-            }
+            recordWalletTransaction(
+                userId = userId,
+                changeType = "adjust",
+                amount = change,
+                balanceBefore = BigDecimal.ZERO,
+                balanceAfter = change,
+                reason = reason.take(200),
+                operatorName = operator
+            )
+            return@dbQuery WalletAdjustResult(
+                balance = change.toDouble(),
+                bonusBalance = 0.0,
+                version = 0
+            )
         }
+
+        val balanceBefore = wallet[UserWallets.balance]
+        val bonusBefore = wallet[UserWallets.bonusBalance]
+        val balanceAfter = balanceBefore.add(change)
+        if (balanceAfter < BigDecimal.ZERO) {
+            throw ValidationException("调整后余额不能为负：当前 $balanceBefore 元，本次调整 $change 元")
+        }
+
+        val currentVersion = wallet[UserWallets.version]
+        val updated = UserWallets.update({
+            (UserWallets.userId eq userId) and (UserWallets.version eq currentVersion)
+        }) {
+            it[UserWallets.balance] = balanceAfter
+            it[UserWallets.version] = currentVersion + 1
+            // 该列只有 defaultExpression，不显式赋值则更新时不会刷新
+            it[UserWallets.updatedAt] = LocalDateTime.now()
+        }
+        if (updated == 0) {
+            throw ConflictException("客户余额已被其他操作变更，请重新提交")
+        }
+
+        recordWalletTransaction(
+            userId = userId,
+            changeType = "adjust",
+            amount = change,
+            balanceBefore = balanceBefore,
+            balanceAfter = balanceAfter,
+            bonusBefore = bonusBefore,
+            bonusAfter = bonusBefore,
+            reason = reason.take(200),
+            operatorName = operator
+        )
+
+        WalletAdjustResult(
+            balance = balanceAfter.toDouble(),
+            bonusBalance = bonusBefore.toDouble(),
+            version = currentVersion + 1
+        )
     }
 
     suspend fun adjustLevel(userId: Long, levelCode: Int): Unit = dbQuery {

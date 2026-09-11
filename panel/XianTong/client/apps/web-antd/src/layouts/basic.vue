@@ -4,11 +4,7 @@ import { useRouter } from 'vue-router';
 
 import { AuthenticationLoginExpiredModal } from '@vben/common-ui';
 import { useWatermark } from '@vben/hooks';
-import {
-  BasicLayout,
-  LockScreen,
-  UserDropdown,
-} from '@vben/layouts';
+import { BasicLayout, LockScreen, UserDropdown } from '@vben/layouts';
 import { preferences, usePreferences } from '@vben/preferences';
 import { useAccessStore, useUserStore } from '@vben/stores';
 

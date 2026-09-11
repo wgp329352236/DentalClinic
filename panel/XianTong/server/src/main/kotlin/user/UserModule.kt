@@ -1,5 +1,6 @@
 package com.dentalclinic.user
 
+import com.dentalclinic.common.ReferralRewardService
 import com.dentalclinic.user.route.*
 import com.dentalclinic.user.service.*
 import io.ktor.server.application.*
@@ -30,7 +31,9 @@ fun Application.userRouting() {
     val consumptionService = ConsumptionRecordService()
     val rechargeService = RechargeService()
     val pointsService = PointsService()
-    val referralService = ReferralService(pointsService)
+    // 推荐奖励发放与 admin 端消费录入链路共用同一实现（common 包）
+    val referralRewardService = ReferralRewardService()
+    val referralService = ReferralService(pointsService, referralRewardService)
     val couponService = CouponService()
     val notificationService = NotificationService()
     val fileUploadService = FileUploadService()

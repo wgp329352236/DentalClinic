@@ -23,7 +23,7 @@ class AdminUserService : BaseService() {
             var query = AdminUsers.selectAll()
 
             if (!keyword.isNullOrBlank()) {
-                query = query.where {
+                query = query.andWhere {
                     (AdminUsers.username like "%$keyword%") or (AdminUsers.displayName like "%$keyword%")
                 }
             }

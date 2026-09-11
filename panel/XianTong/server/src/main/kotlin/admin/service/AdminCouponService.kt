@@ -8,6 +8,9 @@ import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.inList
+import org.jetbrains.exposed.v1.r2dbc.andWhere
+import org.jetbrains.exposed.v1.r2dbc.deleteWhere
 import org.jetbrains.exposed.v1.r2dbc.insert
 import org.jetbrains.exposed.v1.r2dbc.selectAll
 import org.jetbrains.exposed.v1.r2dbc.update
@@ -206,7 +209,8 @@ class AdminCouponService : BaseService() {
                 ?: return@dbQuery ScanRedeemResult.Error("优惠券模板不存在")
 
             val now = LocalDateTime.now()
-            if (now.isBefore(template[CouponTemplates.validFrom]) || now.isAfter(template[CouponTemplates.validTo])) {
+            if (now.isBefore(template[CouponTemplates.validFrom]) ||
+                now.isAfter(template[CouponTemplates.validTo])) {
                 return@dbQuery ScanRedeemResult.Error("优惠券已过期")
             }
 
@@ -228,6 +232,85 @@ class AdminCouponService : BaseService() {
         } catch (e: Exception) {
             ScanRedeemResult.Error("核销失败: ${e.message}")
         }
+    }
+
+    /**
+     * 分页查询用户优惠券记录（支持按用户/模板/状态筛选）。
+     */
+    suspend fun getUserCoupons(
+        userId: Long?,
+        templateId: Long?,
+        status: String?,
+        page: Int,
+        pageSize: Int
+    ): UserCouponsResponse = dbQuery {
+        var query = UserCoupons.selectAll()
+
+        if (userId != null) {
+            query = query.andWhere { UserCoupons.userId eq userId }
+        }
+        if (templateId != null) {
+            query = query.andWhere { UserCoupons.templateId eq templateId }
+        }
+        if (!status.isNullOrBlank()) {
+            query = query.andWhere { UserCoupons.status eq status }
+        }
+
+        val total = query.count()
+        val rows = query
+            .orderBy(UserCoupons.createdAt, SortOrder.DESC)
+            .limit(pageSize).offset((page - 1).toLong())
+            .toList()
+
+        // 批量加载模板名称，避免 N+1 查询
+        val templateIds = rows.map { it[UserCoupons.templateId] }.distinct()
+        val templateMap = if (templateIds.isNotEmpty()) {
+            CouponTemplates.selectAll()
+                .where { CouponTemplates.id inList templateIds }
+                .toList()
+                .associateBy { it[CouponTemplates.id] }
+        } else emptyMap()
+
+        val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+        val list = rows.map { row ->
+            val template = templateMap[row[UserCoupons.templateId]]
+            UserCouponAdminDto(
+                id = row[UserCoupons.id],
+                userId = row[UserCoupons.userId],
+                templateId = row[UserCoupons.templateId],
+                couponName = template?.get(CouponTemplates.name) ?: "未知优惠券",
+                couponCode = row[UserCoupons.couponCode],
+                // 券属性一并返回：录入消费时需要据此判断能否抵扣（仅现金券、需达门槛、需在有效期内）
+                couponType = template?.get(CouponTemplates.couponType),
+                faceValue = template?.get(CouponTemplates.faceValue)?.toDouble(),
+                minConsumption = template?.get(CouponTemplates.minConsumption)?.toDouble(),
+                validTo = template?.get(CouponTemplates.validTo)?.format(formatter),
+                status = row[UserCoupons.status],
+                usedAt = row[UserCoupons.usedAt]?.format(formatter),
+                createdAt = row[UserCoupons.createdAt].format(formatter)
+            )
+        }
+
+        UserCouponsResponse(list = list, total = total, page = page, pageSize = pageSize)
+    }
+
+    /**
+     * 删除优惠券模板。已发放过的模板禁止物理删除，避免破坏用户券的引用完整性。
+     */
+    suspend fun deleteCouponTemplate(id: Long): DeleteCouponResult = dbQuery {
+        val template = CouponTemplates.selectAll()
+            .where { CouponTemplates.id eq id }
+            .toList()
+            .singleOrNull()
+            ?: return@dbQuery DeleteCouponResult.Error("优惠券模板不存在")
+
+        val issued = template[CouponTemplates.issuedQuantity]
+        if (issued > 0) {
+            return@dbQuery DeleteCouponResult.Error("该模板已发放 $issued 张，无法删除，建议改为停用")
+        }
+
+        CouponTemplates.deleteWhere { CouponTemplates.id eq id }
+        DeleteCouponResult.Success
     }
 
     /**
@@ -318,4 +401,36 @@ sealed class ScanRedeemResult {
     data class Success(val couponName: String, val faceValue: Double) : ScanRedeemResult()
     @Serializable
     data class Error(val message: String) : ScanRedeemResult()
+}
+
+@Serializable
+data class UserCouponAdminDto(
+    val id: Long,
+    val userId: Long,
+    val templateId: Long,
+    val couponName: String,
+    val couponCode: String,
+    /** discount/cash/service，消费录入仅支持 cash 抵扣 */
+    val couponType: String? = null,
+    val faceValue: Double? = null,
+    val minConsumption: Double? = null,
+    val validTo: String? = null,
+    val status: String,
+    val usedAt: String?,
+    val createdAt: String
+)
+
+@Serializable
+data class UserCouponsResponse(
+    val list: List<UserCouponAdminDto>,
+    val total: Long,
+    val page: Int,
+    val pageSize: Int
+)
+
+sealed class DeleteCouponResult {
+    @Serializable
+    object Success : DeleteCouponResult()
+    @Serializable
+    data class Error(val message: String) : DeleteCouponResult()
 }

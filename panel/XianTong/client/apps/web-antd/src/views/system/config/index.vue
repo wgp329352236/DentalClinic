@@ -1,11 +1,33 @@
 <script lang="ts" setup>
-import { ref, onMounted } from 'vue';
+import type { TableColumnsType } from 'ant-design-vue';
+
+import { onMounted, ref } from 'vue';
 
 import { Page } from '@vben/common-ui';
 
-import { Button, Card, Input, InputNumber, message, Switch, Table, Tag } from 'ant-design-vue';
+import {
+  Button,
+  Card,
+  Input,
+  InputNumber,
+  message,
+  Switch,
+  Table,
+  Tag,
+} from 'ant-design-vue';
 
 import { getConfigs, updateConfig } from '#/api/config';
+
+/**
+ * 后端 configType → 前端编辑控件类型。
+ *
+ * 用查表代替嵌套三元：unicorn/no-nested-ternary 要求给嵌套部分加括号，
+ * 而 oxfmt 又会把括号拆回缩进链式写法，两个工具会互相改回去。
+ */
+const valueTypeMap: Record<string, string> = {
+  bool: 'boolean',
+  int: 'number',
+};
 
 const configs = ref<any[]>([]);
 const loading = ref(true);
@@ -25,7 +47,7 @@ async function fetchConfigs() {
             flat.push({
               key: item.configKey,
               value: item.configValue,
-              valueType: item.configType === 'int' ? 'number' : item.configType === 'bool' ? 'boolean' : 'string',
+              valueType: valueTypeMap[item.configType] ?? 'string',
               category: item.category || group.category,
               description: item.description,
               sensitive: item.isSensitive === 1,
@@ -38,7 +60,7 @@ async function fetchConfigs() {
       }
       configs.value = flat;
     }
-  } catch (_) {}
+  } catch {}
   loading.value = false;
 }
 
@@ -58,18 +80,18 @@ async function saveEdit(record: any) {
     record.value = editValue.value;
     editingKey.value = '';
     await fetchConfigs();
-  } catch (e: any) {
-    message.error(e.message || '更新失败');
+  } catch (error: any) {
+    message.error(error.message || '更新失败');
   }
 }
 
 function maskSensitive(value: string, sensitive: boolean): string {
   if (!sensitive || !value) return value;
   if (value.length <= 4) return '••••';
-  return '••••••••' + value.slice(-4);
+  return `••••••••${value.slice(-4)}`;
 }
 
-const columns = [
+const columns: TableColumnsType = [
   { title: '分类', dataIndex: 'category', width: 120 },
   { title: '配置项', dataIndex: 'key', width: 200 },
   { title: '描述', dataIndex: 'description', ellipsis: true },
@@ -85,26 +107,60 @@ onMounted(fetchConfigs);
 <template>
   <Page title="系统配置" auto-content-height>
     <Card :loading="loading">
-      <Table :columns="columns" :data-source="configs" :pagination="false" row-key="key" size="small" :scroll="{ y: 500 }">
+      <Table
+        :columns="columns"
+        :data-source="configs"
+        :pagination="false"
+        row-key="key"
+        size="small"
+        :scroll="{ y: 500 }"
+      >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'value'">
             <template v-if="editingKey === record.key">
-              <Input v-if="record.valueType === 'string'" v-model:value="editValue" size="small" />
-              <InputNumber v-else-if="record.valueType === 'number'" v-model:value="editValue" size="small" :min="record.min" :max="record.max" />
-              <Switch v-else-if="record.valueType === 'boolean'" :checked="editValue === 'true'" @change="(v: boolean) => editValue = String(v)" size="small" />
+              <Input
+                v-if="record.valueType === 'string'"
+                v-model:value="editValue"
+                size="small"
+              />
+              <InputNumber
+                v-else-if="record.valueType === 'number'"
+                v-model:value="editValue"
+                size="small"
+                :min="record.min"
+                :max="record.max"
+              />
+              <Switch
+                v-else-if="record.valueType === 'boolean'"
+                :checked="editValue === 'true'"
+                @change="
+                  (v: any) => {
+                    editValue = String(v);
+                  }
+                "
+                size="small"
+              />
               <Input v-else v-model:value="editValue" size="small" />
             </template>
-            <span v-else>{{ maskSensitive(record.value, record.sensitive) }}</span>
+            <span v-else>{{
+              maskSensitive(record.value, record.sensitive)
+            }}</span>
           </template>
           <template v-if="column.key === 'hotReload'">
-            <Tag :color="record.hotReload ? 'green' : 'default'">{{ record.hotReload ? '热更新' : '需重启' }}</Tag>
+            <Tag :color="record.hotReload ? 'green' : 'default'">
+              {{ record.hotReload ? '热更新' : '需重启' }}
+            </Tag>
           </template>
           <template v-if="column.key === 'action'">
             <template v-if="editingKey === record.key">
-              <Button type="link" size="small" @click="saveEdit(record)">保存</Button>
+              <Button type="link" size="small" @click="saveEdit(record)">
+                保存
+              </Button>
               <Button type="link" size="small" @click="cancelEdit">取消</Button>
             </template>
-            <Button v-else type="link" size="small" @click="startEdit(record)">编辑</Button>
+            <Button v-else type="link" size="small" @click="startEdit(record)">
+              编辑
+            </Button>
           </template>
         </template>
       </Table>

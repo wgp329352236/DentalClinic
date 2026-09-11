@@ -1,6 +1,7 @@
 package com.dentalclinic.user.route
 
 import com.dentalclinic.admin.dto.response.ApiResponse
+import com.dentalclinic.admin.util.ConflictException
 import com.dentalclinic.user.auth.UserJwtConfig
 import com.dentalclinic.user.service.RechargeResult
 import com.dentalclinic.user.service.RechargeService
@@ -10,7 +11,10 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
+import org.slf4j.LoggerFactory
 import java.math.BigDecimal
+
+private val logger = LoggerFactory.getLogger("UserRechargeRoutes")
 
 /**
  * User recharge routes (protected by JWT).
@@ -59,6 +63,7 @@ fun Application.userRechargeRoutes(rechargeService: RechargeService) {
                                     amount = result.amount,
                                     bonusAmount = result.bonusAmount,
                                     totalAdded = result.totalAdded,
+                                    pointsEarned = result.pointsEarned,
                                     paidAt = result.paidAt
                                 )
                             ))
@@ -70,11 +75,18 @@ fun Application.userRechargeRoutes(rechargeService: RechargeService) {
                             ))
                         }
                     }
-                } catch (e: Exception) {
+                } catch (e: ConflictException) {
+                    // 乐观锁冲突属可重试的并发问题，回 409 让前端提示稍后再试，而不是当成服务器故障
+                    logger.warn("[Recharge]: 用户 $userId 充值遇并发冲突: ${e.message}")
                     call.respond(ApiResponse<Unit>(
-                        code = 500,
-                        message = "充值失败: ${e.message}"
+                        code = 409,
+                        message = e.message ?: "余额正在被其他操作变更，请稍后重试"
                     ))
+                } catch (e: Exception) {
+                    val (code, message) = translateApiError(
+                        logger, "[Recharge]: 用户 $userId 充值", "充值失败，请稍后重试", e
+                    )
+                    call.respond(ApiResponse<Unit>(code = code, message = message))
                 }
             }
 
@@ -107,6 +119,8 @@ data class RechargeResponseDto(
     val amount: Double,
     val bonusAmount: Double,
     val totalAdded: Double,
+    /** 本次充值获得的积分（需求 3.4.1：每 1 元积 0.5 分，仅计实际支付金额） */
+    val pointsEarned: Int,
     val paidAt: String
 )
 

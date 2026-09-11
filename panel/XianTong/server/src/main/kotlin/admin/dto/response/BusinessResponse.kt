@@ -142,6 +142,24 @@ data class CustomerResponse(
 )
 
 @Serializable
+data class AppointmentListResponse(
+    val list: List<AppointmentAdminResponse>,
+    val total: Long,
+    /** 当前页码；为 null 表示本次返回的是全量（未传分页参数） */
+    val page: Int? = null,
+    val pageSize: Int? = null
+)
+
+@Serializable
+data class CustomerListResponse(
+    val list: List<CustomerResponse>,
+    val total: Long,
+    /** 当前页码；为 null 表示本次返回的是全量（未传分页参数） */
+    val page: Int? = null,
+    val pageSize: Int? = null
+)
+
+@Serializable
 data class CustomerDetailResponse(
     val user: CustomerInfoDto,
     val wallet: CustomerWalletDto,
@@ -177,7 +195,20 @@ data class CustomerLevelDto(
 )
 
 @Serializable
-data class WalletAdjustRequest(val amount: Double, val reason: String)
+data class WalletAdjustRequest(
+    /** 正数=入账，负数=出账；仅作用于本金余额 */
+    val amount: Double,
+    /** 调整原因，必填，写入 wallet_transaction 供长期追溯 */
+    val reason: String
+)
+
+/** 余额调整结果：回传调整后的钱包状态，便于前端就地刷新而无需重拉详情。 */
+@Serializable
+data class WalletAdjustResult(
+    val balance: Double,
+    val bonusBalance: Double,
+    val version: Int
+)
 
 @Serializable
 data class LevelAdjustRequest(val levelCode: Int, val reason: String)

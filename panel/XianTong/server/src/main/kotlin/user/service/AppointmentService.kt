@@ -9,7 +9,9 @@ import org.jetbrains.exposed.v1.r2dbc.insert
 import org.jetbrains.exposed.v1.r2dbc.selectAll
 import org.jetbrains.exposed.v1.r2dbc.update
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 
 /**
  * Appointment service for booking management.
@@ -152,11 +154,20 @@ class AppointmentService : BaseService() {
      * Create an appointment.
      */
     suspend fun createAppointment(userId: Long, request: CreateAppointmentRequest): AppointmentResult {
-        // Parse date string
+        // 日期与时间都在进入事务前解析：格式错误属调用方的输入问题，应给可读提示。
+        // 时间原先留到事务内才 LocalTime.parse，传错格式会抛 DateTimeParseException
+        // 冒泡到路由层退化成 500，用户看不到「格式应为 HH:mm」这一有用信息。
+        // 提前校验也保证了下方 `request.startTime in schedStart..<schedEnd` 的字符串比较
+        // 两边都是零填充的 HH:mm，否则 "9:00" 这类值会因字典序比较而错配排班时段。
         val appointmentDate = try {
             LocalDate.parse(request.appointmentDate)
-        } catch (e: Exception) {
+        } catch (e: DateTimeParseException) {
             return AppointmentResult.Error("日期格式错误，请使用 yyyy-MM-dd")
+        }
+        val startTimeObj = try {
+            LocalTime.parse(request.startTime)
+        } catch (e: DateTimeParseException) {
+            return AppointmentResult.Error("时间格式错误，请使用 HH:mm")
         }
 
         // Pre-validation before entering transaction
@@ -209,8 +220,7 @@ class AppointmentService : BaseService() {
                     if (existingAppointment != null) {
                         AppointmentResult.Error("您在该时段已有预约")
                     } else {
-                        // Calculate end time
-                        val startTimeObj = java.time.LocalTime.parse(request.startTime)
+                        // Calculate end time（startTimeObj 已在进事务前解析并校验过格式）
                         val slotDuration = schedule[DoctorSchedules.slotDuration]
                         val endTimeObj = startTimeObj.plusMinutes(slotDuration.toLong())
                         val endTime = endTimeObj.format(formatter)
@@ -327,8 +337,14 @@ class AppointmentService : BaseService() {
         // Parse new date
         val appointmentDate = try {
             LocalDate.parse(newDate)
-        } catch (e: Exception) {
+        } catch (e: DateTimeParseException) {
             return AppointmentResult.Error("日期格式错误，请使用 yyyy-MM-dd")
+        }
+        // 与 createAppointment 同理：时间格式在进事务前校验，避免退化成 500
+        val startTimeObj = try {
+            LocalTime.parse(newStartTime)
+        } catch (e: DateTimeParseException) {
+            return AppointmentResult.Error("时间格式错误，请使用 HH:mm")
         }
 
         // Check if new date is in the past
@@ -397,8 +413,7 @@ class AppointmentService : BaseService() {
                 if (bookedCount >= maxAppointments) {
                     AppointmentResult.Error("该时段已满")
                 } else {
-                    // Calculate new end time
-                    val startTimeObj = java.time.LocalTime.parse(newStartTime)
+                    // Calculate new end time（startTimeObj 已在进事务前解析并校验过格式）
                     val slotDuration = schedule[DoctorSchedules.slotDuration]
                     val endTimeObj = startTimeObj.plusMinutes(slotDuration.toLong())
                     val newEndTime = endTimeObj.format(formatter)

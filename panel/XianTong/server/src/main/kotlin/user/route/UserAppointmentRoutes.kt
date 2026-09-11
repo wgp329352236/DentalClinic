@@ -11,7 +11,10 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
+import org.slf4j.LoggerFactory
 import java.time.LocalDate
+
+private val logger = LoggerFactory.getLogger("UserAppointmentRoutes")
 
 /**
  * User appointment routes.
@@ -117,7 +120,11 @@ fun Application.userAppointmentRoutes(appointmentService: AppointmentService) {
                             }
                         }
                     } catch (e: Exception) {
-                        call.respond(ApiResponse<Unit>(code = 500, message = "预约失败: ${e.message}"))
+                        // 业务错误已由 AppointmentResult.Error 走 400 分支，落到这里的只能是底层异常
+                        val (code, message) = translateApiError(
+                            logger, "[Appointment]: 用户 $userId 创建预约", "预约失败，请稍后重试", e
+                        )
+                        call.respond(ApiResponse<Unit>(code = code, message = message))
                     }
                 }
 
@@ -183,7 +190,13 @@ fun Application.userAppointmentRoutes(appointmentService: AppointmentService) {
                             }
                         }
                     } catch (e: Exception) {
-                        call.respond(ApiResponse<Unit>(code = 500, message = "改约失败: ${e.message}"))
+                        val (code, message) = translateApiError(
+                            logger,
+                            "[Appointment]: 用户 $userId 改约, appointmentId=$appointmentId",
+                            "改约失败，请稍后重试",
+                            e
+                        )
+                        call.respond(ApiResponse<Unit>(code = code, message = message))
                     }
                 }
             }

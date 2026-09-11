@@ -2,6 +2,7 @@ package com.dentalclinic.user.route
 
 import com.dentalclinic.admin.dto.response.ApiResponse
 import com.dentalclinic.admin.dto.response.PageResponse
+import com.dentalclinic.common.config.GlobalConfig.appConfig
 import com.dentalclinic.user.auth.userAuthenticated
 import com.dentalclinic.user.auth.userId
 import com.dentalclinic.user.service.*
@@ -10,11 +11,28 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
+import org.slf4j.LoggerFactory
+
+private val logger = LoggerFactory.getLogger("UserReferralRoutes")
 
 /**
  * User referral routes (protected by JWT).
  */
 fun Application.userReferralRoutes(referralService: ReferralService) {
+    // 分享落地页域名外置到配置，避免把 example.com 占位地址硬编码在源码里随包上线。
+    // 未配置时仍回落到占位值，以保持响应字段结构不变（小程序端不会因 shareLink 消失而报错），
+    // 但启动即告警，把这个「上线前必须改」的项从代码注释里提到日志里。
+    val placeholderShareBase = "https://example.com/register"
+    val shareBaseUrl = appConfig.propertyOrNull("referral.shareBaseUrl")
+        ?.getString()?.trim()?.trimEnd('/')
+        ?.takeIf { it.isNotEmpty() }
+        ?: placeholderShareBase
+    if (shareBaseUrl == placeholderShareBase) {
+        logger.warn(
+            "[Referral]: 未配置 referral.shareBaseUrl，分享链接仍指向占位域名 $placeholderShareBase，上线前必须替换"
+        )
+    }
+
     routing {
         route("/api/v1/referral") {
             userAuthenticated {
@@ -28,7 +46,7 @@ fun Application.userReferralRoutes(referralService: ReferralService) {
                 call.respond(ApiResponse(
                     code = 0,
                     message = "success",
-                    data = mapOf("referralCode" to code, "shareLink" to "https://example.com/register?code=$code")
+                    data = mapOf("referralCode" to code, "shareLink" to "$shareBaseUrl?code=$code")
                 ))
             }
 
@@ -74,7 +92,11 @@ fun Application.userReferralRoutes(referralService: ReferralService) {
                         }
                     }
                 } catch (e: Exception) {
-                    call.respond(ApiResponse<Unit>(code = 500, message = "绑定失败: ${e.message}"))
+                    // 业务错误已由 ReferralResult.Error 走 400 分支，落到这里的只能是底层异常
+                    val (code, message) = translateApiError(
+                        logger, "[Referral]: 用户 $userId 绑定推荐关系", "绑定失败，请稍后重试", e
+                    )
+                    call.respond(ApiResponse<Unit>(code = code, message = message))
                 }
             }
             }

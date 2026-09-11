@@ -2,6 +2,55 @@
 
 本文件按日期倒序记录 XianTong 项目的代码改动，每条包含：改了什么、为什么改、影响范围。
 
+## 2026-09-11
+
+### F. 牙科业务模块整体入库，同时下线 game / queue / task 三个旧模块
+
+本节 112 个文件的变更（47 修改 / 21 删除 / 44 新增）**并非本次会话实现**，而是工作区中长期存在但从未提交的既有成果。本次只做两件事：入库前把六道验证门全部跑通，以及如实记录变更构成。各模块的设计意图未在会话中留痕，因此下文按文件与模块客观归类，不揣测动机。
+
+#### F-1. 新增：牙科业务前端 10 个模块（36 个文件）
+
+- **改了什么**：新增 10 个 API 层文件 `apps/web-antd/src/api/{appointment,clinic,consumption,coupon,customer,department,doctor,points,referral,schedule}.ts`，以及对应的 10 个视图目录（共 26 个 `.vue`）。按页面 `table-title` 取证的模块名与文件数：门诊管理 clinic 2、科室管理 department 2、医生管理 doctor 2、医生排班 schedule 2、预约管理 appointment 2、客户管理 customer 3、优惠券模板与发放记录 coupon 3、积分记录与积分规则 points 3、推荐关系与推荐奖励记录 referral 3、消费流水 consumption 4。
+- **原因**：既有成果入库。模块间存在交叉引用，例如 `views/consumption/create-modal.vue` 与 `views/coupon/{index,record,form-modal}.vue` 都依赖 `#/api/coupon`，因此这 36 个文件必须整体入库，缺一即构建失败——这正是上一轮不肯单独提交 `coupon/form-modal.vue` 的原因。
+- **影响范围**：`views/coupon/form-modal.vue` 中上一轮补的 `validate()` 修复随本节一并入库，E-2 记录的「留在工作区」状态至此消除，四处 `validate()` 修复全部入库。
+
+#### F-2. 新增：后端 7 个 Kotlin 文件与 `server/.gitignore`
+
+- **改了什么**：新增 `admin/route/ConsumptionRoutes.kt`、`admin/route/ReferralRoutes.kt`、`admin/service/AdminReferralService.kt`、`admin/service/ConsumptionAdminService.kt`、`common/ReferralRewardService.kt`、`common/config/SchemaMigration.kt`、`user/route/UserApiErrors.kt`，以及 `server/.gitignore`。
+- **原因**：既有成果入库。
+- **影响范围**：admin 与 user 两侧路由；`SchemaMigration.kt` 与 `ReferralRewardService.kt` 属 common 层、被多模块共享，`UserApiErrors.kt` 统一 C 端错误响应。
+
+#### F-3. 修改：后端 28 个 Kotlin 文件 + 配置与种子数据
+
+- **改了什么**：`admin/` 下 13 个（`AdminModule.kt`、`auth/RbacPlugin.kt`、`dto/response/BusinessResponse.kt`、`entity/AdminTables.kt`、`route/{Business,Coupon,Dashboard}Routes.kt`、`service/` 下 7 个）、`user/` 下 14 个（`UserModule.kt`、`route/` 下 8 个、`service/` 下 6 个）、`common/BaseService.kt`，另有 `src/main/resources/application.yaml` 与 `test-data.sql`。已跟踪文件合计 +2072 / −3344。
+- **原因**：既有成果入库。其中 `ConfigRoutes.kt` 的 `.toList()` 修复已随上一节单独提交，不在本节范围。
+- **影响范围**：整个后端。`./gradlew :server:cleanCompileKotlin :server:compileKotlin` 强制重编 BUILD SUCCESSFUL，`:server:test` 同样 BUILD SUCCESSFUL。仅剩一条既有 deprecation 告警：`user/service/FileUploadService.kt:41` 使用了已废弃的 `PartData.FileItem.streamProvider`（阻塞式 InputStream），官方建议改用 `provider()`。属技术债，本次未动。
+
+#### F-4. 删除：game / queue / task 三个旧模块、notification 旧位置与静态路由模块
+
+- **改了什么**：删除 21 个文件——game 模块 9 个（`api/game.ts`、`views/game/detail/{index,sheet-mapping-modal}.vue`、`views/game/list/{clone,create,delete}-modal.vue`、`views/game/list/index.vue`、`e2e/game/{game-detail,game-list}.spec.ts`）、queue 模块 3 个（`api/queue.ts`、`views/queue/{dlq,status}/index.vue`）、task 模块 5 个（`api/task.ts`、`views/task/history/{detail-modal,index}.vue`、`views/task/{schedule,trigger}/index.vue`）、notification 旧位置 3 个（`views/system/notification/{history,rules,rule-form-modal}.vue`）、以及 `router/routes/modules/dashboard.ts`。
+- **原因**：game / queue / task 属项目模板遗留，与牙科门诊业务无关；notification 三个文件是迁往 `views/notification/{history,rules}/` 后留下的旧位置副本，新位置的文件本就在版本库中并已修改。删除 `router/routes/modules/dashboard.ts` 后该目录为空，与 `accessMode: 'backend'`（菜单全部由后端 `/menu/all` 下发）一致；`locales/langs/{zh-CN,en-US}/page.json` 同步删掉 dashboard 文案段，同理。
+- **影响范围**：`e2e/game/` 两个规格随模块下线一并删除，这是 E 节里 e2e 用例总数保持 94 不变的原因。typecheck 通过说明前端无残留引用。
+
+#### F-5. 修改：前端 17 个文件
+
+- **改了什么**：`api/core/auth.ts`、`api/dashboard.ts`、`api/request.ts`、`layouts/basic.vue`、`locales/langs/{en-US,zh-CN}/page.json`、`preferences.ts`、`views/notification/history/index.vue`、`views/notification/rules/{index,rule-form-modal}.vue`、`views/system/audit/{detail-modal,index}.vue`、`views/system/{config,menu,role,user}/index.vue`，以及 `packages/@core/preferences/__tests__/__snapshots__/config.test.ts.snap`。
+- **原因**：既有成果入库。其中两处可以确证：`preferences.ts` 的改动**只新增 3 行注释**，说明 `defaultHomePath: '/dashboard'` 需与后端下发的 `userInfo.homePath` 对齐，值本身未变；快照文件的改动是**修正陈旧快照**——`packages/@core/preferences/src/config.ts` 的实际默认值早已是 `/dashboard`、`companyName: ''`、`companySiteLink: ''`、`date: '2025'`、`settingShow: false`，且该源文件无未提交改动，而快照却仍停留在框架原始的 `/analytics`、`Vben`、`2024`、`true`。
+- **影响范围**：快照修正后 `pnpm run test:unit` 的 35 个测试文件 / 310 个测试全通过，其中 `config.test.ts` 通过即为源码与快照一致的确证。
+
+#### F-6. 入库前的六道验证门
+
+| 验证项 | 命令 | 结果 |
+| --- | --- | --- |
+| 代码风格 | `pnpm run lint` | EXIT=0（oxfmt 1047 文件、oxlint 652 文件 / 217 规则、eslint 均 0 warning 0 error） |
+| 依赖与类型 | `pnpm run check` | EXIT=0（typecheck 通过、cspell 475 文件 0 issues；circular 2 处与 dep 5 条为框架既有告警，不阻断） |
+| 前端单元测试 | `pnpm run test:unit` | 35 个测试文件 / 310 个测试全通过 |
+| 端到端 | `pnpm exec playwright test` | 94 passed / 0 failed / 0 skipped |
+| 后端编译 | `./gradlew :server:cleanCompileKotlin :server:compileKotlin` | BUILD SUCCESSFUL（强制重编），1 条既有 deprecation 告警 |
+| 后端测试 | `./gradlew :server:test` | BUILD SUCCESSFUL（`compileTestKotlin` 与 `test` 均真实执行） |
+
+两点需要说明。其一，lint / check / test:unit / e2e 四道门扫描的都是磁盘文件而非 git 暂存区，因此它们在本节这批未跟踪文件在场的情况下就已经通过；后端两道门则是本次专门为入库补跑的，第一次执行 `compileKotlin` 时返回 `UP-TO-DATE`（复用缓存产物、等于没验证），改用 `cleanCompileKotlin` 强制重编后才算数。其二，新增的 10 个业务模块目前**没有 e2e 覆盖**（现有 94 个用例集中在 dashboard / system / modal / routing / ui-state），其正确性只有 typecheck、lint 与后端编译/测试保证，功能层面未经浏览器实测。
+
 ## 2026-09-10
 
 本轮集中修复「工程链路可运行性」与「测试有效性」，共四项（B/D/C/A），并顺带修复两个真实缺陷。

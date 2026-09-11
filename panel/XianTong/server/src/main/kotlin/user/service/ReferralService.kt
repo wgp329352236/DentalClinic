@@ -2,6 +2,8 @@ package com.dentalclinic.user.service
 
 import com.dentalclinic.admin.entity.*
 import com.dentalclinic.common.BaseService
+import com.dentalclinic.common.ReferralRewardOutcome
+import com.dentalclinic.common.ReferralRewardService
 import kotlinx.coroutines.flow.toList
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
@@ -10,13 +12,17 @@ import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.r2dbc.insert
 import org.jetbrains.exposed.v1.r2dbc.selectAll
 import org.jetbrains.exposed.v1.r2dbc.update
+import java.math.BigDecimal
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 /**
  * Referral service for user growth program.
  */
-class ReferralService(private val pointsService: PointsService) : BaseService() {
+class ReferralService(
+    private val pointsService: PointsService,
+    private val referralRewardService: ReferralRewardService
+) : BaseService() {
 
     private val dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 
@@ -178,143 +184,25 @@ class ReferralService(private val pointsService: PointsService) : BaseService() 
     }
 
     /**
-     * Award first consumption reward for referral.
-     * Called when a referred user completes their first purchase.
+     * 发放被推荐人的首消奖励。
+     *
+     * 实际发放逻辑已下沉到 [ReferralRewardService]（common 包），管理端「录入消费」走的是
+     * 同一套首消/持续/阶梯奖励与月度上限规则，避免两份实现漂移。
+     *
+     * 生产环境应由消费结算链路自动触发，本方法仅保留给测试端点使用。
+     *
+     * @param payAmount 模拟的实付金额；已首消过时作为持续奖励的计算基数
      */
-    suspend fun awardFirstConsumptionReward(refereeId: Long): ReferralResult = dbQuery {
-        val relation = ReferralRelations.selectAll()
-            .where { ReferralRelations.refereeId eq refereeId }
-            .toList()
-            .firstOrNull { row ->
-                row[ReferralRelations.referrerId] != row[ReferralRelations.refereeId]
-            }
-            ?: return@dbQuery ReferralResult.Error("该用户没有推荐关系")
-
-        if (relation[ReferralRelations.firstConsumedAt] != null) {
-            return@dbQuery ReferralResult.Error("已发放过首消奖励")
-        }
-
-        val referrerId = relation[ReferralRelations.referrerId]
-        val now = LocalDateTime.now()
-
-        // Award points to referrer (read from config, fallback 100)
-        val pointsRule = PointsRules.selectAll()
-            .where {
-                (PointsRules.actionType eq "referral_first_consumption") and
-                (PointsRules.status eq 1)
-            }
-            .toList()
-            .singleOrNull()
-        val pointsAmount = pointsRule?.get(PointsRules.pointsPerUnit) ?: 100
-
-        pointsService.addPoints(
-            userId = referrerId,
-            amount = pointsAmount,
-            sourceType = "referral_first_consumption",
-            description = "推荐首消奖励-积分",
-            validityMonths = 12
-        )
-
-        // Award bonus balance (read from config, fallback 50)
-        val bonusAmount = 50.0.toBigDecimal()
-        val currentBonus = UserWallets.selectAll()
-            .where { UserWallets.userId eq referrerId }
-            .toList()
-            .singleOrNull()
-            ?.get(UserWallets.bonusBalance) ?: 0.0.toBigDecimal()
-
-        UserWallets.update({ UserWallets.userId eq referrerId }) {
-            it[UserWallets.bonusBalance] = currentBonus.add(bonusAmount)
-        }
-
-        // Create referral reward record
-        ReferralRewards.insert {
-            it[ReferralRewards.relationId] = relation[ReferralRelations.id]
-            it[ReferralRewards.referrerId] = referrerId
-            it[ReferralRewards.refereeId] = refereeId
-            it[ReferralRewards.rewardType] = "points_balance"
-            it[ReferralRewards.rewardValue] = (pointsAmount + 50).toDouble().toBigDecimal()
-            it[ReferralRewards.stage] = "first_consumption"
-            it[ReferralRewards.status] = "granted"
-            it[ReferralRewards.grantedAt] = now
-        }
-
-        // Update referral relation
-        ReferralRelations.update({
-            (ReferralRelations.referrerId eq referrerId) and
-            (ReferralRelations.refereeId eq refereeId)
-        }) {
-            it[ReferralRelations.firstConsumedAt] = now
-            it[ReferralRelations.rewardStatus] = "full"
-        }
-
-        // Award newcomer coupon to referee
-        val newcomerTemplate = CouponTemplates.selectAll()
-            .where { CouponTemplates.name eq "推荐新人券" }
-            .toList()
-            .singleOrNull()
-
-        if (newcomerTemplate != null) {
-            val templateId = newcomerTemplate[CouponTemplates.id]
-            val couponCode = "NEW${refereeId}${System.currentTimeMillis().toString().takeLast(8)}"
-
-            UserCoupons.insert {
-                it[UserCoupons.userId] = refereeId
-                it[UserCoupons.templateId] = templateId
-                it[UserCoupons.couponCode] = couponCode
-                it[UserCoupons.status] = "unused"
-            }
-
-            CouponTemplates.update({ CouponTemplates.id eq templateId }) {
-                it[CouponTemplates.issuedQuantity] = newcomerTemplate[CouponTemplates.issuedQuantity] + 1
-            }
-        }
-
-        // Check for tier reward (5+ referrals)
-        checkAndAwardTierReward(referrerId)
-
-        ReferralResult.Success
-    }
-
-    /**
-     * Check if referrer has reached tier threshold and award bonus.
-     */
-    private suspend fun checkAndAwardTierReward(referrerId: Long) {
-        val referralCount = ReferralRelations.selectAll()
-            .where { ReferralRelations.referrerId eq referrerId }
-            .toList()
-            .count { row ->
-                row[ReferralRelations.referrerId] != row[ReferralRelations.refereeId]
-            }
-
-        if (referralCount >= 5) {
-            val tierRewardExists = ReferralRewards.selectAll()
-                .where {
-                    (ReferralRewards.referrerId eq referrerId) and
-                    (ReferralRewards.stage eq "tier")
-                }
-                .count() > 0
-
-            if (!tierRewardExists) {
-                pointsService.addPoints(
-                    userId = referrerId,
-                    amount = 200,
-                    sourceType = "referral_tier_reward",
-                    description = "推荐满5人阶梯奖励",
-                    validityMonths = 12
-                )
-
-                ReferralRewards.insert {
-                    it[ReferralRewards.relationId] = 0
-                    it[ReferralRewards.referrerId] = referrerId
-                    it[ReferralRewards.refereeId] = 0
-                    it[ReferralRewards.rewardType] = "points"
-                    it[ReferralRewards.rewardValue] = 200.0.toBigDecimal()
-                    it[ReferralRewards.stage] = "tier"
-                    it[ReferralRewards.status] = "granted"
-                    it[ReferralRewards.grantedAt] = LocalDateTime.now()
-                }
-            }
+    suspend fun awardFirstConsumptionReward(
+        refereeId: Long,
+        payAmount: BigDecimal = BigDecimal.ZERO
+    ): ReferralResult = dbQuery {
+        when (val outcome = referralRewardService.settleConsumptionReward(refereeId, payAmount)) {
+            ReferralRewardOutcome.NoRelation -> ReferralResult.Error("该用户没有推荐关系")
+            is ReferralRewardOutcome.FirstConsumption -> ReferralResult.Success
+            is ReferralRewardOutcome.Ongoing -> ReferralResult.Success
+            is ReferralRewardOutcome.NoReward ->
+                ReferralResult.Error("首消奖励已发放过；本次持续奖励未触发（${outcome.reason}）")
         }
     }
 }

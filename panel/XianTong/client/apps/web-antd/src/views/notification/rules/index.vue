@@ -22,15 +22,29 @@ const [Grid, gridApi] = useVbenVxeGrid({
       { field: 'conditionType', title: '条件类型', width: 120 },
       { field: 'threshold', title: '阈值', width: 80 },
       { field: 'webhookUrl', title: 'Webhook', minWidth: 200 },
-      { field: 'isEnabled', title: '状态', width: 80, slots: { default: 'enabled' } },
-      { field: 'action', title: '操作', width: 150, fixed: 'right', slots: { default: 'action' } },
+      {
+        field: 'isEnabled',
+        title: '状态',
+        width: 80,
+        slots: { default: 'enabled' },
+      },
+      {
+        field: 'action',
+        title: '操作',
+        width: 150,
+        fixed: 'right',
+        slots: { default: 'action' },
+      },
     ],
     height: 'auto',
     proxyConfig: {
       ajax: {
         query: async () => {
           const data = await getNotificationRules();
-          return { items: Array.isArray(data) ? data : [], total: Array.isArray(data) ? data.length : 0 };
+          return {
+            items: Array.isArray(data) ? data : [],
+            total: Array.isArray(data) ? data.length : 0,
+          };
         },
       },
     },
@@ -38,13 +52,23 @@ const [Grid, gridApi] = useVbenVxeGrid({
   },
 });
 
-function onCreate() { formModalApi.setData({ mode: 'create' }).open(); }
-function onEdit(row: any) { formModalApi.setData({ mode: 'edit', row }).open(); }
+function onCreate() {
+  formModalApi.setData({ mode: 'create' }).open();
+}
+function onEdit(row: any) {
+  formModalApi.setData({ mode: 'edit', row }).open();
+}
 
 async function onDelete(row: any) {
   Modal.confirm({
-    title: '删除规则', content: `确定删除规则"${row.ruleName}"？`, okType: 'danger',
-    async onOk() { await deleteNotificationRule(row.id); message.success('删除成功'); gridApi.query(); },
+    title: '删除规则',
+    content: `确定删除规则"${row.ruleName}"？`,
+    okType: 'danger',
+    async onOk() {
+      await deleteNotificationRule(row.id);
+      message.success('删除成功');
+      gridApi.query();
+    },
   });
 }
 </script>
@@ -54,14 +78,20 @@ async function onDelete(row: any) {
     <FormModal @success="gridApi.query()" />
     <Grid table-title="通知规则">
       <template #toolbar-tools>
-        <Button type="primary" @click="onCreate"><Plus class="size-5" />新建规则</Button>
+        <Button type="primary" @click="onCreate">
+          <Plus class="size-5" />新建规则
+        </Button>
       </template>
       <template #enabled="{ row }">
-        <Tag :color="row.isEnabled ? 'success' : 'default'">{{ row.isEnabled ? '启用' : '禁用' }}</Tag>
+        <Tag :color="row.isEnabled ? 'success' : 'default'">
+          {{ row.isEnabled ? '启用' : '禁用' }}
+        </Tag>
       </template>
       <template #action="{ row }">
         <Button type="link" size="small" @click="onEdit(row)">编辑</Button>
-        <Button type="link" size="small" danger @click="onDelete(row)">删除</Button>
+        <Button type="link" size="small" danger @click="onDelete(row)">
+          删除
+        </Button>
       </template>
     </Grid>
   </Page>

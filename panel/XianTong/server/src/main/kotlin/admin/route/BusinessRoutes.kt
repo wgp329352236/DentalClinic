@@ -163,7 +163,19 @@ fun Route.appointmentAdminRoutes(appointmentService: AppointmentAdminService) {
                     val status = call.request.queryParameters["status"]
                     val clinicId = call.request.queryParameters["clinicId"]?.toLongOrNull()
                     val doctorId = call.request.queryParameters["doctorId"]?.toLongOrNull()
-                    val data = appointmentService.listAppointments(status, clinicId, doctorId)
+                    // userId：供「录入消费」弹窗按所选客户联动其预约列表
+                    val userId = call.request.queryParameters["userId"]?.toLongOrNull()
+                    // 分页参数保持可选：不传则返回全量，下拉选择器依赖这一行为一次拿全
+                    val page = call.request.queryParameters["page"]?.toIntOrNull()
+                    val pageSize = call.request.queryParameters["pageSize"]?.toIntOrNull()
+                    val data = appointmentService.listAppointments(
+                        status = status,
+                        clinicId = clinicId,
+                        doctorId = doctorId,
+                        userId = userId,
+                        page = page?.coerceAtLeast(1),
+                        pageSize = pageSize?.coerceIn(1, 100)
+                    )
                     call.ok(data)
                 }
             }
@@ -217,7 +229,15 @@ fun Route.customerRoutes(customerService: CustomerService) {
                 get {
                     val keyword = call.request.queryParameters["keyword"]
                     val clinicId = call.request.queryParameters["clinicId"]?.toLongOrNull()
-                    val data = customerService.listCustomers(keyword, clinicId)
+                    // 分页参数保持可选：不传则返回全量，「录入消费」弹窗的客户下拉依赖这一行为
+                    val page = call.request.queryParameters["page"]?.toIntOrNull()
+                    val pageSize = call.request.queryParameters["pageSize"]?.toIntOrNull()
+                    val data = customerService.listCustomers(
+                        keyword = keyword,
+                        clinicId = clinicId,
+                        page = page?.coerceAtLeast(1),
+                        pageSize = pageSize?.coerceIn(1, 100)
+                    )
                     call.ok(data)
                 }
             }
@@ -234,8 +254,10 @@ fun Route.customerRoutes(customerService: CustomerService) {
                 put("/{id}/wallet") {
                     val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的客户ID")
                     val req = call.receive<WalletAdjustRequest>()
-                    customerService.adjustWallet(id, req.amount)
-                    call.ok<Unit>(message = "余额调整成功")
+                    // 资金调整必须留痕：reason 落入 wallet_transaction，operator 记录是谁调的
+                    val principal = call.adminPrincipal()
+                    val result = customerService.adjustWallet(id, req.amount, req.reason, principal.username)
+                    call.ok(result, "余额调整成功")
                 }
             }
 

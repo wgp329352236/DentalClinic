@@ -6,7 +6,9 @@ import com.dentalclinic.admin.entity.*
 import com.dentalclinic.admin.route.*
 import com.dentalclinic.admin.service.*
 import com.dentalclinic.admin.util.*
+import com.dentalclinic.common.ReferralRewardService
 import com.dentalclinic.common.config.DBConfig
+import com.dentalclinic.common.config.SchemaMigration
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.plugins.*
@@ -53,6 +55,7 @@ fun Application.adminModule() {
                 // User / membership
                 Users,
                 UserWallets,
+                WalletTransactions,
                 RechargeRecords,
                 MemberLevels,
                 UserMemberLevels,
@@ -77,6 +80,8 @@ fun Application.adminModule() {
             )
             logger.info("All tables (admin + dental clinic) created/verified.")
         }
+        // SchemaUtils.create() 只建缺失的表，不会给已存在的表补列，因此新增字段需走显式迁移
+        SchemaMigration.migrate()
     }
     // Seed default data
     runBlocking {
@@ -117,6 +122,17 @@ private fun Application.installAdminStatusPages() {
                 ApiResponse<Unit>(code = 403, message = cause.message ?: "权限不足")
             )
         }
+        // 业务异常「资源不存在」→ 404。
+        // 必须用全限定名：下方显式 import 的 io.ktor.server.plugins.NotFoundException 与
+        // com.dentalclinic.admin.util.NotFoundException 同名，会遮蔽各 Service 实际抛出的业务异常，
+        // 使其落入兜底的 exception<Exception> 分支返回 500。
+        exception<com.dentalclinic.admin.util.NotFoundException> { call, cause ->
+            call.respond(
+                HttpStatusCode.NotFound,
+                ApiResponse<Unit>(code = 404, message = cause.message ?: "资源不存在")
+            )
+        }
+        // Ktor 内置的同名异常（如静态资源缺失）仍按 404 返回，避免退化成 500
         exception<NotFoundException> { call, cause ->
             call.respond(
                 HttpStatusCode.NotFound,
@@ -172,6 +188,11 @@ fun Application.adminRouting() {
     val dashboardService = AdminDashboardService()
     val pointsService = AdminPointsService()
     val couponService = AdminCouponService()
+    val referralService = AdminReferralService()
+
+    // 推荐奖励发放（user 端注册链路与 admin 端消费录入链路共用）
+    val referralRewardService = ReferralRewardService()
+    val consumptionService = ConsumptionAdminService(pointsService, referralRewardService)
 
     // Business data services
     val clinicService = ClinicService()
@@ -195,6 +216,8 @@ fun Application.adminRouting() {
             auditRoutes()
             pointsRoutes(pointsService)
             couponRoutes(couponService)
+            referralRoutes(referralService)
+            consumptionRoutes(consumptionService)
 
             // Business data management routes
             clinicRoutes(clinicService)

@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withContext
 import org.jetbrains.exposed.v1.core.*
 import org.jetbrains.exposed.v1.r2dbc.*
+import org.slf4j.LoggerFactory
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Paths
@@ -19,6 +20,8 @@ import java.util.*
  * File upload service for local storage.
  */
 class FileUploadService : BaseService() {
+
+    private val logger = LoggerFactory.getLogger("FileUploadService")
 
     private val uploadDir = System.getProperty("user.dir") + "/uploads"
     private val baseUrl = "/api/v1/files"
@@ -75,7 +78,9 @@ class FileUploadService : BaseService() {
 
                 FileUploadResult.Success(url, newFileName, size)
             } catch (e: Exception) {
-                FileUploadResult.Error("文件保存失败: ${e.message}")
+                // 不回传 e.message：磁盘/权限类异常的文本会把服务器绝对路径等细节暴露给 C 端用户
+                logger.error("[FileUpload]: 用户 $userId 保存文件失败", e)
+                FileUploadResult.Error("文件保存失败，请稍后重试")
             }
         }
     }
@@ -100,9 +105,11 @@ class FileUploadService : BaseService() {
         }
 
         return withContext(Dispatchers.IO) {
-            // Delete from disk
-            val filePath = Paths.get(uploadDir, fileName)
-            val file = filePath.toFile()
+            // 复用 getFilePath 的越界校验做纵深防御：DB 里的 fileName 虽由服务端生成，
+            // 但一旦出现异常数据（如后台导入），也不该让删除动作落到 uploads 之外
+            val filePath = getFilePath(fileName)
+                ?: return@withContext FileDeleteResult.Error("文件不存在或无权限删除")
+            val file = File(filePath)
             if (file.exists()) {
                 file.delete()
             }
@@ -149,10 +156,29 @@ class FileUploadService : BaseService() {
     }
 
     /**
-     * Get absolute path for a stored file.
+     * 解析已存文件的绝对路径，越界时返回 null。
+     *
+     * fileName 直接取自 URL 路径参数，Ktor 会对其做百分号解码：
+     * `..%2Fbuild.gradle.kts` 解码后即含 `../`（未编码的 `../` 反而会被路由挡下）。
+     * 若不经校验就 Paths.get(uploadDir, fileName)，未认证的
+     * GET /api/v1/files/{fileName} 就能读到 uploads 之外的任意文件。
+     * 这里规范化后确认仍落在 uploadDir 内，越界一律返回 null。
      */
-    fun getFilePath(fileName: String): String {
-        return Paths.get(uploadDir, fileName).toString()
+    fun getFilePath(fileName: String): String? {
+        // 空字节先拦掉：文件名里出现 \u0000 只可能是攻击（经典的 C 字符串截断尝试），
+        // 且 Java 的 Path/File 会直接抛 IllegalArgumentException，不拦住就会冒泡成 500
+        if (fileName.indexOf('\u0000') >= 0) return null
+
+        return try {
+            val base = File(uploadDir).canonicalFile
+            val target = File(base, fileName).canonicalFile
+            // 比较时带上分隔符，否则 /uploads-evil 这类同前缀目录会被误判为合法
+            if (!target.path.startsWith(base.path + File.separator)) null else target.path
+        } catch (e: java.io.IOException) {
+            // canonicalFile 要访问文件系统，异常同样按「拿不到这个文件」处理，与越界一致回 null
+            logger.warn("[FileUpload]: 解析文件路径失败", e)
+            null
+        }
     }
 }
 

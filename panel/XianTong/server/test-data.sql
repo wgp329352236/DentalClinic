@@ -1,6 +1,11 @@
 -- ============================================================
 -- 牙科门诊小程序测试数据
 -- ============================================================
+-- ⚠️ 仅可在「空库首次初始化」时执行一次：
+--   本脚本大量使用硬编码 ID（doctor_id / clinic_id），在已有数据的库上执行会
+--   把排班、科室关联挂到错误的医生/门店上，并产生重名医生与相互冲突的排班。
+--   会员等级与积分规则已改由后端 DataSeedService 启动时幂等播种，本脚本不再插入。
+-- ============================================================
 
 -- 1. 门店数据
 INSERT INTO clinic (name, address, phone, open_time, close_time, business_days, description, status, sort_order) VALUES
@@ -57,22 +62,17 @@ INSERT INTO doctor_schedule (doctor_id, day_of_week, start_time, end_time, slot_
 (4, 3, '09:00', '12:00', 30, 1),
 (4, 6, '09:00', '12:00', 30, 1);
 
--- 6. 会员等级配置
-INSERT INTO member_level (level_code, level_name, min_consumption, discount_rate, benefits, status) VALUES
-(1, '普通会员', 0, 1.00, '基础服务', 1),
-(2, '银卡会员', 5000, 0.95, '95折优惠，优先预约', 1),
-(3, '金卡会员', 20000, 0.90, '9折优惠，专属客服', 1),
-(4, '钻石会员', 50000, 0.85, '85折优惠，VIP通道', 1);
-
--- 7. 积分规则配置
-INSERT INTO points_rule (rule_name, rule_type, action_type, points_per_unit, unit_description, daily_limit, monthly_limit, validity_months, status) VALUES
-('消费积分', 'earn', 'consumption', 10, '每消费1元获得10积分', NULL, NULL, 12, 1),
-('充值积分', 'earn', 'recharge', 5, '每充值1元获得5积分', NULL, NULL, 12, 1),
-('完善资料', 'earn', 'profile_complete', 100, '完善个人资料一次性奖励', 1, 1, 12, 1),
-('签到积分', 'earn', 'signup', 5, '每日签到奖励', 1, 30, 1, 1),
-('评价积分', 'earn', 'review', 20, '完成就诊评价奖励', 1, 10, 12, 1),
-('推荐积分', 'earn', 'referral', 500, '成功推荐一人注册', NULL, NULL, 12, 1),
-('积分兑换', 'spend', 'redeem', -1, '积分兑换商品或服务', NULL, NULL, 0, 1);
+-- 6. 会员等级配置 / 7. 积分规则配置
+--    已移除：这两类是「系统配置」而非测试数据，由后端 DataSeedService 在启动时幂等播种
+--    （seedMemberLevels / seedPointsRules / seedReferralRewardRules），points_rule.action_type
+--    另建有唯一索引，在此重复插入会直接报错。
+--    移除原因：本文件原先的取值与需求文档冲突，且曾污染过数据库——
+--      · member_level 阈值 5000/20000/50000，需求 3.3.2 为 3000/10000/30000
+--      · points_rule consumption=10，需求 3.4.1 为「每消费1元积1分」
+--      · points_rule referral=500，需求 3.5.2 为 50 分且每月合计上限 500
+--      · points_rule redeem 一行无任何代码引用（积分抵扣尚未实现）
+--    同一 action_type 出现多行时，规则命中结果取决于查询顺序，会造成积分额度漂移。
+--    如需调整阈值或积分比例，请走后台「积分规则」页面，或修改 DataSeedService。
 
 -- 8. 优惠券模板
 INSERT INTO coupon_template (name, coupon_type, face_value, min_consumption, applicable_departments, valid_from, valid_to, total_quantity, issued_quantity, used_quantity, status) VALUES

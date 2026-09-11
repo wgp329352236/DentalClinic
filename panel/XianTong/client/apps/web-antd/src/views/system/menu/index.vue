@@ -1,6 +1,4 @@
 <script lang="ts" setup>
-import { ref } from 'vue';
-
 import { Page, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
@@ -102,13 +100,29 @@ async function onDelete(row: any) {
         </Button>
       </template>
       <template #menuType="{ row }">
-        <Tag :color="row.menuType === 'directory' ? 'blue' : row.menuType === 'menu' ? 'green' : 'orange'">
-          {{ row.menuType === 'directory' ? '目录' : row.menuType === 'menu' ? '菜单' : '按钮' }}
+        <Tag
+          :color="
+            row.menuType === 'directory'
+              ? 'blue'
+              : row.menuType === 'menu'
+                ? 'green'
+                : 'orange'
+          "
+        >
+          {{
+            row.menuType === 'directory'
+              ? '目录'
+              : row.menuType === 'menu'
+                ? '菜单'
+                : '按钮'
+          }}
         </Tag>
       </template>
       <template #action="{ row }">
         <Button type="link" size="small" @click="onEdit(row)">编辑</Button>
-        <Button type="link" size="small" danger @click="onDelete(row)">删除</Button>
+        <Button type="link" size="small" danger @click="onDelete(row)">
+          删除
+        </Button>
       </template>
     </Grid>
   </Page>

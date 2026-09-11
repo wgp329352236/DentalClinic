@@ -15,3 +15,10 @@ database:
   url: "r2dbc:postgresql://localhost:5432/dental_clinic"
   username: "postgres"
   password: "postgres"
+
+# ─── 推荐分享 ───
+# 「邀请好友」落地页地址前缀，小程序端会拼上 ?code=<推荐码> 后展示/分享。
+# 未配置时回落到代码里的 example.com 占位值，并在启动日志里打 WARN 提醒；
+# 上线前必须改成真实域名，否则用户点到的是一条死链。
+referral:
+  shareBaseUrl: ""

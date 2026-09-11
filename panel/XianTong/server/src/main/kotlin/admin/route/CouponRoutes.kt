@@ -4,18 +4,19 @@ import com.dentalclinic.admin.auth.adminPrincipal
 import com.dentalclinic.admin.auth.authenticated
 import com.dentalclinic.admin.auth.requirePermission
 import com.dentalclinic.admin.service.AdminCouponService
+import com.dentalclinic.admin.service.ScanRedeemRequest
 import com.dentalclinic.admin.util.ValidationException
 import com.dentalclinic.admin.util.ok
 import io.ktor.server.request.*
 import io.ktor.server.routing.*
 
 /**
- * Admin coupon management routes.
+ * 后台优惠券管理路由。
  */
 fun Route.couponRoutes(couponService: AdminCouponService) {
     route("/coupons") {
         authenticated {
-            // GET /api/admin/coupons/templates - Get all coupon templates
+            // GET /api/admin/coupons/templates - 获取所有优惠券模板
             requirePermission("coupon:view") {
                 get("/templates") {
                     val templates = couponService.getCouponTemplates()
@@ -23,12 +24,12 @@ fun Route.couponRoutes(couponService: AdminCouponService) {
                 }
             }
 
-            // POST /api/admin/coupons/templates - Create a new coupon template
+            // POST /api/admin/coupons/templates - 创建新的优惠券模板
             requirePermission("coupon:manage") {
                 post("/templates") {
                     val request = call.receive<com.dentalclinic.admin.service.CreateCouponTemplateRequest>()
 
-                    // Validate input
+                    // 校验输入参数
                     if (request.name.isBlank()) {
                         throw ValidationException("优惠券名称不能为空")
                     }
@@ -44,7 +45,7 @@ fun Route.couponRoutes(couponService: AdminCouponService) {
                 }
             }
 
-            // PUT /api/admin/coupons/templates/{id} - Update a coupon template
+            // PUT /api/admin/coupons/templates/{id} - 更新优惠券模板
             requirePermission("coupon:manage") {
                 put("/templates/{id}") {
                     val id = call.parameters["id"]?.toLongOrNull()
@@ -52,7 +53,7 @@ fun Route.couponRoutes(couponService: AdminCouponService) {
 
                     val request = call.receive<com.dentalclinic.admin.service.UpdateCouponTemplateRequest>()
 
-                    // Validate input
+                    // 校验输入参数
                     if (request.name.isBlank()) {
                         throw ValidationException("优惠券名称不能为空")
                     }
@@ -65,7 +66,24 @@ fun Route.couponRoutes(couponService: AdminCouponService) {
                 }
             }
 
-            // POST /api/admin/coupons/grant - Grant coupons to users
+            // DELETE /api/admin/coupons/templates/{id} - 删除优惠券模板
+            requirePermission("coupon:manage") {
+                delete("/templates/{id}") {
+                    val id = call.parameters["id"]?.toLongOrNull()
+                        ?: throw ValidationException("无效的模板ID")
+
+                    when (val result = couponService.deleteCouponTemplate(id)) {
+                        is com.dentalclinic.admin.service.DeleteCouponResult.Success -> {
+                            call.ok<Unit>(message = "删除成功")
+                        }
+                        is com.dentalclinic.admin.service.DeleteCouponResult.Error -> {
+                            throw ValidationException(result.message)
+                        }
+                    }
+                }
+            }
+
+            // POST /api/admin/coupons/grant - 向用户发放优惠券
             requirePermission("coupon:manage") {
                 post("/grant") {
                     val request = call.receive<com.dentalclinic.admin.service.GrantCouponsRequest>()
@@ -101,7 +119,7 @@ fun Route.couponRoutes(couponService: AdminCouponService) {
                 }
             }
 
-            // GET /api/admin/coupons/statistics - Get coupon statistics
+            // GET /api/admin/coupons/statistics - 获取优惠券统计数据
             requirePermission("coupon:view") {
                 get("/statistics") {
                     val templateId = call.request.queryParameters["templateId"]?.toLongOrNull()
@@ -110,10 +128,30 @@ fun Route.couponRoutes(couponService: AdminCouponService) {
                 }
             }
 
-            // POST /api/admin/coupons/scan-redeem - Scan and redeem coupon
+            // GET /api/admin/coupons/records - 分页查询用户优惠券记录
+            requirePermission("coupon:view") {
+                get("/records") {
+                    val userId = call.request.queryParameters["userId"]?.toLongOrNull()
+                    val templateId = call.request.queryParameters["templateId"]?.toLongOrNull()
+                    val status = call.request.queryParameters["status"]
+                    val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 1
+                    val pageSize = call.request.queryParameters["pageSize"]?.toIntOrNull() ?: 20
+
+                    val response = couponService.getUserCoupons(
+                        userId = userId,
+                        templateId = templateId,
+                        status = status,
+                        page = page.coerceAtLeast(1),
+                        pageSize = pageSize.coerceIn(1, 100)
+                    )
+                    call.ok(response)
+                }
+            }
+
+            // POST /api/admin/coupons/scan-redeem - 扫码核销优惠券
             requirePermission("coupon:manage") {
                 post("/scan-redeem") {
-                    val request = call.receive<com.dentalclinic.admin.service.ScanRedeemRequest>()
+                    val request = call.receive<ScanRedeemRequest>()
                     val principal = call.adminPrincipal()
 
                     if (request.qrData.isBlank()) {

@@ -15,6 +15,9 @@ import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.*
 import org.jetbrains.exposed.v1.r2dbc.*
 import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
+import org.slf4j.LoggerFactory
+
+private val logger = LoggerFactory.getLogger("UserProfileRoutes")
 
 /**
  * User profile routes (protected by JWT).
@@ -117,7 +120,11 @@ fun Application.userProfileRoutes() {
                         call.respond(ApiResponse<Unit>(code = 404, message = "用户不存在"))
                     }
                 } catch (e: Exception) {
-                    call.respond(ApiResponse<Unit>(code = 500, message = "更新失败: ${e.message}"))
+                    // scene 里只记 userId，不记 request：手机号/真实姓名属个人敏感信息，不应落入日志
+                    val (code, message) = translateApiError(
+                        logger, "[Profile]: 用户 $userId 更新资料", "更新失败，请稍后重试", e
+                    )
+                    call.respond(ApiResponse<Unit>(code = code, message = message))
                 }
             }
             }

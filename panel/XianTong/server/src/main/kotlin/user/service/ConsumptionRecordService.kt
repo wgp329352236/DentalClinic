@@ -12,6 +12,7 @@ import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greaterEq
 import org.jetbrains.exposed.v1.core.lessEq
+import org.jetbrains.exposed.v1.r2dbc.andWhere
 import org.jetbrains.exposed.v1.r2dbc.selectAll
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -39,16 +40,16 @@ class ConsumptionRecordService : BaseService() {
         // Filter by date range
         if (!startDate.isNullOrBlank()) {
             val start = LocalDate.parse(startDate).atStartOfDay()
-            query = query.where { ConsumptionRecords.createdAt greaterEq start }
+            query = query.andWhere { ConsumptionRecords.createdAt greaterEq start }
         }
         if (!endDate.isNullOrBlank()) {
             val end = LocalDate.parse(endDate).atTime(23, 59, 59)
-            query = query.where { ConsumptionRecords.createdAt lessEq end }
+            query = query.andWhere { ConsumptionRecords.createdAt lessEq end }
         }
 
         // Filter by clinic
         if (clinicId != null) {
-            query = query.where { ConsumptionRecords.clinicId eq clinicId }
+            query = query.andWhere { ConsumptionRecords.clinicId eq clinicId }
         }
 
         val total = query.count()

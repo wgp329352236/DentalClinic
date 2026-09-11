@@ -39,7 +39,7 @@ val RbacInterceptor = createRouteScopedPlugin("RbacInterceptor", ::RbacPluginCon
  * 用法：
  * ```
  * authenticated {
- *     requirePermission("game:list") {
+ *     requirePermission("clinic:list") {
  *         get { ... }
  *     }
  * }

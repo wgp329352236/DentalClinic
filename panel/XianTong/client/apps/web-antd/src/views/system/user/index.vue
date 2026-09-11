@@ -1,13 +1,16 @@
 <script lang="ts" setup>
-import { ref } from 'vue';
-
 import { Page, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
 import { Button, message, Modal, Switch, Tag } from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { deleteUser, getUserList, resetUserPassword, updateUserStatus } from '#/api/system';
+import {
+  deleteUser,
+  getUserList,
+  resetUserPassword,
+  updateUserStatus,
+} from '#/api/system';
 
 import UserFormModal from './form-modal.vue';
 
@@ -57,7 +60,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
     height: 'auto',
     proxyConfig: {
       ajax: {
-        query: async ({ page }, formValues) => {
+        query: async ({ page }: any, formValues: any) => {
           const res = await getUserList({
             page: page.currentPage,
             pageSize: page.pageSize,
@@ -130,15 +133,24 @@ async function onDelete(row: any) {
         </Button>
       </template>
       <template #roles="{ row }">
-        <Tag v-for="r in row.roles" :key="r.roleCode" color="blue">{{ r.roleName }}</Tag>
+        <Tag v-for="r in row.roles" :key="r.roleCode" color="blue">
+          {{ r.roleName }}
+        </Tag>
       </template>
       <template #status="{ row }">
-        <Switch :checked="row.status === 1" @change="() => onToggleStatus(row)" />
+        <Switch
+          :checked="row.status === 1"
+          @change="() => onToggleStatus(row)"
+        />
       </template>
       <template #action="{ row }">
         <Button type="link" size="small" @click="onEdit(row)">编辑</Button>
-        <Button type="link" size="small" @click="onResetPassword(row)">重置密码</Button>
-        <Button type="link" size="small" danger @click="onDelete(row)">删除</Button>
+        <Button type="link" size="small" @click="onResetPassword(row)">
+          重置密码
+        </Button>
+        <Button type="link" size="small" danger @click="onDelete(row)">
+          删除
+        </Button>
       </template>
     </Grid>
   </Page>

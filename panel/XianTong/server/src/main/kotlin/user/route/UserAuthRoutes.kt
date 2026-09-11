@@ -7,6 +7,9 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
+import org.slf4j.LoggerFactory
+
+private val logger = LoggerFactory.getLogger("UserAuthRoutes")
 
 /**
  * User-end authentication routes.
@@ -35,10 +38,11 @@ fun Application.userAuthRoutes(authService: UserAuthService) {
                         )
                     ))
                 } catch (e: Exception) {
-                    call.respond(ApiResponse<Unit>(
-                        code = 500,
-                        message = "登录失败: ${e.message}"
-                    ))
+                    // scene 里不拼 request.code：微信登录凭证不应落入日志
+                    val (code, message) = translateApiError(
+                        logger, "[Auth]: 微信登录", "登录失败，请稍后重试", e
+                    )
+                    call.respond(ApiResponse<Unit>(code = code, message = message))
                 }
             }
 
@@ -64,10 +68,11 @@ fun Application.userAuthRoutes(authService: UserAuthService) {
                         ))
                     }
                 } catch (e: Exception) {
-                    call.respond(ApiResponse<Unit>(
-                        code = 500,
-                        message = "刷新失败: ${e.message}"
-                    ))
+                    // 同上：scene 里不拼 refreshToken
+                    val (code, message) = translateApiError(
+                        logger, "[Auth]: 刷新令牌", "刷新失败，请稍后重试", e
+                    )
+                    call.respond(ApiResponse<Unit>(code = code, message = message))
                 }
             }
         }

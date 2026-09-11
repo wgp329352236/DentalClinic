@@ -11,7 +11,12 @@ const [Grid] = useVbenVxeGrid({
     columns: [
       { type: 'seq', title: '#', width: 50 },
       { field: 'ruleName', title: '规则名称', minWidth: 150 },
-      { field: 'deliveryStatus', title: '发送状态', width: 90, slots: { default: 'status' } },
+      {
+        field: 'deliveryStatus',
+        title: '发送状态',
+        width: 90,
+        slots: { default: 'status' },
+      },
       { field: 'triggeredAt', title: '触发时间', minWidth: 170 },
       { field: 'messageContent', title: '通知内容', minWidth: 200 },
       { field: 'errorMessage', title: '错误信息', minWidth: 150 },
@@ -19,8 +24,11 @@ const [Grid] = useVbenVxeGrid({
     height: 'auto',
     proxyConfig: {
       ajax: {
-        query: async ({ page }) => {
-          const res = await getNotificationHistory({ page: page.currentPage, pageSize: page.pageSize });
+        query: async ({ page }: any) => {
+          const res = await getNotificationHistory({
+            page: page.currentPage,
+            pageSize: page.pageSize,
+          });
           return { items: res?.list || [], total: res?.total || 0 };
         },
       },
@@ -35,7 +43,9 @@ const [Grid] = useVbenVxeGrid({
   <Page auto-content-height>
     <Grid table-title="通知历史">
       <template #status="{ row }">
-        <Tag :color="row.deliveryStatus === 'sent' ? 'success' : 'error'">{{ row.deliveryStatus === 'sent' ? '已发送' : '失败' }}</Tag>
+        <Tag :color="row.deliveryStatus === 'sent' ? 'success' : 'error'">
+          {{ row.deliveryStatus === 'sent' ? '已发送' : '失败' }}
+        </Tag>
       </template>
     </Grid>
   </Page>

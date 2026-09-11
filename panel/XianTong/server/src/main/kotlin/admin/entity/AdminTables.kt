@@ -379,6 +379,42 @@ object UserWallets : Table("user_wallet") {
 }
 
 /**
+ * 钱包资金流水表
+ *
+ * 为什么不复用 admin_audit_log：审计日志由 AdminCleanupService 每日清理 90 天前的记录，
+ * 而资金变动属财务凭证，需长期可追溯。故独立建表，只追加不修改。
+ *
+ * changeType 取值：
+ *   recharge 充值入账、consume 消费扣款、adjust 管理端人工调整、refund 退款入账、
+ *   referral_reward 推荐奖励发放赠送余额
+ *
+ * 覆盖要求：任何修改 user_wallet 余额或赠送余额的代码路径都必须写一条流水，
+ * 否则「流水逐笔累加 = 钱包当前余额」这一对账等式不成立，表就失去意义。
+ */
+object WalletTransactions : Table("wallet_transaction") {
+    val id = long("id").autoIncrement()
+    val userId = long("user_id")
+    val changeType = varchar("change_type", 20)
+    val amount = decimal("amount", 12, 2)      // 本金余额变动（正=入账，负=出账）
+    val bonusAmount = decimal("bonus_amount", 12, 2).default(0.0.toBigDecimal()) // 赠送余额变动
+    val balanceBefore = decimal("balance_before", 12, 2)
+    val balanceAfter = decimal("balance_after", 12, 2)
+    val bonusBefore = decimal("bonus_before", 12, 2).default(0.0.toBigDecimal())
+    val bonusAfter = decimal("bonus_after", 12, 2).default(0.0.toBigDecimal())
+    val reason = varchar("reason", 200).nullable() // 变动原因（管理端人工调整必填）
+    val operatorName = varchar("operator_name", 50).nullable() // 操作员；C 端自助操作为空
+    val relatedId = long("related_id").nullable() // 关联业务ID（充值记录ID/消费记录ID）
+    val createdAt = datetime("created_at").defaultExpression(CurrentTimestamp)
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        index("wtx_wallet_transaction_idx_user_id", false, userId)
+        index("wtx_wallet_transaction_idx_change_type", false, changeType)
+        index("wtx_wallet_transaction_idx_created_at", false, createdAt)
+    }
+}
+
+/**
  * 充值记录表
  */
 object RechargeRecords : Table("recharge_record") {
@@ -444,16 +480,33 @@ object UserMemberLevels : Table("user_member_level") {
 
 /**
  * 消费记录表
+ *
+ * 金额字段口径（结算链路自上而下）：
+ *   originalAmount 项目原价
+ *     - discountAmount 会员等级折扣减免
+ *   = amount 折后消费金额（营收统计口径，数据看板按此字段汇总）
+ *     - couponDeduct 优惠券抵扣
+ *   = payAmount 实付金额
+ *     = balanceUsed 余额支付 + wechatPaid 微信支付
+ *
+ * 消费积分以 payAmount 为基数计算（需求 3.4.1：含余额支付和微信支付）。
  */
 object ConsumptionRecords : Table("consumption_record") {
     val id = long("id").autoIncrement()
     val userId = long("user_id")
     val clinicId = long("clinic_id")
     val appointmentId = long("appointment_id").nullable() // 关联预约
-    val amount = decimal("amount", 12, 2)     // 消费金额
+    val amount = decimal("amount", 12, 2)     // 消费金额（会员折扣后）
+    val originalAmount = decimal("original_amount", 12, 2).default(0.0.toBigDecimal()) // 项目原价
+    val discountAmount = decimal("discount_amount", 12, 2).default(0.0.toBigDecimal()) // 会员折扣减免
+    val couponDeduct = decimal("coupon_deduct", 12, 2).default(0.0.toBigDecimal()) // 优惠券抵扣金额
+    val userCouponId = long("user_coupon_id").nullable() // 本次核销的用户优惠券ID
     val balanceUsed = decimal("balance_used", 12, 2).default(0.0.toBigDecimal()) // 使用余额
     val wechatPaid = decimal("wechat_paid", 12, 2).default(0.0.toBigDecimal()) // 微信支付部分
+    val payAmount = decimal("pay_amount", 12, 2).default(0.0.toBigDecimal()) // 实付金额
     val pointsEarned = integer("points_earned").default(0) // 获得积分
+    val status = varchar("status", 20).default("success") // success/refunded
+    val operatorName = varchar("operator_name", 50).nullable() // 录入操作员（管理端账号）
     val description = text("description").nullable() // 消费说明
     val createdAt = datetime("created_at").defaultExpression(CurrentTimestamp)
     override val primaryKey = PrimaryKey(id)
@@ -511,7 +564,15 @@ object PointsRules : Table("points_rule") {
     val ruleName = varchar("rule_name", 100)  // 规则名称
     val ruleType = varchar("rule_type", 20)   // earn/spend
     val actionType = varchar("action_type", 30) // consumption/recharge/signup/profile_complete/review/referral
-    val pointsPerUnit = integer("points_per_unit") // 每单位获得的积分
+    val pointsPerUnit = integer("points_per_unit") // 每 unitAmount 个单位获得的积分
+    /**
+     * 计分单位数量，与 [pointsPerUnit] 共同表达比率：每 unitAmount 个单位积 pointsPerUnit 分。
+     *
+     * 存在的理由：需求 3.4.1 的充值积分是「每充值 1 元积 0.5 分」，而 points_per_unit 是整型，
+     * 存不下 0.5。用 unitAmount=2 + pointsPerUnit=1 表达同一比率（每 2 元 1 分），
+     * 既精确表示小数积分率，又无需把整型列改成 decimal 而波及全部读取点。
+     */
+    val unitAmount = integer("unit_amount").default(1)
     val unitDescription = varchar("unit_description", 100).nullable() // 单位说明 如"每消费1元"
     val dailyLimit = integer("daily_limit").nullable() // 每日上限
     val monthlyLimit = integer("monthly_limit").nullable() // 每月上限
@@ -593,7 +654,7 @@ object ReferralRewards : Table("referral_reward") {
     val refereeId = long("referee_id")
     val rewardType = varchar("reward_type", 20) // points/balance/coupon
     val rewardValue = decimal("reward_value", 12, 2) // 奖励值
-    val stage = varchar("stage", 20)          // registration/first_consumption/tier
+    val stage = varchar("stage", 20)          // registration/first_consumption/tier/ongoing
     val status = varchar("status", 20).default("pending") // pending/granted
     val grantedAt = datetime("granted_at").nullable()
     val createdAt = datetime("created_at").defaultExpression(CurrentTimestamp)

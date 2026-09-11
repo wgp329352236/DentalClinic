@@ -14,6 +14,7 @@ import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greaterEq
 import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.core.lessEq
+import org.jetbrains.exposed.v1.r2dbc.andWhere
 import org.jetbrains.exposed.v1.r2dbc.selectAll
 import java.time.format.DateTimeFormatter
 
@@ -47,17 +48,17 @@ class MedicalRecordService : BaseService() {
 
         if (!startDate.isNullOrBlank()) {
             val start = java.time.LocalDate.parse(startDate)
-            query = query.where { Appointments.appointmentDate greaterEq start }
+            query = query.andWhere { Appointments.appointmentDate greaterEq start }
         }
         if (!endDate.isNullOrBlank()) {
             val end = java.time.LocalDate.parse(endDate)
-            query = query.where { Appointments.appointmentDate lessEq end }
+            query = query.andWhere { Appointments.appointmentDate lessEq end }
         }
         if (doctorId != null) {
-            query = query.where { Appointments.doctorId eq doctorId }
+            query = query.andWhere { Appointments.doctorId eq doctorId }
         }
         if (departmentId != null) {
-            query = query.where { Appointments.departmentId eq departmentId }
+            query = query.andWhere { Appointments.departmentId eq departmentId }
         }
 
         val total = query.count()

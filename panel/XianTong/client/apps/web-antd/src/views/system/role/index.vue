@@ -94,11 +94,21 @@ async function onDelete(row: any) {
         <Tag color="blue">{{ row.permissions?.length || 0 }}</Tag>
       </template>
       <template #isSystem="{ row }">
-        <Tag :color="row.isSystem ? 'red' : 'default'">{{ row.isSystem ? '是' : '否' }}</Tag>
+        <Tag :color="row.isSystem ? 'red' : 'default'">
+          {{ row.isSystem ? '是' : '否' }}
+        </Tag>
       </template>
       <template #action="{ row }">
         <Button type="link" size="small" @click="onEdit(row)">编辑</Button>
-        <Button type="link" size="small" danger :disabled="!!row.isSystem" @click="onDelete(row)">删除</Button>
+        <Button
+          type="link"
+          size="small"
+          danger
+          :disabled="!!row.isSystem"
+          @click="onDelete(row)"
+        >
+          删除
+        </Button>
       </template>
     </Grid>
   </Page>

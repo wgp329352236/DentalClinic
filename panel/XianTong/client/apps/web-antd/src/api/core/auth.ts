@@ -1,3 +1,5 @@
+import type { HttpResponse } from '@vben/request';
+
 import { baseRequestClient, requestClient } from '#/api/request';
 
 export namespace AuthApi {
@@ -13,8 +15,14 @@ export namespace AuthApi {
     refreshToken?: string;
   }
 
+  /**
+   * 刷新 Token 返回值。
+   * refreshTokenApi 走 baseRequestClient（responseReturn='raw'），RequestClient.post<T>
+   * 运行时返回原始 AxiosResponse，故此处描述的是 AxiosResponse 形状：
+   * data 是后端 {code,data,message} 包装（真正的新 token 在 data.data），status 是 HTTP 状态码。
+   */
   export interface RefreshTokenResult {
-    data: string;
+    data: HttpResponse<string>;
     status: number;
   }
 }
