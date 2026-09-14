@@ -6,6 +6,7 @@ import com.dentalclinic.admin.entity.*
 import com.dentalclinic.admin.route.*
 import com.dentalclinic.admin.service.*
 import com.dentalclinic.admin.util.*
+import com.dentalclinic.common.FileUploadService
 import com.dentalclinic.common.ReferralRewardService
 import com.dentalclinic.common.config.DBConfig
 import com.dentalclinic.common.config.SchemaMigration
@@ -75,6 +76,9 @@ fun Application.adminModule() {
                 // Notifications
                 Notifications,
                 MessageTemplates,
+                // Miniprogram content (banner / notice)
+                MpBanners,
+                MpNotices,
                 // Files
                 UploadedFiles
             )
@@ -202,6 +206,10 @@ fun Application.adminRouting() {
     val appointmentService = AppointmentAdminService()
     val customerService = CustomerService(pointsService)
 
+    // 小程序内容配置（轮播图/公告）与管理端文件上传
+    val contentService = AdminContentService()
+    val fileUploadService = FileUploadService()
+
     routing {
         // Admin API
         route("/api/admin") {
@@ -226,6 +234,10 @@ fun Application.adminRouting() {
             scheduleRoutes(scheduleService)
             appointmentAdminRoutes(appointmentService)
             customerRoutes(customerService)
+
+            // Miniprogram content config & file upload
+            contentAdminRoutes(contentService)
+            adminFileRoutes(fileUploadService)
         }
     }
 }

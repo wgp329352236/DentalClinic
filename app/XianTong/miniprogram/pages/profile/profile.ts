@@ -1,6 +1,7 @@
 // pages/profile/profile.ts
 import { getUserProfile, getCoupons, getUnreadCount } from '../../utils/api'
 import { checkLogin } from '../../utils/auth'
+import { resolveFileUrl } from '../../utils/util'
 import type { UserInfo, Coupon } from '../../types'
 
 Page({
@@ -9,34 +10,53 @@ Page({
     coupons: [] as Coupon[],
     unreadCount: 0,
     loading: false,
-    progressPercent: 0 // 会员升级进度条宽度
+    progressPercent: 0, // 会员升级进度条宽度
+    discountText: '' // 折扣文案，如「9.5 折」；无折扣时为空串，wxml 据此隐藏该行
   },
 
   onLoad() {
-    if (!checkLogin()) return
+    checkLogin()
+  },
+
+  /**
+   * 每次显示都重新拉取。
+   *
+   * 不能只读 app.globalData.userInfo：从「编辑资料」返回时全局态里还是改前的旧值，
+   * 用户改完昵称/头像却看不到变化。onShow 在 onLoad 之后必然触发，故 onLoad 只做登录校验。
+   */
+  onShow() {
+    const app = getApp<IAppOption>()
+    // 未登录时不再调 checkLogin()：它会 reLaunch 到首页，而 onShow 可能因 reLaunch 再次触发，
+    // 形成跳转循环；此处静默返回即可，登录态由 onLoad 的 checkLogin 负责
+    if (!app?.globalData?.token) return
     this.loadUserInfo()
     this.loadCoupons()
     this.loadUnreadCount()
   },
 
-  onShow() {
-    // 刷新用户信息
-    const app = getApp<IAppOption>()
-    if (app.globalData.userInfo) {
-      const userInfo = app.globalData.userInfo
-      this.setData({
-        userInfo,
-        progressPercent: this.calcProgress(userInfo)
-      })
-    }
-  },
-
-  // 计算会员升级进度百分比
+  /**
+   * 计算会员升级进度百分比。
+   *
+   * nextLevelCost 为 null（已是最高等级）或 0 时返回 0，由 wxml 的 wx:if 隐藏进度条，
+   * 而不是显示一根「还需消费 0 元」的空进度条。
+   */
   calcProgress(userInfo: UserInfo): number {
     const total = userInfo.totalSpent || 0
     const next = userInfo.memberLevel.nextLevelCost || 0
     if (next <= 0) return 0
     return Math.min(100, Math.round((total / (total + next)) * 100))
+  },
+
+  /**
+   * 折扣率 → 中文折扣文案。
+   *
+   * discountRate 为 1（无折扣）时返回空串：展示「10 折」反而让人以为有优惠。
+   * 用 toFixed(2) 去掉浮点尾差后再删多余的 0，9.50 → 9.5、9.00 → 9。
+   */
+  formatDiscount(discount: number): string {
+    if (!discount || discount >= 1) return ''
+    const zhe = Number((discount * 10).toFixed(2))
+    return `${zhe} 折`
   },
 
   // 加载用户资料（GET /profile/me，映射为本地 UserInfo 结构）
@@ -48,22 +68,32 @@ Page({
         const userInfo: UserInfo = {
           id: d.userId,
           name: d.realName || d.nickname || '',
+          nickname: d.nickname || '',
           phone: d.phone || '',
           gender: d.gender === 2 ? 'female' : 'male',
           age: d.age || 0,
-          avatar: d.avatar || '',
+          // 后端存的是 /api/v1/files/xxx.png 形式的相对地址，<image> 需要绝对地址
+          avatar: resolveFileUrl(d.avatar),
           clinicId: d.primaryClinicId || 0,
+          // 等级、折扣、权益、累计消费、升级差额全部由 /profile/me 下发，
+          // 不再前端硬编码：此前写死 Lv1 导致等级卡片长期展示假数据
           memberLevel: {
-            level: 1,
-            name: '普通会员',
-            discount: 1.0,
-            benefits: ['预约优先', '生日祝福'],
-            nextLevelCost: 3000
+            level: d.levelCode,
+            name: d.levelName,
+            discount: d.discountRate,
+            benefits: d.benefits || [],
+            nextLevelCost: d.nextLevelCost
           },
           registerSource: 'self',
-          totalSpent: 0 // TODO: 后端暂无累计消费，待补充
+          totalSpent: d.accumulatedConsumption || 0,
+          balance: d.balance || 0,
+          bonusBalance: d.bonusBalance || 0
         }
-        this.setData({ userInfo, progressPercent: this.calcProgress(userInfo) })
+        this.setData({
+          userInfo,
+          progressPercent: this.calcProgress(userInfo),
+          discountText: this.formatDiscount(userInfo.memberLevel.discount)
+        })
         const app = getApp<IAppOption>()
         app.setUserInfo(userInfo)
       }
@@ -109,17 +139,17 @@ Page({
 
   // 编辑个人信息
   editProfile() {
-    wx.showToast({ title: '编辑功能开发中', icon: 'none' })
+    wx.navigateTo({ url: '/pages/profile-edit/profile-edit' })
   },
 
   // 查看就诊记录
   goToVisitRecords() {
-    wx.showToast({ title: '就诊记录开发中', icon: 'none' })
+    wx.navigateTo({ url: '/pages/medical-records/medical-records' })
   },
 
   // 查看消息中心
   goToMessages() {
-    wx.showToast({ title: '消息中心开发中', icon: 'none' })
+    wx.navigateTo({ url: '/pages/messages/messages' })
   },
 
   // 登出

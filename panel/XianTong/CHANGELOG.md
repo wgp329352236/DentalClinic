@@ -2,6 +2,168 @@
 
 本文件按日期倒序记录 XianTong 项目的代码改动，每条包含：改了什么、为什么改、影响范围。
 
+## 2026-09-14
+
+本轮实施需求文档差距分析的**第 1 步**：补齐「小程序个人中心」与「首页内容配置」两条链路，并先清掉四个会在实施过程中直接绊住人的前置阻塞点（B1~B4，见 H 节）。改动跨三端：后端 6 新增 + 8 修改 + 1 迁移，管理端 6 新增 + 1 修改，小程序 16 新增 + 14 修改。
+
+按用户指示「第 1 步不验证」，**跳过正式验证门**——`pnpm exec playwright test`（e2e）与 `pnpm run test:unit` 未跑，content 模块也没有新增 e2e 规格；只跑了编译/类型/风格层面的轻量验证，结果与验证边界见 L 节。
+
+### H. 四个前置阻塞点
+
+#### H-1. 首页图片全是死链（B1）
+
+- **改了什么**：`miniprogram/images/` 目录下只有一个 README.md，而首页 `data` 里硬编码的 3 条 banners（`/images/banner{1,2,3}.jpg`）与 4 条 quickActions（`/images/icon-*.png`）全部指向不存在的文件。本轮 banners 改为后端下发（见 I-3、K-4），quickActions 的 `icon` 字段改为 emoji（📅💰🎁👥），`.quick-action-icon` 字号从 24rpx 提到 44rpx。
+- **原因**：死链在真机上表现为轮播区一片空白加四个快捷入口没有图标，是首页最显眼的破相；而补图需要真实设计素材，不是代码层面能解决的问题。emoji 按字号渲染，沿用 24rpx 会小到看不清。
+- **影响范围**：仅首页。emoji 方案不引入任何资源文件，也就不存在再次死链的可能。收尾用 `grep -rn "/images/" pages/ utils/ app.ts app.json` 复查为空，全库无残留引用。
+
+#### H-2. 改手机号撞唯一索引返回 500（B2）
+
+- **改了什么**：`user/route/UserApiErrors.kt`（53→96 行）的 `translateApiError` 从两分支扩成三分支，新增 SQLState 23505 识别，命中回 409 并给出用户能据以修正的文案。
+- **取证细节**：映射表的键取自 `AdminTables` 里 uniqueIndex 的名字（`cuser_uk_phone` → 「该手机号已被其他账号使用」、`cuser_uk_openid` → 「该微信账号已绑定其他用户」），因为 PostgreSQL 的报错原文形如 `duplicate key value violates unique constraint "cuser_uk_phone"`，约束名稳定且不随数据变化，比解析列名可靠。查找方式是 `generateSequence<Throwable>(e) { it.cause }.filterIsInstance<R2dbcException>().firstOrNull { it.sqlState == "23505" }`——必须沿 cause 链遍历，Exposed 的事务层与 R2DBC 驱动都可能把原始异常裹进别的异常再抛。未命中映射表时回通用文案「数据重复，请检查后重试」，不暴露是哪个约束。
+- **原因**：改手机号撞上他人已用号码是业务常态而非故障。回 500 会让用户以为系统坏了并反复重试，而重试永远不会让重复的号码变得不重复。
+- **影响范围**：所有走 `translateApiError` 的 C 端路由。冲突分支记 WARN 而非 ERROR，避免淹没真正的服务器故障形成告警噪音（与既有的请求体解析分支同理）。三个分支都不回传 `e.message`：底层异常的文本会把表名/列名/约束名乃至服务器绝对路径暴露给 C 端用户。
+
+#### H-3. 管理端零上传能力（B3）
+
+- **改了什么**：新增 `admin/route/AdminFileRoutes.kt`（103 行），提供 `POST /api/admin/files/upload` 与 `DELETE /api/admin/files/{fileName}`，两个端点均要求 `content:manage` 权限；在 `AdminModule.adminRouting()` 的 `/api/admin` route 下挂载。管理端配套新增 `api/upload.ts`（30 行）。
+- **原因**：既有的 `POST /api/v1/files/upload` 位于 `userAuthenticated { }` 内，管理员 JWT 进不去。没有上传能力，轮播图配置页就只能让管理员手填外链，而外链图在小程序里还要额外配 downloadFile 合法域名。
+- **取证细节**：前端用 `requestClient.upload(url, { file })` 走 FileUploader，FormData 的 Content-Type 由 axios 在浏览器环境自动设置（带 boundary），不能手写。默认 10s 超时对 5MB 图片偏紧，弱网下容易在传完前被中断，显式设为 60s。后端把 multipart 读取与业务校验拆成两段 try：前者失败包 500 且不回传 `e.message`，后者抛 ValidationException 冒泡到 StatusPages 映射 400。
+- **影响范围**：管理端新增两个端点。**素材的读取端点仍在 C 端命名空间**（`GET /api/v1/files/{fileName}`，公开），因此管理端上传后拿到的相对地址在 dev 下需要额外的 vite 代理，见 J-2。
+
+#### H-4. FileUploadService 下沉到 common 避免包循环（B4）
+
+- **改了什么**：`user/service/FileUploadService.kt` 移到 `common/FileUploadService.kt`（git 识别为 rename），`user/UserModule.kt`、`user/route/FileUploadRoutes.kt`、`admin/AdminModule.kt` 三处 import 改指 `com.dentalclinic.common.FileUploadService`。
+- **原因**：H-3 让管理端也要上传，但 user 包已依赖 admin 包（54 处），admin 反向 import `user.service` 会形成包循环。与 `BaseService`、`ReferralRewardService` 下沉 common 的理由一致。
+- **影响范围**：`saveFile`/`deleteFile`/`batchDeleteFiles` 三个方法新增 `ownerType` 参数（默认 `OWNER_USER`，签名向后兼容）；companion object 加 `OWNER_USER`/`OWNER_ADMIN`/`ADMIN_OWNER_ID` 三个常量。删除时的归属校验**同时比对 userId 与 ownerType**：管理端文件的 userId 统一写 0，只比 userId 会让任意两个管理员互相删掉对方上传的文件，也会让 id 恰为 0 的 C 端用户碰到管理端文件。`getFilePath` 的路径越界防护（空字节拦截 + canonicalFile + 带分隔符前缀比较）随迁移保留未动。
+
+#### H-5. 收尾时清掉的两处残留
+
+- **改了什么**：其一，`user/service/FileUploadService.kt` 在迁移后仍留在磁盘上（9616 字节，内容与 common 版仅差 package 行、一行 import 与一段说明注释），处于 git 未跟踪状态且无任何代码引用，已删除。其二，`server/build.gradle.kts` 有一处只删掉一个空行的改动，与本轮无关，已 `git checkout --` 还原。
+- **原因**：两个同名类分居 `com.dentalclinic.user.service` 与 `com.dentalclinic.common` 两个包，编译不报错（FQN 不冲突，所有 import 都已指向 common 版），因此不会被任何一道验证门发现，但它是死代码：后来人改上传逻辑时很可能改到不生效的那一份。
+- **影响范围**：删除后重跑 `./gradlew :server:cleanCompileKotlin :server:test`，BUILD SUCCESSFUL——L 节的后端两道门是删完之后跑的，不是复用删之前的结果。
+
+### I. 后端：小程序内容配置与 C 端资料接口
+
+#### I-1. mp_banner / mp_notice 两表与 uploaded_file.owner_type
+
+- **改了什么**：`admin/entity/AdminTables.kt`（+81 行）新增 `MpBanners`（表 `mp_banner`）、`MpNotices`（表 `mp_notice`）与常量对象 `ContentLinkType`（`none`/`page`/`webview`，另有 `ALL` 集合供校验用）；`UploadedFiles` 加 `owner_type varchar(10) default 'user'`。`common/config/SchemaMigration.kt` 新增 `migrateUploadedFileOwnerType()` 并接入 `migrate()` 调用链。
+- **表结构**：banner 为 title(100) / image_url(500) / link_type(20) / link_target(500, nullable) / sort_order / status / start_at / end_at / created_by / created_at / updated_at，另建索引 `mp_banner_idx_status_sort (status, sort_order)`；notice 同构，用一个 content 列替换 title + image_url。
+- **原因**：不复用既有的 `admin_system_config`——它的 `config_value` 只有 varchar(500)，且管理端是单行 key-value 编辑器，装不下多条「图片 + 标题 + 跳转 + 排期」记录。owner_type 必须走显式迁移，因为 `SchemaUtils.create()` 只建缺失的表、不给已有表补列。
+- **影响范围**：历史 `uploaded_file` 行全是 C 端上传，`DEFAULT 'user'` 即正确语义，无需回填。迁移幂等（`addColumnIfMissing`），已部署库重启一次即可。
+
+#### I-2. 管理端 CRUD
+
+- **改了什么**：新增 `admin/service/AdminContentService.kt`（286 行）与 `admin/route/ContentAdminRoutes.kt`（109 行）。`/api/admin/banners` 与 `/api/admin/notices` 各提供 GET 列表（支持 `?status=` 过滤）/ POST / PUT `{id}` / DELETE `{id}`；读操作要 `content:view`，写操作要 `content:manage`。DTO 为 `SaveBannerRequest`、`SaveNoticeRequest`、`BannerItemDto`、`NoticeItemDto`。
+- **原因**：管理端列表看全量（含已下线与未到期的），排期过滤只发生在 C 端接口，否则运营没法提前录入待上线的素材。
+- **影响范围**：校验集中在 `validateBanner`/`validateNotice`/`validateCommon`：linkType 必须在 `ContentLinkType.ALL` 内；非 none 必须有 linkTarget；webview 的 linkTarget 必须是 https；endAt 不早于 startAt。`parseDate(value, endOfDay)` 与 `AdminCouponService` 同口径——起始补 00:00:00、截止补 23:59:59，同时容忍 `yyyy-MM-dd HH:mm:ss` 全格式，避免运营从 Excel 粘时间进来就报格式错误。
+
+#### I-3. C 端公开接口 GET /api/v1/content/home
+
+- **改了什么**：新增 `user/service/ContentService.kt`（101 行）与 `user/route/UserContentRoutes.kt`（41 行），一次返回 `{ banners, notices }`；DTO 为 `BannerDto(id, title, imageUrl, linkType, linkTarget)`、`NoticeDto(id, content, linkType, linkTarget)`、`HomeContentDto`。路由挂在 `userAuthenticated` **之外**。
+- **原因**：合成一个接口而不是 banner、notice 各一个，是为了少一轮 RTT——需求 5.1 要求首屏 <2s。放在鉴权外是因为首页在未登录状态也要展示轮播图与公告。
+- **影响范围**：排期三条件为 `status = 1` 且 `(start_at is null 或 <= now)` 且 `(end_at is null 或 >= now)`，命中 I-1 建的复合索引；返回条数上限 `MAX_BANNERS = 10`、`MAX_NOTICES = 5`。异常走 `translateApiError`，与其他 C 端路由一致。
+
+#### I-4. /profile/me 返回真实会员等级与累计消费
+
+- **改了什么**：新增 `user/service/UserProfileService.kt`（198 行），`user/route/UserProfileRoutes.kt` 从 159 行的内联查询瘦身为 84 行的纯路由（查库与校验逻辑全部搬进 service）。`UserProfileDto` 新增 levelCode / levelName / discountRate / benefits / accumulatedConsumption / nextLevelCost 六个字段。
+- **原因**：需求 3.7.1 的等级卡片此前在小程序侧是硬编码的「Lv1 / 普通会员 / 距升级 3000」，接口不下发这些字段，前端就只能造假。
+- **实现细节**：`getProfile(userId)` 一次取全 `MemberLevels`（该表只有 4 行）在内存里算当前级与下一级，避免两次查询；用户关联的等级记录缺失时兜底到最低级而不是返回 null；已是最高级时 `nextLevelCost = null`（因此小程序侧该字段类型是 `number | null`）。`parseBenefits(raw)` 处理的是 `member_level.benefits` 这个 **text 列存 `{"benefits":[...]}` JSON 文本**的情况（不是 exposed-json 列），解析失败降级为空列表而不抛异常。
+- **影响范围**：`updateProfile` 只做格式校验（手机号 `^1[3-9]\d{9}$`、gender ∈ {1,2}、age ∈ 0..150、姓名/昵称非空白），返回 sealed class `ProfileUpdateResult`（Success / NotFound / Error）。唯一约束冲突**不在 service 里捕获**，交路由层的 `translateApiError` 翻译成 409（见 H-2）——在 service 里 catch 会把它变成一条正常的返回值，丢掉 H-2 刚建立的语义。手机号只做格式校验、不做验证码校验，因为短信通道与真实微信 code2Session 尚未接入，号码占用由 `cuser_uk_phone` 唯一索引兜底。
+
+#### I-5. 权限与菜单 seed
+
+- **改了什么**：`admin/service/DataSeedService.kt`（+20/-1）新增权限 `content:view`（查看小程序内容）与 `content:manage`（管理小程序内容）；新增一级目录「内容管理」（routePath `/content`，icon `lucide:image`，sortOrder 75）与两个子菜单「轮播图管理」（`/content/banner` → `/content/banner/index`，icon `lucide:images`）、「公告管理」（`/content/notice` → `/content/notice/index`，icon `lucide:megaphone`）；`linkMenusToSuperAdmin` 的 menuPaths 补 `/content`、`/content/banner`、`/content/notice` 三条；seed 完成的日志文案同步加上 content。
+- **原因**：项目是 `accessMode: 'backend'`，菜单全部由 `/menu/all` 下发，不 seed 就看不到入口。
+- **影响范围**：幂等性沿用既有机制——`ensureMenu` 按 routePath 判重、权限按 permissionCode 判重、super_admin 每次启动补齐全部权限与菜单，因此已部署的库重启一次即可看到新菜单，不需要手工插数据。**有意不 seed 默认轮播图/公告**：没有真实图片素材，seed 假 URL 等于把 H-1 刚清掉的死链又装回去；小程序侧对空列表有 `wx:if` 兜底（整块不渲染），管理员录入后即生效。
+
+### J. 管理端：内容管理两个配置页
+
+#### J-1. api/content.ts 与 banner / notice 两个页面
+
+- **改了什么**：新增 `api/content.ts`（72 行，`ContentLinkType` 联合类型 + `BannerItem`/`NoticeItem` 接口 + 8 个 CRUD 函数）与 `views/content/{banner,notice}/{index,form-modal}.vue`（4 文件共 631 行，其中 banner/form-modal 226 行、notice/form-modal 145 行）。
+- **图片地址独立于 schema 管理**：banner 表单的 `imageUrl` 用 `ref<string>('')` 单独持有，配 antd `Upload` 的 `customRequest` 直传，`onConfirm` 时先校验 imageUrl 非空再 `formApi.validate()`，payload 手动合并。原因是 adapter 里的 Upload 组件绑的是 fileList 数组，而后端存的是单个 URL 字符串，两套模型对不上，硬塞进 schema 要在 onChange 里反复拆装。
+- **linkTarget 用 schema 的 `dependencies`**：`if: values => values.linkType !== 'none'`（隐藏）、`rules: values => values.linkType === 'none' ? null : 'required'`（动态必填）、`triggerFields: ['linkType']`。同时保留一个手填 URL 的 Input，便于运营直接粘已有素材地址。
+- **两个交互细节**：前端做 5MB 前置拦截（后端也拦，但等传完再报错体验差）；上传失败时只在 `!error?.response` 的情况下弹 toast，因为 requestClient 的响应拦截器已经弹过一次，不判就会双重提示。
+- **图标选型**：用 `@vben/icons` 的 `IconifyIcon`，不用 `@ant-design/icons-vue`——后者不在 web-antd 的 dependencies 里（首次写完才发现）。loading 态用 `class="animate-spin"`，因为 @iconify/vue 的 Icon 没有 `spin` 属性。
+
+#### J-2. vite dev server 补 /api/v1 代理
+
+- **改了什么**：`apps/web-antd/vite.config.ts` 新增 `/api/v1` → `http://localhost:8080` 的代理。
+- **原因**：上传素材的读取端点在 C 端命名空间下（`GET /api/v1/files/{fileName}`），而 `requestClient` 的 baseURL 是 `/api/admin`，原有代理只覆盖 `/api/admin`。不代理的话，管理端上传成功后拿到的相对地址在 dev 下 404，轮播图预览、门店封面、医生头像全是裂图。
+- **影响范围**：仅 dev server；生产由 Nginx 统一转发，不受影响。
+
+### K. 小程序：个人中心四页与首页改造
+
+#### K-1. 四个新页面（16 文件 878 行）
+
+- **改了什么**：新增 `pages/profile-edit`（4 文件 268 行，编辑姓名/昵称/手机号/性别/年龄，头像走 `wx.chooseMedia` + `uploadFile`）、`pages/medical-records`（4 文件 163 行，就诊记录列表，分页 + 关键词搜索）、`pages/medical-record-detail`（4 文件 192 行，单次就诊详情含消费明细）、`pages/messages`（4 文件 255 行，消息中心，读/未读与标记已读）；`app.json` 注册四页。
+- **原因**：需求 3.7 个人中心里的这三项（编辑资料、就诊记录、消息中心）此前是 `wx.showToast({ title: 'xx开发中' })` 占位，点了只弹 toast。对应后端接口（`PUT /profile/me`、`GET /medical-records`、`GET /messages`）早就存在，缺的只是页面。
+- **一处逻辑修正**：`medical-record-detail` 最初写了个 `onCallClinic`，把 `record.clinicAddress` 当电话号码传给 `wx.makePhoneCall`——详情 DTO 里根本没有门诊电话字段，地址字符串喂给拨号是错的。已删掉该方法与对应按钮，只保留「再次预约」。
+- **profile-edit 的错误呈现**：提交失败时直接展示 `error.message`，这样 H-2 的 409 文案（「该手机号已被其他账号使用」）能原样呈现给用户，而不是被吞成一句「保存失败」。
+
+#### K-2. api.ts 与 types/index.ts 补齐
+
+- **改了什么**：`utils/api.ts` 442→552 行——`UserProfileResponse` 扩展 6 个会员字段；新增「就诊记录」段（`MedicalRecord`/`ConsumptionDetail`/`MedicalRecordDetail`/`MedicalRecordsResponse` + `getMedicalRecords(page, pageSize, keyword?)` + `getMedicalRecordDetail(id)`）与「首页内容」段（`ContentLinkType`/`Banner`/`Notice`/`HomeContent` + `getHomeContent()`，`needAuth = false`）；`updateUserProfile` 的返回类型改为 `put<null>`。`types/index.ts` 167→226 行——`UserInfo` 加 balance/bonusBalance/nickname，`MemberLevel.nextLevelCost` 改 `number | null`，新增 `MedicalRecord`/`ConsumptionDetail`/`MedicalRecordDetail`/`ContentLinkType`/`Banner`/`Notice`。
+- **原因**：`updateUserProfile` 原声明的返回类型带着 data，而后端 `PUT /profile/me` 只回 code/message；`nextLevelCost` 改成可空是因为已是最高等级时后端回 null（见 I-4），保持 `number` 会让前端把 null 当 0 算进度条。
+- **影响范围**：仅类型与新增函数，未改动既有函数签名，现有页面无需跟改。
+
+#### K-3. 相对文件地址的解析
+
+- **改了什么**：`utils/request.ts` 拆出并导出 `API_ORIGIN`，`BASE_URL` 改为 `${API_ORIGIN}/api/v1` 模板串；`utils/util.ts` 新增 `resolveFileUrl(url)`。
+- **原因**：后端返回的文件地址是相对路径（`FileUploadService` 的 `baseUrl` 为 `/api/v1/files`），而小程序的 `<image src>` 不认相对路径，直接绑上去就是裂图。
+- **影响范围**：`resolveFileUrl` 对 `//`、`data:`、`wxfile://`、`http://tmp/`、`^https?://` 五种前缀原样返回（`wx.chooseMedia` 的临时路径与网络图都落在这几类），其余拼 `API_ORIGIN`。导出 `API_ORIGIN` 而不是让 util 再写一遍域名，避免两处配置漂移。
+
+#### K-4. 首页轮播图与公告改后端下发
+
+- **改了什么**：`pages/index/index.ts`（309→402 行）——`data.banners`/`data.notices` 改为空数组，新增 `loadHomeContent()` 在 `onShow` 里当两者都为空时补拉；`navigateByContent(linkType, linkTarget)` 统一处理跳转；新增 `onBannerImageError(e)`。`index.wxml` 用 `<image>` + `wx:if` 渲染轮播、公告改纵向 swiper；`index.scss` 新增 `.banner-item { position: relative }`、`.banner-image`、`.notice-bar`/`.notice-icon`/`.notice-swiper`/`.notice-item`。
+- **跳转策略**：`none` 或无 target 直接返回；`webview` 明确 toast「该活动暂不支持在小程序内打开」而不是静默失败；`page` 类型先查 `TAB_BAR_PAGES` 决定用 `switchTab` 还是 `navigateTo`，`navigateTo` 带 fail 回调提示「页面不存在」。
+- **原因**：webview 之所以只提示不跳转，是因为项目里没有 web-view 承载页。后端 `AdminContentService.validateCommon` 仍允许录入 https 的 webview 目标——管理端能力保持完整，C 端待补承载页，这样补的时候不用改数据也不用改管理端。
+- **影响范围**：`onBannerImageError` 在图片加载失败时把该项的 image 置空（``this.setData({ [`banners[${index}].image`]: '' })``），配合 wxml 的 wx:if 让整项退化为纯色标题块，而不是留一个灰色破图占位。余额行改为读 `userInfo.balance`/`bonusBalance` 真值，此前是硬编码的假数字。
+
+#### K-5. 顺带修掉一个既有的静默失败
+
+- **改了什么**：`index.ts` 新增 `TAB_BAR_PAGES` 常量（四个 tab 路径），`onQuickAction` 与 `onClinicTap` 由 `wx.navigateTo` 改为按该常量选 `switchTab`；`app.ts` 与 `typings/index.d.ts` 新增 `globalData.pendingClinicId` 字段与 `setPendingClinicId(id)` 方法；`pages/appointment/appointment.ts` 新增 `onShow()`，读取 `pendingClinicId` 后**立即置空**再 setData + `loadDepartments()`。
+- **原因**：首页 quickActions 的「预约挂号」（`/pages/appointment/appointment`）与门店卡片点击都在用 `navigateTo` 跳 tabBar 页面，而 `navigateTo` 不能跳 tabBar、会**静默失败**——点了完全没反应，控制台也不报错。这是本轮之前就存在的缺陷，改首页时顺手撞到。
+- **影响范围**：门店 id 因为 `switchTab` 不支持带 query，改走 `globalData.pendingClinicId` 中转。`onShow` 里读完立刻置空是必要的：否则用户自己切到预约 tab 时会被上一次点击残留的门店 id 悄悄改掉选择。
+
+#### K-6. profile 页对齐真实数据
+
+- **改了什么**：`pages/profile/profile.ts`（141→171 行）——`loadUserInfo` 用后端真实字段填 `memberLevel`（levelCode/levelName/discountRate/benefits/nextLevelCost）与 `totalSpent`（accumulatedConsumption）、balance、bonusBalance、avatar（经 `resolveFileUrl`），不再硬编码 Lv1/普通会员/3000；`onLoad` 只做 `checkLogin()`，实际取数移到 `onShow`；新增 `formatDiscount(discount)`；`editProfile`/`goToVisitRecords`/`goToMessages` 三个 toast 占位改为 `wx.navigateTo`。`profile.wxml` 加余额行、权益标签、折扣行；`profile.scss` +24 行。
+- **原因**：取数移到 `onShow` 是为了从 profile-edit 返回时资料能自动刷新（`onLoad` 在页面栈里只跑一次）。
+- **两处显示细节**：折扣不在 wxml 里直接写 `discount * 10`，因为会出浮点尾差（0.57 × 10 = 5.699999999999999），改在 ts 侧用 `Number((discount * 10).toFixed(2))`，且 `discount >= 1` 时返回空串让 wxml 隐藏该行。升级进度条的显示条件从 `nextLevelCost > 0 && userInfo.totalSpent` 改为只判 `nextLevelCost > 0` 并加 `wx:else` 分支显示「已是当前最高等级」——原条件下累计消费为 0 的新用户看不到进度条，而新用户恰恰是最该看到升级激励的一批。
+
+### L. 验证结果与验证边界
+
+| 验证项 | 命令 | 结果 |
+| --- | --- | --- |
+| 后端编译 | `./gradlew :server:cleanCompileKotlin` | BUILD SUCCESSFUL（强制重编、非 UP-TO-DATE），日志无 `w:` 告警 |
+| 后端测试 | `./gradlew :server:test` | BUILD SUCCESSFUL in 43s（`compileTestKotlin` 与 `test` 均真实执行） |
+| 后端打包 | `./gradlew :server:build -x test` | EXIT=0 |
+| 管理端类型 | `pnpm typecheck` | EXIT=0（初次报 4 处 TS2345，见下） |
+| 管理端风格 | `npx oxlint --config oxlint.config.ts` | Found 0 warnings and 0 errors（6 文件 / 217 规则） |
+| 管理端格式 | `npx oxfmt` + `npx eslint` | 均无输出 |
+| 小程序类型 | `npx tsc --noEmit -p tsconfig.json` | EXIT=0 |
+| 死链复查 | `grep -rn "/images/" pages/ utils/ app.ts app.json` | 空 |
+
+四点说明。
+
+其一，typecheck 初次报 4 处 TS2345：`views/content/{banner,notice}/index.vue` 的 `onEdit(row: BannerItem)` / `onDelete(row: BannerItem)` 与 vxe grid slot 传进来的 `Record<string, any>` 不兼容。按项目既有约定（`views/clinic/index.vue` 用的就是 `row: any`）移除 `import type` 并把参数改成 `any`。这是 vxe slot 类型定义的既有限制，不是本轮引入的问题。
+
+其二，小程序的 `npx tsc --noEmit` 首次执行无任何输出，为确认它不是空跑，先用 `--listFiles | grep -c miniprogram` 得到 20 个文件，再写入一个 `const x: number = "abc"` 的探针文件确认能报 TS2322，随后删除探针。
+
+其三，后端两道门是在删掉 H-5 那个死代码副本之后重跑的，不是复用删之前的结果。
+
+其四，`grep -rn` 在 zsh 下不能直接写 `--include=*.ts`（会报 `no matches found`），改用显式目录列表。
+
+**验证边界**：按用户指示跳过了 e2e 与单元测试，因此新增的两个管理端配置页与四个小程序页面**未经浏览器/真机实测**，其正确性只有类型检查、lint 与后端编译/测试保证。内容配置的完整链路（管理端上传图 → 存 mp_banner → 小程序首页拉取渲染）需要在后端起来之后手工走一遍。
+
+**运维提示**：
+
+- 数据库无需手工迁移：`mp_banner`/`mp_notice` 由 `SchemaUtils.create` 建表，`uploaded_file.owner_type` 由 `SchemaMigration` 补列，两者都在启动时幂等执行。
+- 新菜单只自动关联了 super_admin。其他角色要看到「内容管理」，需在「系统管理 → 角色管理」里手工勾选。
+- **首页轮播图与公告初始为空**，管理员在「内容管理」录入后小程序首页才展示（有意为之，理由见 I-5）。
+- 小程序 `utils/request.ts` 的 `API_ORIGIN` 仍是 `http://localhost:8080`：真机预览需改成电脑局域网 IP，上线需换成 HTTPS 域名并在微信公众平台配置 request 合法域名。
+
 ## 2026-09-11
 
 ### F. 牙科业务模块整体入库，同时下线 game / queue / task 三个旧模块

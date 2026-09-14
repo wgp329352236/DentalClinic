@@ -1,0 +1,79 @@
+<!--pages/medical-record-detail/medical-record-detail.wxml-->
+<view class="container">
+  <view wx:if="{{loading}}" class="loading">加载中...</view>
+
+  <block wx:elif="{{record}}">
+    <!-- 就诊概要 -->
+    <view class="card">
+      <view class="section-title">就诊信息</view>
+      <view class="info-row">
+        <text class="info-label">就诊时间</text>
+        <text class="info-value">
+          {{record.appointmentDate}}{{record.startTime ? ' ' + record.startTime : ''}}{{record.endTime ? ' - ' + record.endTime : ''}}
+        </text>
+      </view>
+      <view class="info-row">
+        <text class="info-label">门诊</text>
+        <text class="info-value">{{record.clinicName}}</text>
+      </view>
+      <view class="info-row" wx:if="{{record.clinicAddress}}">
+        <text class="info-label">地址</text>
+        <text class="info-value">{{record.clinicAddress}}</text>
+      </view>
+      <view class="info-row">
+        <text class="info-label">科室</text>
+        <text class="info-value">{{record.departmentName || '-'}}</text>
+      </view>
+      <view class="info-row">
+        <text class="info-label">医生</text>
+        <text class="info-value">
+          {{record.doctorName}}{{record.doctorTitle ? '（' + record.doctorTitle + '）' : ''}}
+        </text>
+      </view>
+    </view>
+
+    <!-- 诊断与治疗方案 -->
+    <view class="card">
+      <view class="section-title">诊疗内容</view>
+      <view class="info-row column">
+        <text class="info-label">诊断</text>
+        <text class="info-value block">{{record.diagnosis || '暂无记录'}}</text>
+      </view>
+      <view class="info-row column">
+        <text class="info-label">治疗方案</text>
+        <text class="info-value block">{{record.treatmentPlan || '暂无记录'}}</text>
+      </view>
+      <view class="info-row column" wx:if="{{record.remark}}">
+        <text class="info-label">备注</text>
+        <text class="info-value block">{{record.remark}}</text>
+      </view>
+    </view>
+
+    <!-- 费用明细 -->
+    <view class="card">
+      <view class="section-title">费用明细</view>
+      <view class="fee-item" wx:for="{{record.consumptionDetails}}" wx:key="id">
+        <view class="flex-between">
+          <text>{{item.description || '诊疗费用'}}</text>
+          <text class="font-bold">¥{{item.amount}}</text>
+        </view>
+        <view class="text-muted font-small mt-10">
+          余额抵扣 ¥{{item.balanceUsed}} · 微信支付 ¥{{item.wechatPaid}}
+          <text wx:if="{{item.pointsEarned > 0}}"> · 获得 {{item.pointsEarned}} 积分</text>
+        </view>
+      </view>
+      <view wx:if="{{record.consumptionDetails.length === 0}}" class="text-muted font-small">暂无费用明细</view>
+      <view class="divider"></view>
+      <view class="flex-between">
+        <text class="font-bold">合计</text>
+        <text class="font-bold text-primary font-large">¥{{record.totalAmount}}</text>
+      </view>
+    </view>
+
+    <view class="actions">
+      <button class="btn-primary" bindtap="onRebook">再次预约</button>
+    </view>
+  </block>
+
+  <view wx:else class="empty-state">未找到就诊记录</view>
+</view>

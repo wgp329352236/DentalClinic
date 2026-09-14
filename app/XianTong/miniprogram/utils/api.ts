@@ -57,6 +57,16 @@ export interface UserProfileResponse {
   primaryClinicId: number
   balance: number
   bonusBalance: number
+  // 会员等级（需求 3.7.1 等级卡片）
+  levelCode: number
+  levelName: string
+  /** 折扣率，如 0.95 表示 9.5 折；无折扣为 1 */
+  discountRate: number
+  benefits: string[]
+  /** 累计消费金额，用于计算升级进度 */
+  accumulatedConsumption: number
+  /** 距下一级还需消费的金额；已是最高等级时为 null */
+  nextLevelCost: number | null
 }
 
 export interface UpdateProfileParams {
@@ -77,9 +87,12 @@ export function getUserProfile() {
 
 /**
  * 更新用户资料
+ *
+ * 后端只回 code/message，不回更新后的资料体，因此 data 声明为 null；
+ * 需要最新资料时由调用方重新 getUserProfile()。
  */
 export function updateUserProfile(params: UpdateProfileParams) {
-  return put<UserProfileResponse>('/profile/me', params)
+  return put<null>('/profile/me', params)
 }
 
 // ==================== 门诊/科室/医生 ====================
@@ -439,4 +452,101 @@ export function markMessageRead(id: number) {
  */
 export function markAllRead() {
   return put('/messages/read-all')
+}
+
+// ==================== 就诊记录 ====================
+
+export interface MedicalRecord {
+  /** 就诊记录以预约为载体，此 id 即预约 id */
+  id: number
+  appointmentDate: string
+  startTime?: string
+  endTime?: string
+  clinicName: string
+  doctorName: string
+  doctorTitle?: string
+  departmentName?: string
+  diagnosis?: string
+  remark?: string
+  consumptionAmount: number
+  completedAt?: string
+}
+
+export interface ConsumptionDetail {
+  id: number
+  amount: number
+  balanceUsed: number
+  wechatPaid: number
+  pointsEarned: number
+  description?: string
+  createdAt: string
+}
+
+export interface MedicalRecordDetail extends MedicalRecord {
+  clinicAddress?: string
+  doctorIntroduction?: string
+  status: string
+  treatmentPlan?: string
+  arrivedAt?: string
+  totalAmount: number
+  consumptionDetails: ConsumptionDetail[]
+}
+
+export interface MedicalRecordsResponse {
+  list: MedicalRecord[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+/**
+ * 获取就诊记录列表（已完成的预约）
+ */
+export function getMedicalRecords(page = 1, pageSize = 20, keyword?: string) {
+  const params: any = { page, pageSize }
+  if (keyword) params.keyword = keyword
+  return get<MedicalRecordsResponse>('/medical-records', params)
+}
+
+/**
+ * 获取就诊记录详情
+ * @param id 预约 id
+ */
+export function getMedicalRecordDetail(id: number) {
+  return get<MedicalRecordDetail>(`/medical-records/${id}`)
+}
+
+// ==================== 首页内容（轮播图/公告） ====================
+
+/** 跳转类型：与管理端 mp_banner/mp_notice 的 link_type 取值一致 */
+export type ContentLinkType = 'none' | 'page' | 'webview'
+
+export interface Banner {
+  id: number
+  title: string
+  imageUrl: string
+  linkType: ContentLinkType
+  linkTarget?: string
+}
+
+export interface Notice {
+  id: number
+  content: string
+  linkType: ContentLinkType
+  linkTarget?: string
+}
+
+export interface HomeContent {
+  banners: Banner[]
+  notices: Notice[]
+}
+
+/**
+ * 获取首页内容（轮播图 + 公告）
+ *
+ * 公开接口，未登录也可调用：首页在登录前就要展示这些内容。
+ * 停用与不在生效排期内的条目已由后端过滤。
+ */
+export function getHomeContent() {
+  return get<HomeContent>('/content/home', undefined, false)
 }

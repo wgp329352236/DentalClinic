@@ -13,21 +13,58 @@
         </view>
       </view>
       <view class="text-right">
-        <view class="text-muted font-small">余额</view>
-        <view class="font-bold text-primary">¥{{userInfo.memberLevel.discount === 1 ? '0.00' : '待充值'}}</view>
+        <view class="text-muted font-small">账户余额</view>
+        <!-- 直接展示钱包余额；此前用「折扣率是否为 1」反推出 0.00/待充值，是假数据 -->
+        <view class="font-bold text-primary">¥{{userInfo.balance}}</view>
       </view>
     </view>
   </view>
 
-  <!-- 轮播图 -->
-  <view class="card" style="padding: 0; overflow: hidden;">
+  <!-- 轮播图（管理端「内容管理 → 轮播图管理」下发；无启用项时整块不渲染） -->
+  <view class="card" style="padding: 0; overflow: hidden;" wx:if="{{banners.length > 0}}">
     <swiper class="banner-swiper" indicator-dots autoplay interval="3000" circular>
       <swiper-item wx:for="{{banners}}" wx:key="id">
-        <view class="banner-item" data-id="{{item.id}}" bindtap="onBannerTap">
+        <view
+          class="banner-item"
+          data-linktype="{{item.linkType}}"
+          data-linktarget="{{item.linkTarget}}"
+          bindtap="onBannerTap"
+        >
+          <!-- 图片加载失败（地址失效/域名未配）时退回标题占位，避免整屏空白 -->
+          <image
+            wx:if="{{item.image}}"
+            class="banner-image"
+            src="{{item.image}}"
+            mode="aspectFill"
+            binderror="onBannerImageError"
+            data-index="{{index}}"
+          ></image>
           <view class="banner-placeholder">
             <text>{{item.title}}</text>
           </view>
         </view>
+      </swiper-item>
+    </swiper>
+  </view>
+
+  <!-- 公告（管理端「内容管理 → 公告管理」下发；纵向自动轮播） -->
+  <view class="card notice-bar" wx:if="{{notices.length > 0}}">
+    <view class="notice-icon">📢</view>
+    <swiper
+      class="notice-swiper"
+      vertical
+      autoplay
+      circular
+      interval="4000"
+      duration="400"
+    >
+      <swiper-item wx:for="{{notices}}" wx:key="id">
+        <view
+          class="notice-item"
+          data-linktype="{{item.linkType}}"
+          data-linktarget="{{item.linkTarget}}"
+          bindtap="onNoticeTap"
+        >{{item.content}}</view>
       </swiper-item>
     </swiper>
   </view>
@@ -37,7 +74,7 @@
     <view class="section-title">快捷服务</view>
     <view class="quick-actions">
       <view class="quick-action-item" wx:for="{{quickActions}}" wx:key="id" data-path="{{item.path}}" bindtap="onQuickAction">
-        <view class="quick-action-icon">{{item.name}}</view>
+        <view class="quick-action-icon">{{item.icon}}</view>
         <view class="quick-action-name">{{item.name}}</view>
       </view>
     </view>

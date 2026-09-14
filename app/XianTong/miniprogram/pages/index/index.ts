@@ -1,6 +1,17 @@
 // pages/index/index.ts
-import { wechatLogin, getUserProfile, getClinics } from '../../utils/api'
-import type { Clinic, UserInfo } from '../../types'
+import { wechatLogin, getUserProfile, getClinics, getHomeContent } from '../../utils/api'
+import type { Clinic, UserInfo, Banner, Notice } from '../../types'
+import { resolveFileUrl } from '../../utils/util'
+
+// tabBar 页面清单（与 app.json 的 tabBar.list 一致）。
+// wx.navigateTo 跳 tabBar 页会静默失败，必须用 switchTab，
+// 此前首页「预约挂号」快捷入口与门店卡片点了都没反应就是这个原因。
+const TAB_BAR_PAGES = [
+  '/pages/index/index',
+  '/pages/appointment/appointment',
+  '/pages/wallet/wallet',
+  '/pages/profile/profile'
+]
 
 // 微信授权返回的用户资料
 interface WechatProfile {
@@ -22,16 +33,17 @@ Page({
   data: {
     userInfo: null as UserInfo | null,
     clinics: [] as Clinic[],
-    banners: [
-      { id: 1, image: '/images/banner1.jpg', title: '新用户注册送100元券' },
-      { id: 2, image: '/images/banner2.jpg', title: '推荐好友得双倍积分' },
-      { id: 3, image: '/images/banner3.jpg', title: '会员充值最高送25%' }
-    ],
+    // 轮播图与公告改由管理端「内容管理」下发（需求 4.11），
+    // 不再硬编码：此前 /images/banner1.jpg 等文件根本不存在，首页三张轮播图全是空白块
+    banners: [] as (Banner & { image: string })[],
+    notices: [] as Notice[],
+    // 图标用 emoji 而非图片路径：images/ 目录下没有任何图标文件，
+    // 写图片路径等于渲染一个裂图；emoji 无需额外资源即可显示
     quickActions: [
-      { id: 'appointment', name: '预约挂号', icon: '/images/icon-appointment.png', path: '/pages/appointment/appointment' },
-      { id: 'recharge', name: '充值', icon: '/images/icon-recharge.png', path: '/pages/recharge/recharge' },
-      { id: 'points', name: '积分兑换', icon: '/images/icon-points.png', path: '/pages/points/points' },
-      { id: 'referral', name: '推荐好友', icon: '/images/icon-referral.png', path: '/pages/referral/referral' }
+      { id: 'appointment', name: '预约挂号', icon: '📅', path: '/pages/appointment/appointment' },
+      { id: 'recharge', name: '充值', icon: '💰', path: '/pages/recharge/recharge' },
+      { id: 'points', name: '积分兑换', icon: '🎁', path: '/pages/points/points' },
+      { id: 'referral', name: '推荐好友', icon: '👥', path: '/pages/referral/referral' }
     ],
     loading: false,
     loginError: '' // 登录失败原因（页面可见，便于排查）
@@ -40,6 +52,7 @@ Page({
   onLoad() {
     this.checkLogin()
     this.loadClinics()
+    this.loadHomeContent()
   },
 
   onShow() {
@@ -49,6 +62,11 @@ Page({
       this.setData({
         userInfo: app.globalData.userInfo
       })
+    }
+    // 内容只在首次拉取失败（列表为空）时补拉：首页是 tabBar 落地页，
+    // 每次切换都重新请求会白白增加首屏负担，而轮播图/公告本身低频变更
+    if (this.data.banners.length === 0 && this.data.notices.length === 0) {
+      this.loadHomeContent()
     }
   },
 
@@ -196,11 +214,13 @@ Page({
       avatar: profile.userInfo.avatarUrl || '',
       clinicId: 0,
       memberLevel: {
+        // 微信资料兜底路径拿不到会员信息：等级按最低的 Lv1 展示，
+        // nextLevelCost 置 null 让进度条整块隐藏，而不是编一个「还需 3000」的假目标
         level: 1,
         name: '普通会员',
         discount: 1.0,
-        benefits: ['预约优先', '生日祝福'],
-        nextLevelCost: 3000
+        benefits: [],
+        nextLevelCost: null
       },
       registerSource: 'self',
       totalSpent: 0
@@ -228,23 +248,28 @@ Page({
         const app = getApp<IAppOption>()
         
         // 转换为本地 UserInfo 格式
+        const d = result.data
         const userInfo: UserInfo = {
-          id: result.data.userId,
-          name: result.data.realName || result.data.nickname,
-          phone: result.data.phone,
-          gender: result.data.gender === 1 ? 'male' : 'female',
-          age: result.data.age,
-          avatar: result.data.avatar,
-          clinicId: result.data.primaryClinicId,
+          id: d.userId,
+          name: d.realName || d.nickname || '',
+          nickname: d.nickname || '',
+          phone: d.phone || '',
+          gender: d.gender === 2 ? 'female' : 'male',
+          age: d.age || 0,
+          avatar: resolveFileUrl(d.avatar),
+          clinicId: d.primaryClinicId || 0,
+          // 等级/折扣/权益/累计消费/升级差额全部取自 /profile/me，不再前端写死
           memberLevel: {
-            level: 1, // TODO: 从后端获取会员等级
-            name: '普通会员',
-            discount: 1.0,
-            benefits: ['预约优先', '生日祝福'],
-            nextLevelCost: 3000
+            level: d.levelCode,
+            name: d.levelName,
+            discount: d.discountRate,
+            benefits: d.benefits || [],
+            nextLevelCost: d.nextLevelCost
           },
           registerSource: 'self',
-          totalSpent: 0 // TODO: 从后端获取
+          totalSpent: d.accumulatedConsumption || 0,
+          balance: d.balance || 0,
+          bonusBalance: d.bonusBalance || 0
         }
 
         app.setUserInfo(userInfo)
@@ -281,29 +306,97 @@ Page({
     }
   },
 
+  /**
+   * 加载首页内容（轮播图 + 公告），公开接口，未登录也展示。
+   *
+   * 失败时静默降级为空列表：首页其余部分（门店、登录入口）不该因内容接口挂掉而不可用，
+   * wxml 对空列表有 wx:if 兜底，不会留下空白轮播框。
+   */
+  async loadHomeContent() {
+    try {
+      const result = await getHomeContent()
+      if (result.code === 0 && result.data) {
+        const banners = (result.data.banners || []).map((b) => ({
+          ...b,
+          // 后端存的是 /api/v1/files/xxx.png 相对地址，<image> 需要绝对地址
+          image: resolveFileUrl(b.imageUrl)
+        }))
+        this.setData({ banners, notices: result.data.notices || [] })
+      }
+    } catch (error) {
+      console.warn('[Index] 加载首页内容失败:', error)
+    }
+  },
+
+  /**
+   * 轮播图片加载失败时清空该项的 image。
+   *
+   * 触发场景：管理端填了一个失效地址，或生产环境未在公众平台配置 downloadFile 合法域名。
+   * 清空后 wxml 的 wx:if 会让下层的标题占位块露出，不至于整张轮播图是一片白。
+   */
+  onBannerImageError(e: any) {
+    const index = Number(e.currentTarget.dataset.index)
+    const banner = this.data.banners[index]
+    if (!banner || !banner.image) return
+    console.warn('[Index] 轮播图片加载失败:', banner.imageUrl)
+    this.setData({ [`banners[${index}].image`]: '' })
+  },
+
+  /**
+   * 按内容配置执行跳转。
+   *
+   * linkType 取值与管理端「内容管理」一致：
+   * - none：不跳转
+   * - page：小程序内页面，tabBar 页必须走 switchTab
+   * - webview：外部网页，需项目里存在承载页；当前没有 webview 页面，
+   *   直接打开会跳到不存在的路由，因此明确提示而不是静默失败
+   */
+  navigateByContent(linkType: string, linkTarget?: string) {
+    if (linkType === 'none' || !linkTarget) return
+    if (linkType === 'webview') {
+      wx.showToast({ title: '该活动暂不支持在小程序内打开', icon: 'none' })
+      return
+    }
+    const path = linkTarget.startsWith('/') ? linkTarget : `/${linkTarget}`
+    if (TAB_BAR_PAGES.includes(path.split('?')[0] as string)) {
+      wx.switchTab({ url: path })
+    } else {
+      wx.navigateTo({
+        url: path,
+        fail: () => wx.showToast({ title: '页面不存在', icon: 'none' })
+      })
+    }
+  },
+
   // 快捷操作点击
   onQuickAction(e: any) {
     const { path } = e.currentTarget.dataset
-    if (path) {
-      wx.navigateTo({
-        url: path
-      })
+    if (!path) return
+    if (TAB_BAR_PAGES.includes(path)) {
+      wx.switchTab({ url: path })
+    } else {
+      wx.navigateTo({ url: path })
     }
   },
 
   // 轮播图点击
   onBannerTap(e: any) {
-    const { id } = e.currentTarget.dataset
-    console.log('点击轮播图:', id)
-    // TODO: 跳转到对应活动页面
+    const { linktype, linktarget } = e.currentTarget.dataset
+    this.navigateByContent(linktype, linktarget)
+  },
+
+  // 公告点击
+  onNoticeTap(e: any) {
+    const { linktype, linktarget } = e.currentTarget.dataset
+    this.navigateByContent(linktype, linktarget)
   },
 
   // 门店卡片点击
   onClinicTap(e: any) {
-    const { id } = e.currentTarget.dataset
-    // 跳转到预约页面并选中该门店
-    wx.navigateTo({
-      url: `/pages/appointment/appointment?clinicId=${id}`
-    })
+    const id = Number(e.currentTarget.dataset.id)
+    // 预约页是 tabBar 页面，switchTab 带不了 query，门诊 id 走全局态中转
+    const app = getApp<IAppOption>()
+    app.setPendingClinicId(id)
+    wx.switchTab({ url: '/pages/appointment/appointment' })
   }
 })

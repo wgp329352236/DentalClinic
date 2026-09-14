@@ -5,13 +5,21 @@ interface AppGlobalData {
   userInfo: UserInfo | null
   token: string
   clinics: any[]
+  /**
+   * 首页点门店后要带进预约页的门诊 id。
+   *
+   * 预约页是 tabBar 页面，只能用 wx.switchTab 跳转，而 switchTab 不支持 query 参数，
+   * 因此用全局态中转；预约页在 onShow 里读取并立即清空，避免下次进入还残留旧值。
+   */
+  pendingClinicId: number | null
 }
 
 App<IAppOption>({
   globalData: {
     userInfo: null,
     token: '',
-    clinics: []
+    clinics: [],
+    pendingClinicId: null
   } as AppGlobalData,
 
   onLaunch() {
@@ -38,6 +46,11 @@ App<IAppOption>({
   setToken(token: string) {
     this.globalData.token = token
     wx.setStorageSync('token', token)
+  },
+
+  // 设置待选门诊（首页 → 预约页）
+  setPendingClinicId(clinicId: number | null) {
+    this.globalData.pendingClinicId = clinicId
   },
 
   // 登出

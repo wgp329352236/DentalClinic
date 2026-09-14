@@ -31,6 +31,7 @@ object SchemaMigration {
                 migratePointsRuleUnitAmount()
                 migratePointsRuleUniqueActionType()
                 migrateDoctorScheduleUnique()
+                migrateUploadedFileOwnerType()
             }
         } catch (e: Exception) {
             logger.error("[SchemaMigration] 表结构迁移失败，请检查数据库权限", e)
@@ -141,6 +142,17 @@ object SchemaMigration {
                 "ON doctor_schedule (doctor_id, day_of_week, start_time)"
         )
         logger.info("[SchemaMigration] 已为 doctor_schedule 创建唯一索引 $DOCTOR_SCHEDULE_UNIQUE_INDEX。")
+    }
+
+    /**
+     * uploaded_file 补 owner_type 列。
+     *
+     * 管理端要上传轮播图，但 uploaded_file.user_id 是 NOT NULL 且语义是「C 端用户」。
+     * 管理员上传约定写 user_id=0 并用 owner_type='admin' 区分归属。
+     * 历史行全是 C 端上传，默认值 'user' 即正确语义，无需回填。
+     */
+    private suspend fun R2dbcTransaction.migrateUploadedFileOwnerType() {
+        addColumnIfMissing("uploaded_file", "owner_type", "VARCHAR(10) NOT NULL DEFAULT 'user'")
     }
 
     /** 索引是否已存在。 */

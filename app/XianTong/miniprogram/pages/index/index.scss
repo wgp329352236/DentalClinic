@@ -28,6 +28,45 @@
 
 .banner-item {
   height: 100%;
+  /* 图片绝对定位盖在占位块上，加载失败时占位块自然露出 */
+  position: relative;
+}
+
+.banner-image {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* 公告栏 */
+.notice-bar {
+  display: flex;
+  align-items: center;
+  padding: 16rpx 24rpx;
+}
+
+.notice-icon {
+  flex-shrink: 0;
+  margin-right: 12rpx;
+  font-size: 28rpx;
+}
+
+.notice-swiper {
+  flex: 1;
+  height: 44rpx;
+}
+
+.notice-item {
+  height: 44rpx;
+  line-height: 44rpx;
+  font-size: 26rpx;
+  color: #555;
+  /* 单行截断：公告过长时不撑高轮播框，完整内容由跳转目标承载 */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .banner-placeholder {
@@ -68,8 +107,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 24rpx;
-  color: #1890ff;
+  /* 图标改用 emoji 后需要更大字号，24rpx 下几乎看不清 */
+  font-size: 44rpx;
+  line-height: 1;
   margin-bottom: 10rpx;
 }
 

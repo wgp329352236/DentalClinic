@@ -1,9 +1,11 @@
 package com.dentalclinic.user.route
 
 import com.dentalclinic.admin.dto.response.ApiResponse
+import com.dentalclinic.common.FileDeleteResult
+import com.dentalclinic.common.FileUploadResult
+import com.dentalclinic.common.FileUploadService
 import com.dentalclinic.user.auth.userAuthenticated
 import com.dentalclinic.user.auth.userId
-import com.dentalclinic.user.service.*
 import io.ktor.http.*
 import io.ktor.http.content.*
 import io.ktor.server.application.*

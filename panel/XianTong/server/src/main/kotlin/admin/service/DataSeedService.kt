@@ -305,6 +305,9 @@ object DataSeedService {
             // 推荐活动
             Triple("referral:view", "查看推荐活动", "referral"),
             Triple("referral:manage", "管理推荐奖励", "referral"),
+            // 小程序内容配置（轮播图/公告）
+            Triple("content:view", "查看小程序内容", "content"),
+            Triple("content:manage", "管理小程序内容", "content"),
             // 审计日志
             Triple("audit:view", "查看审计日志", "audit"),
             // 系统配置
@@ -462,6 +465,20 @@ object DataSeedService {
         ensureMenu(referralDirId, "推荐关系", "menu", "/referral/index", "/referral/index", "referral:view", "lucide:network", 1)
         ensureMenu(referralDirId, "奖励记录", "menu", "/referral/reward", "/referral/reward", "referral:view", "lucide:gift", 2)
 
+        // 内容管理（小程序首页轮播图与公告，需求 4.11）
+        val contentDirId = ensureMenu(
+            parentId = null,
+            menuName = "内容管理",
+            menuType = "directory",
+            routePath = "/content",
+            component = null,
+            permissionCode = null,
+            icon = "lucide:image",
+            sortOrder = 75
+        )
+        ensureMenu(contentDirId, "轮播图管理", "menu", "/content/banner", "/content/banner/index", "content:view", "lucide:images", 1)
+        ensureMenu(contentDirId, "公告管理", "menu", "/content/notice", "/content/notice/index", "content:view", "lucide:megaphone", 2)
+
         // 通知管理（复用 config 权限；后端端点在 ConfigRoutes 的 /notifications*）
         val notificationDirId = ensureMenu(
             parentId = null,
@@ -495,7 +512,7 @@ object DataSeedService {
 
         // 关联到 super_admin 角色
         linkMenusToSuperAdmin()
-        logger.info("[DataSeed]: Seeded admin menus (dashboard/clinic-ops/customer-ops/system/notification/coupon/referral).")
+        logger.info("[DataSeed]: Seeded admin menus (dashboard/clinic-ops/customer-ops/system/notification/coupon/referral/content).")
     }
 
     /** 幂等创建菜单：按 routePath 判重，返回菜单ID（已存在则返回既有ID）。 */
@@ -548,6 +565,7 @@ object DataSeedService {
             "/customer-ops/consumption",
             "/coupon", "/coupon/index", "/coupon/record",
             "/referral", "/referral/index", "/referral/reward",
+            "/content", "/content/banner", "/content/notice",
             "/notification", "/notification/rules", "/notification/history",
             "/system", "/system/user", "/system/role", "/system/menu", "/system/config", "/system/audit"
         )

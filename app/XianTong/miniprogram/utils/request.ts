@@ -2,14 +2,22 @@
 import type { ApiResponse } from '../types'
 import { mockApiService } from './mockData'
 
-// 后端地址 - 根据环境切换
-// 注意：
-// 1. 开发者工具调试：若请求报 "url not in domain list"，请在 详情 -> 本地设置 勾选
-//    "不校验合法域名、web-view（业务域名）、TLS 版本以及 HTTPS 证书"
-// 2. 真机预览：localhost 指向手机自身，需改成电脑局域网 IP（如 http://192.168.1.100:8080/api/v1）
-// 3. 生产环境：必须使用 HTTPS 域名，并在微信公众平台配置 request 合法域名
-const BASE_URL = 'http://localhost:8080/api/v1' // 开发环境
-// const BASE_URL = 'https://your-domain.com/api/v1' // 生产环境
+/**
+ * 后端服务源（协议 + 主机 + 端口），不含任何路径。切换环境只改这一处。
+ *
+ * 单独导出是因为后端返回的文件地址形如 `/api/v1/files/xxx.png`（相对路径），
+ * 小程序的 <image src> 不会自动补主机名，必须用本常量拼成绝对地址才能渲染。
+ *
+ * 注意：
+ * 1. 开发者工具调试：若请求报 "url not in domain list"，请在 详情 -> 本地设置 勾选
+ *    "不校验合法域名、web-view（业务域名）、TLS 版本以及 HTTPS 证书"
+ * 2. 真机预览：localhost 指向手机自身，需改成电脑局域网 IP（如 http://192.168.1.100:8080）
+ * 3. 生产环境：必须使用 HTTPS 域名，并在微信公众平台配置 request 合法域名
+ */
+export const API_ORIGIN = 'http://localhost:8080' // 开发环境
+// export const API_ORIGIN = 'https://your-domain.com' // 生产环境
+
+const BASE_URL = `${API_ORIGIN}/api/v1`
 
 // ==================== 模拟数据开关 ====================
 // true: 使用模拟数据（离线开发/演示）

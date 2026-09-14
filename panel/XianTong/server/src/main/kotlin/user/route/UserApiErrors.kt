@@ -2,6 +2,7 @@ package com.dentalclinic.user.route
 
 import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.ContentTransformationException
+import io.r2dbc.spi.R2dbcException
 import kotlinx.serialization.SerializationException
 import org.slf4j.Logger
 
@@ -17,6 +18,35 @@ private val CLIENT_INPUT_ERRORS = listOf(
     SerializationException::class
 )
 
+/** PostgreSQL 唯一约束冲突的 SQLState（integrity constraint violation 类下的 unique_violation）。 */
+private const val SQLSTATE_UNIQUE_VIOLATION = "23505"
+
+/**
+ * 约束名 → 面向 C 端用户的文案，只列用户能自行修正的冲突。
+ *
+ * 键取自 AdminTables 里 uniqueIndex 的名字。匹配方式是查异常文本里是否含约束名：
+ * PostgreSQL 的报错原文形如 `duplicate key value violates unique constraint "cuser_uk_phone"`，
+ * 约束名稳定且不随数据变化，比解析列名可靠。
+ */
+private val UNIQUE_CONFLICT_MESSAGES = mapOf(
+    "cuser_uk_phone" to "该手机号已被其他账号使用",
+    "cuser_uk_openid" to "该微信账号已绑定其他用户"
+)
+
+/** 未命中 [UNIQUE_CONFLICT_MESSAGES] 时的兜底文案，不暴露具体是哪个约束。 */
+private const val GENERIC_CONFLICT_MESSAGE = "数据重复，请检查后重试"
+
+/**
+ * 沿 cause 链找出唯一约束冲突异常。
+ *
+ * 需要遍历是因为异常可能被包装：Exposed 的事务层与 R2DBC 驱动都可能把原始的
+ * R2dbcDataIntegrityViolationException 裹进别的异常里再抛出。
+ */
+private fun findUniqueViolation(e: Exception): R2dbcException? =
+    generateSequence<Throwable>(e) { it.cause }
+        .filterIsInstance<R2dbcException>()
+        .firstOrNull { it.sqlState == SQLSTATE_UNIQUE_VIOLATION }
+
 /**
  * C 端路由的异常兜底：把未预期异常翻译成 (body.code, 对外提示)，同时留下可排查的日志。
  *
@@ -26,9 +56,11 @@ private val CLIENT_INPUT_ERRORS = listOf(
  *   小程序端字段类型写错、或客户端与服务端版本不一致时会成批出现：记成带完整堆栈的 ERROR
  *   会淹没真正的服务器故障形成告警噪音；回 500 则会误导前端「稍后重试」——
  *   重试并不会让非法的请求体变合法。管理端由 StatusPages 把同一批异常映射为 400，这里与之对齐。
+ * - 唯一约束冲突（SQLState 23505）回 409 并给出用户能据以修正的文案。这类冲突是业务常态
+ *   而非故障：改手机号撞上他人已用号码属预期分支，回 500 会让用户以为系统坏了并反复重试。
  * - 其余异常一律 500 + 通用提示，堆栈记 ERROR。
  *
- * 两种情况都不回传 e.message：底层异常的文本会把表名/列名/约束名乃至服务器绝对路径
+ * 三个分支都不回传 e.message：底层异常的文本会把表名/列名/约束名乃至服务器绝对路径
  * 暴露给 C 端用户，而这些细节对调用方毫无用处。
  *
  * @param logger   调用方所在文件的 logger
@@ -48,6 +80,17 @@ internal fun translateApiError(
         logger.warn("$scene 请求参数不合法: ${e.message}")
         400 to "请求参数格式不正确"
     } else {
-        logger.error("$scene 失败", e)
-        500 to fallback
+        val conflict = findUniqueViolation(e)
+        if (conflict != null) {
+            // 原始文本含表名/约束名，只进日志；对外仅回查表得到的业务文案
+            logger.warn("$scene 唯一约束冲突: ${conflict.message}")
+            val detail = conflict.message
+            val hint = UNIQUE_CONFLICT_MESSAGES.entries
+                .firstOrNull { (constraint, _) -> detail?.contains(constraint) == true }
+                ?.value
+            409 to (hint ?: GENERIC_CONFLICT_MESSAGE)
+        } else {
+            logger.error("$scene 失败", e)
+            500 to fallback
+        }
     }

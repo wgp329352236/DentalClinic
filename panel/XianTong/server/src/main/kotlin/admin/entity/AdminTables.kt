@@ -760,6 +760,13 @@ object MessageTemplates : Table("message_template") {
 object UploadedFiles : Table("uploaded_file") {
     val id = long("id").autoIncrement()
     val userId = long("user_id")
+    /**
+     * 文件归属方：user=C 端用户上传，admin=管理端上传。
+     *
+     * userId 是 NOT NULL，而管理端上传没有 C 端用户身份，约定写 0；
+     * 单看 userId=0 无法区分「匿名」与「管理员」，故用本列显式标记归属。
+     */
+    val ownerType = varchar("owner_type", 10).default("user")
     val fileName = varchar("file_name", 200)
     val originalName = varchar("original_name", 200)
     val fileSize = long("file_size")
@@ -771,5 +778,79 @@ object UploadedFiles : Table("uploaded_file") {
     init {
         index("idx_user_id", false, userId)
         uniqueIndex("uf_uk_file_name", fileName)
+    }
+}
+
+// ============================================================
+// 小程序内容配置（需求 4.11：首页轮播图、公告内容）
+// ============================================================
+
+/**
+ * 跳转类型。
+ *
+ * 用常量收口而不是散落的字符串字面量：mp_banner 与 mp_notice 两张表共用同一套取值，
+ * C 端渲染与管理端表单都要按它分派行为。
+ */
+object ContentLinkType {
+    /** 不跳转，仅展示 */
+    const val NONE = "none"
+
+    /** 跳小程序内部页面，linkTarget 存 pages 路径 */
+    const val PAGE = "page"
+
+    /** 跳外部网页，linkTarget 存完整 URL（需已配置业务域名） */
+    const val WEBVIEW = "webview"
+
+    val ALL = setOf(NONE, PAGE, WEBVIEW)
+}
+
+/**
+ * 小程序首页轮播图表。
+ *
+ * 不复用 admin_system_config：后者的 config_value 是 varchar(500)，装不下多条
+ * 「图片 + 标题 + 跳转 + 排期」；且系统配置页是单行 key-value 编辑，改 JSON 数组不可维护。
+ */
+object MpBanners : Table("mp_banner") {
+    val id = long("id").autoIncrement()
+    val title = varchar("title", 100)                 // 标题（也用作图片加载失败时的兜底文案）
+    val imageUrl = varchar("image_url", 500)          // 图片地址
+    val linkType = varchar("link_type", 20).default(ContentLinkType.NONE)
+    val linkTarget = varchar("link_target", 500).nullable()
+    val sortOrder = integer("sort_order").default(0)  // 升序，越小越靠前
+    val status = integer("status").default(1)         // 1=启用 0=停用
+    val startAt = datetime("start_at").nullable()     // 生效起始，null=不限
+    val endAt = datetime("end_at").nullable()         // 生效截止，null=不限
+    val createdBy = varchar("created_by", 50).nullable()
+    val createdAt = datetime("created_at").defaultExpression(CurrentTimestamp)
+    val updatedAt = datetime("updated_at").defaultExpression(CurrentTimestamp)
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        index("mp_banner_idx_status_sort", false, status, sortOrder)
+    }
+}
+
+/**
+ * 小程序首页公告表。
+ *
+ * 与轮播图分表而不合并：两者字段与展示形态差异较大（公告无图、可多条滚动播报），
+ * 合表会引入大量互斥的 nullable 列。
+ */
+object MpNotices : Table("mp_notice") {
+    val id = long("id").autoIncrement()
+    val content = varchar("content", 500)             // 公告正文
+    val linkType = varchar("link_type", 20).default(ContentLinkType.NONE)
+    val linkTarget = varchar("link_target", 500).nullable()
+    val sortOrder = integer("sort_order").default(0)
+    val status = integer("status").default(1)
+    val startAt = datetime("start_at").nullable()
+    val endAt = datetime("end_at").nullable()
+    val createdBy = varchar("created_by", 50).nullable()
+    val createdAt = datetime("created_at").defaultExpression(CurrentTimestamp)
+    val updatedAt = datetime("updated_at").defaultExpression(CurrentTimestamp)
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        index("mp_notice_idx_status_sort", false, status, sortOrder)
     }
 }

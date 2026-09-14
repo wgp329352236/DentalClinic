@@ -10,6 +10,9 @@ export interface UserInfo {
   memberLevel: MemberLevel
   registerSource: 'self' | 'referral' | 'store'
   totalSpent?: number // 累计消费金额
+  balance?: number // 钱包余额
+  bonusBalance?: number // 赠送余额
+  nickname?: string
 }
 
 export interface MemberLevel {
@@ -17,7 +20,63 @@ export interface MemberLevel {
   name: string
   discount: number // 折扣，如 0.95 表示 9.5折
   benefits: string[]
-  nextLevelCost: number // 距升级还需消费金额
+  /** 距升级还需消费金额；已是最高等级时为 null，前端据此隐藏进度条 */
+  nextLevelCost: number | null
+}
+
+// 就诊记录相关类型（对应后端 /medical-records）
+export interface MedicalRecord {
+  /** 就诊记录以预约为载体，此 id 即预约 id */
+  id: number
+  appointmentDate: string
+  startTime?: string
+  endTime?: string
+  clinicName: string
+  doctorName: string
+  doctorTitle?: string
+  departmentName?: string
+  diagnosis?: string
+  remark?: string
+  consumptionAmount: number
+  completedAt?: string
+}
+
+export interface ConsumptionDetail {
+  id: number
+  amount: number
+  balanceUsed: number
+  wechatPaid: number
+  pointsEarned: number
+  description?: string
+  createdAt: string
+}
+
+export interface MedicalRecordDetail extends MedicalRecord {
+  clinicAddress?: string
+  doctorIntroduction?: string
+  status: string
+  treatmentPlan?: string
+  arrivedAt?: string
+  totalAmount: number
+  consumptionDetails: ConsumptionDetail[]
+}
+
+// 首页内容（管理端「内容管理」下发）
+export type ContentLinkType = 'none' | 'page' | 'webview'
+
+export interface Banner {
+  id: number
+  title: string
+  imageUrl: string
+  linkType: ContentLinkType
+  linkTarget?: string
+}
+
+export interface Notice {
+  id: number
+  content: string
+  linkType: ContentLinkType
+  linkTarget?: string
 }
 
 // 门店相关类型

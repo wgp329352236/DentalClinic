@@ -124,3 +124,27 @@
   color: #ff4d4f;
   border-color: #ff4d4f;
 }
+
+.balance-row {
+  display: flex;
+  padding-top: 20rpx;
+  border-top: 1rpx solid #f0f0f0;
+}
+
+.balance-item {
+  flex: 1;
+}
+
+.benefit-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.benefit-tag {
+  font-size: 22rpx;
+  color: #1890ff;
+  background: #e6f4ff;
+  border-radius: 20rpx;
+  padding: 6rpx 18rpx;
+}

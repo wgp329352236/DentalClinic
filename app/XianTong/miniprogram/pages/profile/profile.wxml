@@ -18,12 +18,44 @@
       <view class="edit-btn" bindtap="editProfile">编辑</view>
     </view>
 
-    <!-- 会员等级进度 -->
-    <view class="member-progress mt-20" wx:if="{{userInfo.memberLevel.nextLevelCost > 0 && userInfo.totalSpent}}">
+    <!-- 余额：直接取 /profile/me 下发的钱包字段，不再用折扣率反推假数据 -->
+    <view class="balance-row mt-20">
+      <view class="balance-item">
+        <view class="text-muted font-small">账户余额</view>
+        <view class="font-bold text-primary">¥{{userInfo.balance}}</view>
+      </view>
+      <view class="balance-item">
+        <view class="text-muted font-small">赠送余额</view>
+        <view class="font-bold">¥{{userInfo.bonusBalance}}</view>
+      </view>
+      <view class="balance-item">
+        <view class="text-muted font-small">累计消费</view>
+        <view class="font-bold">¥{{userInfo.totalSpent}}</view>
+      </view>
+    </view>
+
+    <!-- 会员等级进度：已是最高等级（nextLevelCost 为 null/0）时整块隐藏 -->
+    <view class="member-progress mt-20" wx:if="{{userInfo.memberLevel.nextLevelCost > 0}}">
       <view class="text-muted font-small mb-10">距升级还需消费 ¥{{userInfo.memberLevel.nextLevelCost}}</view>
       <view class="progress-bar">
         <view class="progress-fill" style="width: {{progressPercent}}%;"></view>
       </view>
+    </view>
+    <view class="member-progress mt-20" wx:else>
+      <view class="text-muted font-small">已是当前最高等级</view>
+    </view>
+
+    <!-- 等级权益：后端 member_level.benefits 下发，无权益时不渲染空块 -->
+    <view class="benefits mt-20" wx:if="{{userInfo.memberLevel.benefits.length > 0}}">
+      <view class="text-muted font-small mb-10">等级权益</view>
+      <view class="benefit-tags">
+        <text class="benefit-tag" wx:for="{{userInfo.memberLevel.benefits}}" wx:key="*this">{{item}}</text>
+      </view>
+    </view>
+
+    <!-- 折扣文案由 ts 侧算好：wxml 里直接写 discount * 10 会碰到浮点尾差（如 0.57*10=5.699999999999999） -->
+    <view class="member-progress mt-20" wx:if="{{discountText}}">
+      <view class="text-muted font-small">消费折扣 {{discountText}}</view>
     </view>
   </view>
 

@@ -37,6 +37,23 @@ Page({
     }
   },
 
+  /**
+   * 消费首页中转过来的门诊 id。
+   *
+   * 本页是 tabBar 页面，首页只能用 switchTab 跳转而它不支持 query，
+   * 因此门诊 id 走 app.globalData.pendingClinicId 中转。读到后立即置空，
+   * 否则用户下次自己点 tabBar 进来还会被强行切回上次那家门诊。
+   */
+  onShow() {
+    const app = getApp<IAppOption>()
+    const pending = app?.globalData?.pendingClinicId
+    if (!pending) return
+    app.setPendingClinicId(null)
+    // onLoad 可能已经跑完（页面被缓存），这里要重新拉一次该门诊下的科室
+    this.setData({ selectedClinicId: pending })
+    this.loadDepartments()
+  },
+
   // 加载门店列表
   async loadClinics() {
     try {

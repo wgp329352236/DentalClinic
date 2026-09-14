@@ -1,7 +1,6 @@
-package com.dentalclinic.user.service
+package com.dentalclinic.common
 
 import com.dentalclinic.admin.entity.UploadedFiles
-import com.dentalclinic.common.BaseService
 import io.ktor.http.content.*
 import io.ktor.utils.io.toByteArray
 import kotlinx.coroutines.Dispatchers
@@ -19,6 +18,10 @@ import java.util.*
 
 /**
  * File upload service for local storage.
+ *
+ * 位于 common 包而不是 user.service：管理端（轮播图、门店封面、医生头像）与 C 端（用户头像）
+ * 都要上传，而 user 包已大量依赖 admin 包，若把它留在 user.service 会让 admin 反向依赖 user
+ * 形成包循环。与 BaseService、ReferralRewardService 迁到 common 的理由一致。
  */
 class FileUploadService : BaseService() {
 
@@ -35,8 +38,16 @@ class FileUploadService : BaseService() {
 
     /**
      * Save uploaded file and return the access URL.
+     *
+     * @param ownerType user=C 端用户上传（默认），admin=管理端上传。
+     *                  管理端上传时 [userId] 约定传 0（uploaded_file.user_id 为 NOT NULL），
+     *                  归属靠 ownerType 区分，避免与「匿名 C 端用户」混淆。
      */
-    suspend fun saveFile(userId: Long, part: PartData.FileItem): FileUploadResult {
+    suspend fun saveFile(
+        userId: Long,
+        part: PartData.FileItem,
+        ownerType: String = OWNER_USER
+    ): FileUploadResult {
         return withContext(Dispatchers.IO) {
             // Validate file size
             // 改用非阻塞的 provider()：已废弃的 streamProvider() 把上传流包成阻塞式
@@ -73,6 +84,7 @@ class FileUploadService : BaseService() {
                 dbQuery {
                     UploadedFiles.insert {
                         it[UploadedFiles.userId] = userId
+                        it[UploadedFiles.ownerType] = ownerType
                         it[UploadedFiles.fileName] = newFileName
                         it[UploadedFiles.originalName] = originalFileName
                         it[UploadedFiles.fileSize] = size
@@ -84,7 +96,7 @@ class FileUploadService : BaseService() {
                 FileUploadResult.Success(url, newFileName, size)
             } catch (e: Exception) {
                 // 不回传 e.message：磁盘/权限类异常的文本会把服务器绝对路径等细节暴露给 C 端用户
-                logger.error("[FileUpload]: 用户 $userId 保存文件失败", e)
+                logger.error("[FileUpload]: $ownerType/$userId 保存文件失败", e)
                 FileUploadResult.Error("文件保存失败，请稍后重试")
             }
         }
@@ -92,14 +104,23 @@ class FileUploadService : BaseService() {
 
     /**
      * Delete a file by fileName, verifying ownership.
+     *
+     * 归属校验同时比对 userId 与 ownerType：管理端文件的 userId 统一是 0，
+     * 只比 userId 会让任意两个管理员互相删对方上传的文件，也会让
+     * C 端用户（若其 id 恰为 0）碰到管理端文件。
      */
-    suspend fun deleteFile(userId: Long, fileName: String): FileDeleteResult {
+    suspend fun deleteFile(
+        userId: Long,
+        fileName: String,
+        ownerType: String = OWNER_USER
+    ): FileDeleteResult {
         // Pre-check ownership
         val fileRecord = dbQuery {
             UploadedFiles.selectAll()
                 .where {
                     (UploadedFiles.fileName eq fileName) and
-                    (UploadedFiles.userId eq userId)
+                    (UploadedFiles.userId eq userId) and
+                    (UploadedFiles.ownerType eq ownerType)
                 }
                 .toList()
                 .singleOrNull()
@@ -123,7 +144,8 @@ class FileUploadService : BaseService() {
             dbQuery {
                 UploadedFiles.deleteWhere {
                     (UploadedFiles.fileName eq fileName) and
-                    (UploadedFiles.userId eq userId)
+                    (UploadedFiles.userId eq userId) and
+                    (UploadedFiles.ownerType eq ownerType)
                 }
             }
 
@@ -134,11 +156,15 @@ class FileUploadService : BaseService() {
     /**
      * Batch delete files, verifying ownership for each.
      */
-    suspend fun batchDeleteFiles(userId: Long, fileNames: List<String>): BatchDeleteResult {
+    suspend fun batchDeleteFiles(
+        userId: Long,
+        fileNames: List<String>,
+        ownerType: String = OWNER_USER
+    ): BatchDeleteResult {
         val results = mutableListOf<FileDeleteItemResult>()
         
         for (fileName in fileNames) {
-            val result = deleteFile(userId, fileName)
+            val result = deleteFile(userId, fileName, ownerType)
             results.add(FileDeleteItemResult(
                 fileName = fileName,
                 success = result is FileDeleteResult.Success,
@@ -184,6 +210,17 @@ class FileUploadService : BaseService() {
             logger.warn("[FileUpload]: 解析文件路径失败", e)
             null
         }
+    }
+
+    companion object {
+        /** uploaded_file.owner_type 取值：C 端用户上传 */
+        const val OWNER_USER = "user"
+
+        /** uploaded_file.owner_type 取值：管理端上传 */
+        const val OWNER_ADMIN = "admin"
+
+        /** 管理端上传没有 C 端用户身份，user_id 约定写 0，归属靠 ownerType 区分 */
+        const val ADMIN_OWNER_ID = 0L
     }
 }
 

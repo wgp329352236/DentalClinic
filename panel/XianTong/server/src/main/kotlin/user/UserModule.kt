@@ -1,5 +1,6 @@
 package com.dentalclinic.user
 
+import com.dentalclinic.common.FileUploadService
 import com.dentalclinic.common.ReferralRewardService
 import com.dentalclinic.user.route.*
 import com.dentalclinic.user.service.*
@@ -26,6 +27,7 @@ fun Application.userModule() {
 fun Application.userRouting() {
     // Service instances (consistent with AdminModule pattern)
     val authService = UserAuthService()
+    val profileService = UserProfileService()
     val appointmentService = AppointmentService()
     val medicalRecordService = MedicalRecordService()
     val consumptionService = ConsumptionRecordService()
@@ -37,13 +39,18 @@ fun Application.userRouting() {
     val couponService = CouponService()
     val notificationService = NotificationService()
     val fileUploadService = FileUploadService()
+    // 首页轮播图/公告，管理端在 AdminContentService 里维护
+    val contentService = ContentService()
 
     routing {
         // Public auth endpoints
         userAuthRoutes(authService)
 
+        // Public content endpoints (首页未登录也要展示轮播图与公告)
+        userContentRoutes(contentService)
+
         // Protected user APIs
-        userProfileRoutes()
+        userProfileRoutes(profileService)
         userWalletRoutes()
         userRechargeRoutes(rechargeService)
         userAppointmentRoutes(appointmentService)
