@@ -8,9 +8,15 @@ import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { deleteClinic, getClinics } from '#/api/clinic';
 
 import ClinicFormModal from './form-modal.vue';
+import ClinicQrModal from './qrcode-modal.vue';
 
 const [FormModal, formModalApi] = useVbenModal({
   connectedComponent: ClinicFormModal,
+  destroyOnClose: true,
+});
+
+const [QrModal, qrModalApi] = useVbenModal({
+  connectedComponent: ClinicQrModal,
   destroyOnClose: true,
 });
 
@@ -37,7 +43,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
       {
         field: 'action',
         title: '操作',
-        width: 140,
+        width: 200,
         fixed: 'right',
         slots: { default: 'action' },
       },
@@ -63,6 +69,10 @@ function onEdit(row: any) {
   formModalApi.setData({ mode: 'edit', row }).open();
 }
 
+function onShowQr(row: any) {
+  qrModalApi.setData({ row }).open();
+}
+
 async function onDelete(row: any) {
   Modal.confirm({
     title: '删除门诊',
@@ -80,6 +90,7 @@ async function onDelete(row: any) {
 <template>
   <Page auto-content-height>
     <FormModal @success="gridApi.query()" />
+    <QrModal />
     <Grid table-title="门诊管理">
       <template #toolbar-tools>
         <Button type="primary" @click="onCreate">
@@ -97,6 +108,7 @@ async function onDelete(row: any) {
       </template>
       <template #action="{ row }">
         <Button type="link" size="small" @click="onEdit(row)">编辑</Button>
+        <Button type="link" size="small" @click="onShowQr(row)">签到码</Button>
         <Button type="link" size="small" danger @click="onDelete(row)">
           删除
         </Button>

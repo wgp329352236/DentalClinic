@@ -1,17 +1,22 @@
 package com.dentalclinic.admin.service
 
+import com.dentalclinic.admin.auth.ClinicScope
 import com.dentalclinic.admin.dto.response.*
 import com.dentalclinic.admin.entity.*
 import com.dentalclinic.admin.util.ConflictException
+import com.dentalclinic.admin.util.ForbiddenException
 import com.dentalclinic.admin.util.ValidationException
 import com.dentalclinic.common.BaseService
 import kotlinx.coroutines.flow.toList
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.greaterEq
 import org.jetbrains.exposed.v1.core.inList
+import org.jetbrains.exposed.v1.core.lessEq
 import org.jetbrains.exposed.v1.core.like
 import org.jetbrains.exposed.v1.core.lowerCase
+import org.jetbrains.exposed.v1.core.neq
 import org.jetbrains.exposed.v1.core.or
 import org.jetbrains.exposed.v1.r2dbc.andWhere
 import org.jetbrains.exposed.v1.r2dbc.deleteWhere
@@ -20,18 +25,50 @@ import org.jetbrains.exposed.v1.r2dbc.selectAll
 import org.jetbrains.exposed.v1.r2dbc.update
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 
 /**
  * 门诊管理
  */
 class ClinicService : BaseService() {
 
-    suspend fun listClinics(): List<ClinicResponse> = dbQuery {
-        Clinics.selectAll()
+    suspend fun listClinics(scope: ClinicScope = ClinicScope.ALL): List<ClinicResponse> = dbQuery {
+        // 未授权任何门店的非超管账号直接返回空，避免对空列表执行 IN ()
+        if (scope.isEmpty) return@dbQuery emptyList()
+        var query = Clinics.selectAll()
+        if (!scope.all) {
+            query = query.andWhere { Clinics.id inList scope.clinicIds }
+        }
+        query
             .orderBy(Clinics.sortOrder, SortOrder.ASC)
             .toList()
             .map { r ->
+                ClinicResponse(
+                    id = r[Clinics.id],
+                    name = r[Clinics.name],
+                    address = r[Clinics.address],
+                    phone = r[Clinics.phone],
+                    openTime = r[Clinics.openTime],
+                    closeTime = r[Clinics.closeTime],
+                    description = r[Clinics.description],
+                    coverImage = r[Clinics.coverImage],
+                    status = r[Clinics.status],
+                    sortOrder = r[Clinics.sortOrder]
+                )
+            }
+    }
+
+    /** 按主键查单个门店，不存在返回 null（签到码签发前校验门店真实性）。 */
+    suspend fun getClinic(id: Long): ClinicResponse? = dbQuery {
+        Clinics.selectAll()
+            .where { Clinics.id eq id }
+            .toList()
+            .singleOrNull()
+            ?.let { r ->
                 ClinicResponse(
                     id = r[Clinics.id],
                     name = r[Clinics.name],
@@ -253,8 +290,14 @@ class AppointmentAdminService : BaseService() {
      */
     suspend fun listAppointments(
         status: String?, clinicId: Long?, doctorId: Long?, userId: Long? = null,
-        page: Int? = null, pageSize: Int? = null
+        dateFrom: String? = null, dateTo: String? = null,
+        page: Int? = null, pageSize: Int? = null,
+        scope: ClinicScope = ClinicScope.ALL
     ): AppointmentListResponse = dbQuery {
+        // 门店数据隔离：无全店权限且未授权任何门店时直接空结果
+        if (scope.isEmpty) {
+            return@dbQuery AppointmentListResponse(list = emptyList(), total = 0, page = page, pageSize = pageSize)
+        }
         var query = Appointments.selectAll()
         if (!status.isNullOrBlank()) {
             query = query.andWhere { Appointments.status eq status }
@@ -262,12 +305,22 @@ class AppointmentAdminService : BaseService() {
         if (clinicId != null) {
             query = query.andWhere { Appointments.clinicId eq clinicId }
         }
+        if (!scope.all) {
+            query = query.andWhere { Appointments.clinicId inList scope.clinicIds }
+        }
         if (doctorId != null) {
             query = query.andWhere { Appointments.doctorId eq doctorId }
         }
         // 按客户过滤：供「录入消费」弹窗联动该客户的预约
         if (userId != null) {
             query = query.andWhere { Appointments.userId eq userId }
+        }
+        // 预约日期范围（按 appointment_date 而非创建时间，看板/翻页都按就诊日）
+        if (dateFrom != null) {
+            query = query.andWhere { Appointments.appointmentDate greaterEq parseApptDate(dateFrom) }
+        }
+        if (dateTo != null) {
+            query = query.andWhere { Appointments.appointmentDate lessEq parseApptDate(dateTo) }
         }
 
         val total = query.count()
@@ -426,6 +479,120 @@ class AppointmentAdminService : BaseService() {
             }
         }
     }
+
+    /**
+     * 代客预约：前台/客服替客户下单。
+     * 与 C 端 createAppointment 的差异：
+     * ① 受门店数据权限约束（scope 外门店禁止下单）；
+     * ② 跳过爽约黑名单（门店人工受理，豁免 30 天 3 次爽约的在线限制）；
+     * ③ 初始状态直接为 confirmed（前台已与客户确认，无需再次确认）。
+     */
+    suspend fun createAppointment(req: AdminCreateAppointmentRequest, scope: ClinicScope): Long {
+        // 进事务前解析日期时间：格式错误属调用方输入问题，给可读 400 而非冒泡成 500。
+        // 同时保证下方时段匹配的字符串比较两边都是零填充 HH:mm，避免 "9:00" 字典序错配。
+        val appointmentDate = parseApptDate(req.appointmentDate)
+        val startTimeObj = try {
+            LocalTime.parse(req.startTime)
+        } catch (e: DateTimeParseException) {
+            throw ValidationException("时间格式应为 HH:mm，收到：${req.startTime}")
+        }
+
+        if (!scope.all && req.clinicId !in scope.clinicIds) {
+            throw ForbiddenException("无权在该门店代客预约")
+        }
+
+        val formatter = DateTimeFormatter.ofPattern("HH:mm")
+        val dayOfWeek = appointmentDate.dayOfWeek.value
+
+        return dbQuery {
+            // 客户存在性
+            val userCount = Users.selectAll().where { Users.id eq req.userId }.count()
+            if (userCount == 0L) {
+                throw ValidationException("客户不存在")
+            }
+
+            // 门店存在且营业中
+            val clinic = Clinics.selectAll()
+                .where { Clinics.id eq req.clinicId }
+                .toList().firstOrNull()
+                ?: throw ValidationException("门店不存在")
+            if (clinic[Clinics.status] != 1) {
+                throw ValidationException("门店当前未营业，无法预约")
+            }
+
+            // 医生存在且在职
+            val doctor = Doctors.selectAll()
+                .where { Doctors.id eq req.doctorId }
+                .toList().firstOrNull()
+                ?: throw ValidationException("医生不存在")
+            if (doctor[Doctors.status] != 1) {
+                throw ValidationException("医生已离职，无法预约")
+            }
+
+            // 排班匹配：该医生在该星期几启用的排班中，首个覆盖所选开始时间的时段
+            val schedule = DoctorSchedules.selectAll()
+                .where {
+                    (DoctorSchedules.doctorId eq req.doctorId) and
+                        (DoctorSchedules.dayOfWeek eq dayOfWeek) and
+                        (DoctorSchedules.isEnabled eq 1)
+                }
+                .toList()
+                .firstOrNull { row ->
+                    req.startTime in row[DoctorSchedules.startTime]..<row[DoctorSchedules.endTime]
+                }
+                ?: throw ValidationException("该时段不可预约")
+
+            // 医生该时段容量校验
+            val bookedCount = Appointments.selectAll()
+                .where {
+                    (Appointments.doctorId eq req.doctorId) and
+                        (Appointments.appointmentDate eq appointmentDate) and
+                        (Appointments.startTime eq req.startTime) and
+                        (Appointments.status neq "cancelled")
+                }
+                .count()
+            if (bookedCount >= schedule[DoctorSchedules.maxAppointments]) {
+                throw ConflictException("该时段已满")
+            }
+
+            // 客户同时段去重
+            val userBooked = Appointments.selectAll()
+                .where {
+                    (Appointments.userId eq req.userId) and
+                        (Appointments.appointmentDate eq appointmentDate) and
+                        (Appointments.startTime eq req.startTime) and
+                        (Appointments.status neq "cancelled")
+                }
+                .count()
+            if (userBooked > 0L) {
+                throw ConflictException("该客户在该时段已有预约")
+            }
+
+            val endTime = startTimeObj
+                .plusMinutes(schedule[DoctorSchedules.slotDuration].toLong())
+                .format(formatter)
+
+            Appointments.insert {
+                it[Appointments.userId] = req.userId
+                it[Appointments.clinicId] = req.clinicId
+                it[Appointments.doctorId] = req.doctorId
+                it[Appointments.departmentId] = req.departmentId
+                it[Appointments.appointmentDate] = appointmentDate
+                it[Appointments.startTime] = req.startTime
+                it[Appointments.endTime] = endTime
+                // 代客预约默认已确认
+                it[Appointments.status] = "confirmed"
+                it[Appointments.remark] = req.remark
+                it[Appointments.updatedAt] = LocalDateTime.now()
+            } get Appointments.id
+        }
+    }
+
+    private fun parseApptDate(s: String): LocalDate = try {
+        LocalDate.parse(s)
+    } catch (e: DateTimeParseException) {
+        throw ValidationException("日期格式应为 yyyy-MM-dd，收到：$s")
+    }
 }
 
 /**
@@ -441,11 +608,35 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
      */
     suspend fun listCustomers(
         keyword: String?, clinicId: Long?,
-        page: Int? = null, pageSize: Int? = null
+        page: Int? = null, pageSize: Int? = null,
+        scope: ClinicScope = ClinicScope.ALL,
+        tagId: Long? = null
     ): CustomerListResponse = dbQuery {
+        // 门店数据隔离：客户归属按首选就诊门店 primaryClinicId 判定
+        if (scope.isEmpty) {
+            return@dbQuery CustomerListResponse(list = emptyList(), total = 0, page = page, pageSize = pageSize)
+        }
+        // 标签筛选：先定位打了该标签的 userId 集合（一次查询复用）；标签下无客户时直接空页，避免 IN ()
+        val tagUserIds: List<Long>? = if (tagId != null) {
+            val ids = UserTagRels.selectAll()
+                .where { UserTagRels.tagId eq tagId }
+                .toList()
+                .map { it[UserTagRels.userId] }
+                .distinct()
+            if (ids.isEmpty()) {
+                return@dbQuery CustomerListResponse(list = emptyList(), total = 0, page = page, pageSize = pageSize)
+            }
+            ids
+        } else null
         var query = Users.selectAll()
         if (clinicId != null) {
             query = query.andWhere { Users.primaryClinicId eq clinicId }
+        }
+        if (!scope.all) {
+            query = query.andWhere { Users.primaryClinicId inList scope.clinicIds }
+        }
+        if (tagUserIds != null) {
+            query = query.andWhere { Users.id inList tagUserIds }
         }
         // keyword 下推到 SQL：原先是「全表捞出再内存过滤」，客户量增长后每翻一页都要扫全表，
         // 且内存过滤使分页无法在数据库层完成（total 与当页数据必须同源）。
@@ -506,6 +697,32 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
                 }
         } else emptyMap()
 
+        // 客户标签：两次查询（关系 + 字典）批量装配为 userId -> 标签列表，避免逐客户 N+1。
+        // 仅取启用中的标签，与打标校验口径一致，停用标签不在列表/筛选中展示。
+        val tagsMap: Map<Long, List<CustomerTagDto>> = if (userIds.isNotEmpty()) {
+            val rels = UserTagRels.selectAll()
+                .where { UserTagRels.userId inList userIds }
+                .toList()
+            val relTagIds = rels.map { it[UserTagRels.tagId] }.distinct()
+            val tagRows = if (relTagIds.isNotEmpty()) {
+                CustomerTags.selectAll()
+                    .where { (CustomerTags.id inList relTagIds) and (CustomerTags.status eq 1) }
+                    .toList()
+            } else emptyList()
+            val tagDtoMap = tagRows.associate { row ->
+                row[CustomerTags.id] to CustomerTagDto(
+                    id = row[CustomerTags.id],
+                    tagName = row[CustomerTags.tagName],
+                    color = row[CustomerTags.color],
+                    remark = row[CustomerTags.remark],
+                    status = row[CustomerTags.status]
+                )
+            }
+            rels.mapNotNull { rel ->
+                tagDtoMap[rel[UserTagRels.tagId]]?.let { rel[UserTagRels.userId] to it }
+            }.groupBy({ it.first }, { it.second })
+        } else emptyMap()
+
         val list = pagedUsers.map { user ->
             val wallet = walletsMap[user[Users.id]]
             val uml = umlMap[user[Users.id]]
@@ -526,6 +743,7 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
                 memberLevel = ml?.get(MemberLevels.levelCode),
                 levelName = ml?.get(MemberLevels.levelName),
                 totalConsumption = consumptionMap[user[Users.id]] ?: 0.0,
+                tags = tagsMap[user[Users.id]] ?: emptyList(),
                 createdAt = user[Users.createdAt].toString()
             )
         }
@@ -555,6 +773,27 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
                 .toList().firstOrNull()
         } else null
 
+        // 客户当前标签（详情页/打标弹窗展示）；仅展示启用中的标签
+        val detailTagIds = UserTagRels.selectAll()
+            .where { UserTagRels.userId eq id }
+            .toList()
+            .map { it[UserTagRels.tagId] }
+        val detailTags = if (detailTagIds.isNotEmpty()) {
+            CustomerTags.selectAll()
+                .where { (CustomerTags.id inList detailTagIds) and (CustomerTags.status eq 1) }
+                .orderBy(CustomerTags.id, SortOrder.ASC)
+                .toList()
+                .map { row ->
+                    CustomerTagDto(
+                        id = row[CustomerTags.id],
+                        tagName = row[CustomerTags.tagName],
+                        color = row[CustomerTags.color],
+                        remark = row[CustomerTags.remark],
+                        status = row[CustomerTags.status]
+                    )
+                }
+        } else emptyList()
+
         CustomerDetailResponse(
             user = CustomerInfoDto(
                 id = user[Users.id],
@@ -565,6 +804,7 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
                 age = user[Users.age],
                 avatar = user[Users.avatar],
                 primaryClinicId = user[Users.primaryClinicId],
+                tags = detailTags,
                 createdAt = user[Users.createdAt].toString()
             ),
             wallet = CustomerWalletDto(

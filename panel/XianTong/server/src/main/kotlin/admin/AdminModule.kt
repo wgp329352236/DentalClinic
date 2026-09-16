@@ -10,6 +10,10 @@ import com.dentalclinic.common.FileUploadService
 import com.dentalclinic.common.ReferralRewardService
 import com.dentalclinic.common.config.DBConfig
 import com.dentalclinic.common.config.SchemaMigration
+import com.dentalclinic.common.scheduler.AppointmentReminderService
+import com.dentalclinic.common.scheduler.AutoNoShowService
+import com.dentalclinic.common.scheduler.MemberLevelReviewService
+import com.dentalclinic.common.scheduler.PointsExpireService
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.plugins.*
@@ -39,6 +43,7 @@ fun Application.adminModule() {
                 AdminUsers,
                 AdminRoles,
                 AdminUserRoles,
+                AdminUserClinics,
                 AdminPermissions,
                 AdminRolePermissions,
                 AdminMenus,
@@ -58,8 +63,11 @@ fun Application.adminModule() {
                 UserWallets,
                 WalletTransactions,
                 RechargeRecords,
+                RechargeTiers,
                 MemberLevels,
                 UserMemberLevels,
+                CustomerTags,
+                UserTagRels,
                 ConsumptionRecords,
                 // Appointments
                 Appointments,
@@ -79,8 +87,13 @@ fun Application.adminModule() {
                 // Miniprogram content (banner / notice)
                 MpBanners,
                 MpNotices,
+                // Points mall
+                PointsGoods,
+                PointsExchangeOrders,
                 // Files
-                UploadedFiles
+                UploadedFiles,
+                // Scheduler bookkeeping
+                SystemJobLogs
             )
             logger.info("All tables (admin + dental clinic) created/verified.")
         }
@@ -96,6 +109,11 @@ fun Application.adminModule() {
     configureAdminStaticFiles()
     // 启动数据清理定时任务，每24小时清理过期运维数据（审计日志>90天、任务历史>30天、DLQ已处理>30天、通知历史>30天）
     AdminCleanupService.start()
+    // P1 业务定时任务：预约提醒（20:05/10:05）、自动爽约（每小时）、积分过期清零+30天提醒（每日）、会员年度复评（1/1）
+    AppointmentReminderService.start()
+    AutoNoShowService.start()
+    PointsExpireService.start()
+    MemberLevelReviewService.start()
 }
 
 
@@ -200,11 +218,20 @@ fun Application.adminRouting() {
 
     // Business data services
     val clinicService = ClinicService()
+    // 门店签到码签发（与 user 端验签共用同一密钥配置，两个实例签名等价）
+    val checkinCodeService = com.dentalclinic.common.security.CheckinCodeService()
     val departmentService = DepartmentService()
     val doctorService = DoctorService()
     val scheduleService = ScheduleService()
     val appointmentService = AppointmentAdminService()
     val customerService = CustomerService(pointsService)
+
+    // P2 管理完整性：充值档位/会员等级/充值流水/客户标签/消息模板
+    val rechargeTierAdminService = RechargeTierAdminService()
+    val memberLevelAdminService = MemberLevelAdminService()
+    val rechargeRecordAdminService = RechargeRecordAdminService()
+    val customerTagAdminService = CustomerTagAdminService()
+    val messageTemplateAdminService = MessageTemplateAdminService()
 
     // 小程序内容配置（轮播图/公告）与管理端文件上传
     val contentService = AdminContentService()
@@ -228,12 +255,19 @@ fun Application.adminRouting() {
             consumptionRoutes(consumptionService)
 
             // Business data management routes
-            clinicRoutes(clinicService)
+            clinicRoutes(clinicService, checkinCodeService)
             departmentRoutes(departmentService)
             doctorRoutes(doctorService)
             scheduleRoutes(scheduleService)
             appointmentAdminRoutes(appointmentService)
             customerRoutes(customerService)
+
+            // P2 管理完整性
+            rechargeTierRoutes(rechargeTierAdminService)
+            memberLevelRoutes(memberLevelAdminService)
+            rechargeRecordRoutes(rechargeRecordAdminService)
+            customerTagRoutes(customerTagAdminService)
+            messageTemplateRoutes(messageTemplateAdminService)
 
             // Miniprogram content config & file upload
             contentAdminRoutes(contentService)

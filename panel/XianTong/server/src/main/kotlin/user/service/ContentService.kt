@@ -2,6 +2,7 @@ package com.dentalclinic.user.service
 
 import com.dentalclinic.admin.entity.MpBanners
 import com.dentalclinic.admin.entity.MpNotices
+import com.dentalclinic.admin.entity.MessageTemplates
 import com.dentalclinic.common.BaseService
 import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.Serializable
@@ -67,6 +68,27 @@ class ContentService : BaseService() {
         HomeContentDto(banners = banners, notices = notices)
     }
 
+    /**
+     * 微信订阅消息模板配置（公开接口，预约成功后小程序据此申请订阅授权）。
+     *
+     * 只返回「启用中且已填真实微信模板 ID」的模板：DataSeedService 播种的模板 templateId
+     * 为空串占位，此时不返回，小程序侧拿不到 ID 就不弹授权框（wx.requestSubscribeMessage
+     * 传空/非法 ID 会直接报错），提醒全部走站内信；管理端在通知模板配置里填入真实 ID 后
+     * 无需发版即可恢复订阅授权弹窗。
+     */
+    suspend fun getSubscribeTemplates(): List<SubscribeTemplateDto> = dbQuery {
+        MessageTemplates.selectAll()
+            .where { MessageTemplates.status eq 1 }
+            .toList()
+            .filter { it[MessageTemplates.templateId].isNotBlank() }
+            .map { row ->
+                SubscribeTemplateDto(
+                    templateKey = row[MessageTemplates.templateKey],
+                    templateId = row[MessageTemplates.templateId]
+                )
+            }
+    }
+
     companion object {
         /** 轮播图条数上限：再多用户也划不完，且每条都是一张待下载的图片 */
         private const val MAX_BANNERS = 10
@@ -98,4 +120,12 @@ data class NoticeDto(
 data class HomeContentDto(
     val banners: List<BannerDto>,
     val notices: List<NoticeDto>
+)
+
+@Serializable
+data class SubscribeTemplateDto(
+    /** 业务模板标识（appointment_remind_evening/appointment_remind_morning/points_expire_remind） */
+    val templateKey: String,
+    /** 微信公众平台模板 ID，用于 wx.requestSubscribeMessage */
+    val templateId: String
 )

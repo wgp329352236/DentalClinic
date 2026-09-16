@@ -2,13 +2,16 @@ package com.dentalclinic.user.service
 
 import com.dentalclinic.admin.entity.*
 import com.dentalclinic.common.BaseService
+import com.dentalclinic.common.security.CheckinCodeService
 import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.*
 import org.jetbrains.exposed.v1.r2dbc.insert
 import org.jetbrains.exposed.v1.r2dbc.selectAll
 import org.jetbrains.exposed.v1.r2dbc.update
+import java.time.Duration
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
@@ -16,7 +19,19 @@ import java.time.format.DateTimeParseException
 /**
  * Appointment service for booking management.
  */
-class AppointmentService : BaseService() {
+class AppointmentService(
+    /** 门店签到码验签：只有后端签发的 HMAC 码才能解出可信 clinicId */
+    private val checkinCodeService: CheckinCodeService
+) : BaseService() {
+
+    companion object {
+        /** 距就诊开始不足该小时数，用户不可自助取消/改约（需求 2.x：就诊前 2 小时规则） */
+        private const val CANCEL_DEADLINE_MINUTES = 120L
+        /** 爽约黑名单：窗口内累计爽约达到此次数即禁止在线预约 */
+        private const val NO_SHOW_LIMIT = 3
+        /** 爽约黑名单窗口天数（3 次爽约限预约 30 天） */
+        private const val NO_SHOW_WINDOW_DAYS = 30L
+    }
 
     /**
      * Get all active clinics.
@@ -175,6 +190,22 @@ class AppointmentService : BaseService() {
         val dayOfWeek = appointmentDate.dayOfWeek.value
 
         return dbQuery {
+            // 爽约黑名单：近 30 天内累计 no_show 达到 3 次的用户禁止在线预约（需求：3 次爽约限预约 30 天）。
+            // 按 appointment_date 计数实际爽约单，不依赖可能失修的 no_show_count 冗余列。
+            val noShowSince = LocalDate.now().minusDays(NO_SHOW_WINDOW_DAYS)
+            val recentNoShowCount = Appointments.selectAll()
+                .where {
+                    (Appointments.userId eq userId) and
+                    (Appointments.status eq "no_show") and
+                    (Appointments.appointmentDate greaterEq noShowSince)
+                }
+                .count()
+            if (recentNoShowCount >= NO_SHOW_LIMIT) {
+                return@dbQuery AppointmentResult.Error(
+                    "您近30天内已有${NO_SHOW_LIMIT}次爽约记录，暂无法在线预约，请联系门店处理"
+                )
+            }
+
             // Check if slot is still available
             val bookedCount = Appointments.selectAll()
                 .where {
@@ -294,6 +325,82 @@ class AppointmentService : BaseService() {
     }
 
     /**
+     * 扫码到店签到（需求 3.2.2：pending/confirmed → arrived）。
+     *
+     * code 为小程序上报的门店码原文（后端签发的 HMAC 签名码 `dc1.<clinicId>.<sig>`），
+     * 服务端依次校验：
+     * 0. 码签名合法，解出可信 clinicId（伪造/过期格式码在此直接拒绝，不碰数据库）；
+     * 1. 归属本人；
+     * 2. 扫码门店真实存在且处于营业状态；
+     * 3. 扫码门店与预约门店一致（防用户在非预约门店、甚至家中远程扫自制码签到）；
+     * 4. 状态为待就诊/已确认；
+     * 5. 就诊日期就是今天。
+     */
+    suspend fun checkIn(userId: Long, appointmentId: Long, code: String): AppointmentResult {
+        // 纯密码学校验放事务外：伪造码直接拒绝，省一次 DB 往返
+        val clinicId = checkinCodeService.verify(code)
+            ?: return AppointmentResult.Error("无效的门店码，请扫描门店前台二维码")
+
+        return dbQuery {
+            val appointment = Appointments.selectAll()
+                .where {
+                    (Appointments.id eq appointmentId) and
+                    (Appointments.userId eq userId)
+                }
+                .toList()
+                .singleOrNull()
+                ?: return@dbQuery AppointmentResult.Error("预约不存在")
+
+            // 签名已证明 clinicId 由服务端签发，这里再确认门店仍真实存在且营业中
+            val clinic = Clinics.selectAll()
+                .where { Clinics.id eq clinicId }
+                .toList()
+                .singleOrNull()
+                ?: return@dbQuery AppointmentResult.Error("无效的门店码，请扫描门店前台二维码")
+
+            if (clinic[Clinics.status] != 1) {
+                return@dbQuery AppointmentResult.Error("该门店已暂停营业，无法签到")
+            }
+
+            // 门店一致性：扫哪个门店的码，就必须是在该门店的预约
+            if (appointment[Appointments.clinicId] != clinicId) {
+                return@dbQuery AppointmentResult.Error("扫码门店与预约门店不一致，请到预约门店签到")
+            }
+
+            when (appointment[Appointments.status]) {
+                "arrived" -> return@dbQuery AppointmentResult.Error("您已签到，请勿重复操作")
+                "completed" -> return@dbQuery AppointmentResult.Error("预约已完成，无需签到")
+                "cancelled" -> return@dbQuery AppointmentResult.Error("预约已取消，无法签到")
+                "no_show" -> return@dbQuery AppointmentResult.Error("预约已爽约，无法签到")
+            }
+
+            // 仅剩 pending/confirmed 可签到；只允许就诊当天签到，防止提前几天远程签到
+            if (!appointment[Appointments.appointmentDate].isEqual(LocalDate.now())) {
+                return@dbQuery AppointmentResult.Error("仅就诊当天可签到")
+            }
+
+            Appointments.update({ Appointments.id eq appointmentId }) {
+                it[Appointments.status] = "arrived"
+                it[Appointments.arrivedAt] = LocalDateTime.now()
+            }
+            AppointmentResult.Success(appointmentId)
+        }
+    }
+
+    /**
+     * 距就诊开始是否已不足 2 小时（开始时间已过也视为不足，禁止自助取消/改约）。
+     * 恰好 2 小时仍允许（严格 <），给前台口径留一分钟余量。
+     * 历史脏数据（时间格式损坏）不阻断，返回 false 交由状态机兜底。
+     */
+    private fun isWithinCancelDeadline(date: LocalDate, startTime: String): Boolean =
+        try {
+            val start = LocalDateTime.of(date, LocalTime.parse(startTime))
+            Duration.between(LocalDateTime.now(), start).toMinutes() < CANCEL_DEADLINE_MINUTES
+        } catch (e: DateTimeParseException) {
+            false
+        }
+
+    /**
      * Cancel an appointment.
      */
     suspend fun cancelAppointment(userId: Long, appointmentId: Long): AppointmentResult = dbQuery {
@@ -317,14 +424,23 @@ class AppointmentService : BaseService() {
                     AppointmentResult.Error("预约已完成，无法取消")
                 }
                 else -> {
-                    // Update status
-                    Appointments.update({ Appointments.id eq appointmentId }) {
-                        it[Appointments.status] = "cancelled"
-                        it[Appointments.cancelledAt] = java.time.LocalDateTime.now()
-                        it[Appointments.cancelledBy] = userId
-                    }
+                    // 就诊前 2 小时内不可自助取消，需联系门店（门店侧管理端不受此限）
+                    if (isWithinCancelDeadline(
+                            appointment[Appointments.appointmentDate],
+                            appointment[Appointments.startTime]
+                        )
+                    ) {
+                        AppointmentResult.Error("距就诊不足2小时，无法自助取消，请联系门店")
+                    } else {
+                        // Update status
+                        Appointments.update({ Appointments.id eq appointmentId }) {
+                            it[Appointments.status] = "cancelled"
+                            it[Appointments.cancelledAt] = java.time.LocalDateTime.now()
+                            it[Appointments.cancelledBy] = userId
+                        }
 
-                    AppointmentResult.Success(appointmentId)
+                        AppointmentResult.Success(appointmentId)
+                    }
                 }
             }
         }
@@ -373,6 +489,18 @@ class AppointmentService : BaseService() {
         }
         if (status == "completed") {
             return AppointmentResult.Error("预约已完成")
+        }
+
+        // 就诊前 2 小时内不可自助改约（与取消同规则）；已到店签到的单也不允许改约
+        if (status == "arrived") {
+            return AppointmentResult.Error("您已到店签到，无法改约")
+        }
+        if (isWithinCancelDeadline(
+                preCheck[Appointments.appointmentDate],
+                preCheck[Appointments.startTime]
+            )
+        ) {
+            return AppointmentResult.Error("距就诊不足2小时，无法自助改约，请联系门店")
         }
 
         val doctorId = preCheck[Appointments.doctorId]

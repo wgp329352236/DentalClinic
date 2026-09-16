@@ -3,16 +3,25 @@ package com.dentalclinic.admin.auth
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import com.auth0.jwt.interfaces.DecodedJWT
+import com.dentalclinic.common.config.GlobalConfig
 import com.dentalclinic.common.config.GlobalConfig.appConfig
 import java.util.*
 
 /**
  * JWT 配置：Access Token (2h) + Refresh Token (7d)
+ *
+ * 签名密钥解析顺序：环境变量 ADMIN_JWT_SECRET > yaml admin.jwt.secret；
+ * 生产环境（APP_ENV=prod）两者都缺失时直接 fail-fast，非生产环境回退开发默认值并打 WARN。
  */
 object JwtConfig {
 
     private val secret: String by lazy {
-        appConfig.propertyOrNull("admin.jwt.secret")?.getString() ?: "admin-default-secret-change-me"
+        GlobalConfig.requireSecret(
+            envName = "ADMIN_JWT_SECRET",
+            yamlPath = "admin.jwt.secret",
+            devDefault = "admin-default-secret-change-me",
+            label = "管理端 JWT 签名密钥"
+        )
     }
 
     private val issuer: String by lazy {

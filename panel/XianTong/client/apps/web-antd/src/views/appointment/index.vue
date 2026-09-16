@@ -16,6 +16,7 @@ const statusMap: Record<string, { color: string; text: string }> = {
   arrived: { color: 'cyan', text: '已到店' },
   completed: { color: 'green', text: '已完成' },
   cancelled: { color: 'default', text: '已取消' },
+  no_show: { color: 'red', text: '爽约' },
 };
 
 const [DetailModal, detailModalApi] = useVbenModal({
@@ -37,6 +38,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
             { label: '已到店', value: 'arrived' },
             { label: '已完成', value: 'completed' },
             { label: '已取消', value: 'cancelled' },
+            { label: '爽约', value: 'no_show' },
           ],
         },
         fieldName: 'status',

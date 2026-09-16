@@ -3,6 +3,7 @@ ktor:
     port: 8080
   application:
     modules:
+      - com.dentalclinic.PreflightKt.configurePreflight
       - com.dentalclinic.SerializationKt.configureSerialization
       - com.dentalclinic.SecurityKt.configureSecurity
       - com.dentalclinic.KoinKt.configureKoin
@@ -11,6 +12,9 @@ ktor:
       - com.dentalclinic.user.UserModuleKt.userModule
 
 # ─── 数据库配置（PostgreSQL） ───
+# 生产环境建议用环境变量覆盖（优先级高于此处）：
+#   DB_URL / DB_USERNAME / DB_PASSWORD
+# APP_ENV=prod 时 DB_PASSWORD 与 database.password 都缺失会直接启动失败（fail-fast）。
 database:
   url: "r2dbc:postgresql://localhost:5432/dental_clinic"
   username: "postgres"
@@ -22,3 +26,45 @@ database:
 # 上线前必须改成真实域名，否则用户点到的是一条死链。
 referral:
   shareBaseUrl: ""
+
+# ─── 门店到店签到码签名密钥 ───
+# 签到码格式 dc1.<clinicId>.<HMAC-SHA256签名>，密钥用于管理端签发 / 用户扫码验签。
+# 留空时每次启动生成随机密钥（仅限本地联调，重启后所有已打印签到码失效，日志打 WARN）。
+# 生产必须配置稳定密钥（建议至少 32 位随机串）；也可用环境变量 CHECKIN_SIGNING_SECRET 注入，
+# 环境变量优先级更高。轮换密钥后全部门店需重新打印签到码。
+checkin:
+  signingSecret: ""
+
+# ─── JWT 签名密钥（管理端 + 用户端） ───
+# 生产环境务必通过环境变量注入（优先级高于此处）：ADMIN_JWT_SECRET / USER_JWT_SECRET
+# 生成方式：openssl rand -hex 32（两端必须使用各自独立的随机密钥）
+# 留空时：本地开发自动使用内置开发默认值（启动日志打 WARN）；
+#         APP_ENV=prod 时缺失任一密钥都会直接启动失败（fail-fast），防止带弱默认密钥上线。
+# 轮换密钥会使所有已签发 token 失效，用户/管理员需重新登录。
+admin:
+  jwt:
+    secret: ""
+    # issuer: "ktor-bi-admin"   # 可选，默认 ktor-bi-admin
+
+user:
+  jwt:
+    secret: ""
+
+# ─── 微信小程序 / 微信支付 V3 ───
+# 所有项留空时相关能力自动降级为 mock（仅限本地联调，启动日志会打 WARN）。
+# 生产环境建议用环境变量注入，避免凭证进配置文件：
+#   WECHAT_APP_ID / WECHAT_APP_SECRET
+#   WECHAT_MCH_ID / WECHAT_API_V3_KEY / WECHAT_MERCHANT_SERIAL
+#   WECHAT_PRIVATE_KEY 或 WECHAT_PRIVATE_KEY_PATH / WECHAT_PAY_NOTIFY_URL
+wechat:
+  miniApp:
+    appId: ""
+    appSecret: ""
+  pay:
+    mchId: ""
+    apiV3Key: ""              # APIv3 密钥，固定 32 字节
+    merchantSerialNumber: ""  # 商户证书序列号
+    privateKey: ""            # 商户私钥 PEM 文本（也可用下面的 privateKeyPath 指定文件）
+    privateKeyPath: ""        # apiclient_key.pem 的绝对路径
+    notifyUrl: ""             # 支付结果通知地址，必须公网 HTTPS，如 https://api.example.com/api/v1/recharge/notify
+

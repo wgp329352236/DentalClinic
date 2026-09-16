@@ -28,8 +28,11 @@ object DataSeedService {
     suspend fun seed() {
         suspendTransaction(DBConfig.database) {
             seedMemberLevels()
+            seedRechargeTiers()
             seedPointsRules()
             seedReferralRewardRules()
+            seedPointsGoods()
+            seedMessageTemplates()
             seedDefaultAdmin()
             seedSuperAdminRole()
             seedBusinessPermissions()
@@ -68,6 +71,37 @@ object DataSeedService {
         }
         logger.info("[DataSeed]: Seeded ${levels.size} member levels.")
     }
+
+    /**
+     * 播种充值档位默认值，与 RechargeService 旧硬编码 4 档保持一致：
+     * 1000→10%、3000→15%、5000→20%、10000→25%。
+     * 表非空即整体跳过：管理端调整过的配置不被覆盖。
+     */
+    private suspend fun seedRechargeTiers() {
+        val count = RechargeTiers.selectAll().count()
+        if (count > 0) return
+
+        val tiers = listOf(
+            RechargeTierSeed("充1000送10%", 1000.0, 0.1000, 10),
+            RechargeTierSeed("充3000送15%", 3000.0, 0.1500, 20),
+            RechargeTierSeed("充5000送20%", 5000.0, 0.2000, 30),
+            RechargeTierSeed("充10000送25%", 10000.0, 0.2500, 40)
+        )
+        for ((name, minAmount, rate, sortOrder) in tiers) {
+            RechargeTiers.insert {
+                it[RechargeTiers.tierName] = name
+                it[RechargeTiers.minAmount] = minAmount.toBigDecimal()
+                it[bonusRate] = rate.toBigDecimal()
+                it[status] = 1
+                it[RechargeTiers.sortOrder] = sortOrder
+            }
+        }
+        logger.info("[DataSeed]: Seeded ${tiers.size} recharge tiers.")
+    }
+
+    private data class RechargeTierSeed(
+        val tierName: String, val minAmount: Double, val bonusRate: Double, val sortOrder: Int
+    )
 
     /**
      * 积分规则播种默认值。
@@ -201,6 +235,112 @@ object DataSeedService {
         }
     }
 
+    /**
+     * 播种积分商城默认商品（需求 3.4.2）：
+     * - 500 积分兑换口腔检查（服务类，不限量）
+     * - 2000 积分兑换电动牙刷（实物类，不限量）
+     * 按 name 幂等：管理端改名后的行不会被重复插入，也不覆盖管理端调价/库存配置。
+     */
+    private data class PointsGoodsSeed(
+        val name: String,
+        val goodsType: String,
+        val pointsPrice: Int,
+        val sortOrder: Int,
+        val description: String
+    )
+
+    private suspend fun seedPointsGoods() {
+        val existingNames = PointsGoods.selectAll().toList()
+            .map { it[PointsGoods.name] }
+            .toSet()
+
+        val goodsSeeds = listOf(
+            PointsGoodsSeed(
+                name = "口腔检查（单次）",
+                goodsType = "service",
+                pointsPrice = 500,
+                sortOrder = 10,
+                description = "需求 3.4.2：500 积分兑换一次口腔检查服务，到店出示核销码即可使用。"
+            ),
+            PointsGoodsSeed(
+                name = "电动牙刷",
+                goodsType = "item",
+                pointsPrice = 2000,
+                sortOrder = 20,
+                description = "需求 3.4.2：2000 积分兑换电动牙刷一支，到店出示核销码领取。"
+            )
+        )
+
+        for (seed in goodsSeeds) {
+            if (seed.name in existingNames) continue
+            PointsGoods.insert {
+                it[PointsGoods.name] = seed.name
+                it[PointsGoods.goodsType] = seed.goodsType
+                it[PointsGoods.pointsPrice] = seed.pointsPrice
+                it[PointsGoods.sortOrder] = seed.sortOrder
+                it[PointsGoods.description] = seed.description
+                it[PointsGoods.totalStock] = -1
+                it[PointsGoods.status] = 1
+            }
+            logger.info("[DataSeed]: Created points goods: ${seed.name}")
+        }
+    }
+
+    /**
+     * 播种微信订阅消息模板（需求 3.6：预约提醒 / 3.4.1：积分到期提醒）。
+     *
+     * template_id 先以空串占位：真实的微信模板 ID 需要在小程序后台申请模板后，
+     * 由管理端「通知模板」配置填入。占位期间定时任务自动降级为站内信，不丢消息；
+     * 管理端填入真实 ID 后无需改代码即可走订阅消息通道。
+     *
+     * trigger_event 与 template_key 同值：ScheduledNotifier 按 template_key 查模板，
+     * 小程序公开配置接口按 trigger_event 取可申请的模板 ID，两列同值让一条种子同时满足两侧。
+     * 幂等：按 templateKey 判重，不覆盖管理端已填的真实模板 ID。
+     */
+    private data class MessageTemplateSeed(
+        val templateKey: String,
+        val title: String,
+        val content: String
+    )
+
+    private suspend fun seedMessageTemplates() {
+        val existingKeys = MessageTemplates.selectAll().toList()
+            .map { it[MessageTemplates.templateKey] }
+            .toSet()
+
+        val templateSeeds = listOf(
+            MessageTemplateSeed(
+                templateKey = "appointment_remind_evening",
+                title = "就诊前一天提醒",
+                content = "您已预约明天就诊，请按时到店；如需取消或改约，请至少提前2小时操作。"
+            ),
+            MessageTemplateSeed(
+                templateKey = "appointment_remind_morning",
+                title = "就诊当天提醒",
+                content = "您今天有预约就诊，请携带有效证件准时到店签到。"
+            ),
+            MessageTemplateSeed(
+                templateKey = "points_expire_remind",
+                title = "积分到期提醒",
+                content = "您有积分即将到期，到期后将自动清零，可前往积分商城兑换好礼。"
+            )
+        )
+
+        for (seed in templateSeeds) {
+            if (seed.templateKey in existingKeys) continue
+            MessageTemplates.insert {
+                it[MessageTemplates.templateKey] = seed.templateKey
+                it[MessageTemplates.templateId] = ""
+                it[MessageTemplates.title] = seed.title
+                it[MessageTemplates.content] = seed.content
+                it[MessageTemplates.triggerEvent] = seed.templateKey
+                it[MessageTemplates.status] = 1
+
+            }
+            logger.info("[DataSeed]: Created message template: ${seed.templateKey}")
+        }
+    }
+
     private suspend fun seedDefaultAdmin() {
         val count = AdminUsers.selectAll().count()
         if (count > 0) return
@@ -272,15 +412,38 @@ object DataSeedService {
             // 预约
             Triple("appointment:list", "查看预约", "appointment"),
             Triple("appointment:view", "查看预约详情", "appointment"),
+            Triple("appointment:create", "代客预约", "appointment"),
             Triple("appointment:update", "更新预约状态", "appointment"),
             Triple("appointment:delete", "取消预约", "appointment"),
             // 客户
             Triple("customer:list", "查看客户", "customer"),
             Triple("customer:view", "查看客户详情", "customer"),
             Triple("customer:update", "更新客户信息", "customer"),
+            // 客户标签
+            Triple("customer_tag:list", "查看客户标签", "customer"),
+            Triple("customer_tag:create", "创建客户标签", "customer"),
+            Triple("customer_tag:update", "更新客户标签", "customer"),
+            Triple("customer_tag:delete", "删除客户标签", "customer"),
             // 消费
             Triple("consumption:list", "查看消费流水", "consumption"),
             Triple("consumption:create", "录入消费", "consumption"),
+            // 充值档位 / 会员等级 / 充值流水
+            Triple("recharge:list", "查看充值流水", "recharge"),
+            Triple("recharge_tier:list", "查看充值档位", "recharge"),
+            Triple("recharge_tier:create", "创建充值档位", "recharge"),
+            Triple("recharge_tier:update", "更新充值档位", "recharge"),
+            Triple("recharge_tier:delete", "删除充值档位", "recharge"),
+            Triple("member_level:list", "查看会员等级", "recharge"),
+            Triple("member_level:create", "创建会员等级", "recharge"),
+            Triple("member_level:update", "更新会员等级", "recharge"),
+            Triple("member_level:delete", "删除会员等级", "recharge"),
+            // 消息模板
+            Triple("message_template:list", "查看消息模板", "notification"),
+            Triple("message_template:create", "创建消息模板", "notification"),
+            Triple("message_template:update", "更新消息模板", "notification"),
+            Triple("message_template:delete", "删除消息模板", "notification"),
+            // 数据范围：可见全部门店数据（无此权限的账号仅见授权门店）
+            Triple("clinic:data:all", "全部门店数据", "clinic"),
             // 门诊
             Triple("clinic:list", "查看门诊", "clinic"),
             Triple("clinic:create", "创建门诊", "clinic"),
@@ -420,6 +583,7 @@ object DataSeedService {
         ensureMenu(clinicOpsDirId, "医生管理", "menu", "/clinic-ops/doctor", "/doctor/index", "doctor:list", "lucide:stethoscope", 3)
         ensureMenu(clinicOpsDirId, "排班管理", "menu", "/clinic-ops/schedule", "/schedule/index", "doctor:list", "lucide:calendar-clock", 4)
         ensureMenu(clinicOpsDirId, "预约管理", "menu", "/clinic-ops/appointment", "/appointment/index", "appointment:list", "lucide:calendar-check", 5)
+        ensureMenu(clinicOpsDirId, "预约看板", "menu", "/clinic-ops/appointment-board", "/appointment/board", "appointment:list", "lucide:calendar-range", 6)
 
         // 客户运营（客户/积分规则/积分记录）——核心业务
         val customerOpsDirId = ensureMenu(
@@ -433,9 +597,13 @@ object DataSeedService {
             sortOrder = 30
         )
         ensureMenu(customerOpsDirId, "客户管理", "menu", "/customer-ops/customer", "/customer/index", "customer:list", "lucide:contact", 1)
-        ensureMenu(customerOpsDirId, "积分规则", "menu", "/customer-ops/points-rules", "/points/rules", "points:view", "lucide:award", 2)
-        ensureMenu(customerOpsDirId, "积分记录", "menu", "/customer-ops/points-records", "/points/records", "points:view", "lucide:coins", 3)
-        ensureMenu(customerOpsDirId, "消费管理", "menu", "/customer-ops/consumption", "/consumption/index", "consumption:list", "lucide:receipt", 4)
+        ensureMenu(customerOpsDirId, "客户标签", "menu", "/customer-ops/customer-tags", "/customer/tags", "customer_tag:list", "lucide:tags", 2)
+        ensureMenu(customerOpsDirId, "积分规则", "menu", "/customer-ops/points-rules", "/points/rules", "points:view", "lucide:award", 3)
+        ensureMenu(customerOpsDirId, "积分记录", "menu", "/customer-ops/points-records", "/points/records", "points:view", "lucide:coins", 4)
+        ensureMenu(customerOpsDirId, "消费管理", "menu", "/customer-ops/consumption", "/consumption/index", "consumption:list", "lucide:receipt", 5)
+        ensureMenu(customerOpsDirId, "充值档位", "menu", "/customer-ops/recharge-tier", "/member/tier", "recharge_tier:list", "lucide:layers", 6)
+        ensureMenu(customerOpsDirId, "会员等级", "menu", "/customer-ops/member-level", "/member/level", "member_level:list", "lucide:crown", 7)
+        ensureMenu(customerOpsDirId, "充值流水", "menu", "/customer-ops/recharge-records", "/recharge/records", "recharge:list", "lucide:credit-card", 8)
 
         // 优惠券管理
         val couponDirId = ensureMenu(
@@ -492,6 +660,7 @@ object DataSeedService {
         )
         ensureMenu(notificationDirId, "通知规则", "menu", "/notification/rules", "/notification/rules/index", "config:view", "lucide:bell-ring", 1)
         ensureMenu(notificationDirId, "通知历史", "menu", "/notification/history", "/notification/history/index", "config:view", "lucide:history", 2)
+        ensureMenu(notificationDirId, "消息模板", "menu", "/notification/template", "/notification/template/index", "message_template:list", "lucide:file-text", 3)
 
         // 系统管理
         val systemDirId = ensureMenu(
@@ -560,13 +729,13 @@ object DataSeedService {
         val roleId = superAdminRole[AdminRoles.id]
         val menuPaths = listOf(
             "/dashboard", "/dashboard/analytics",
-            "/clinic-ops", "/clinic-ops/clinic", "/clinic-ops/department", "/clinic-ops/doctor", "/clinic-ops/schedule", "/clinic-ops/appointment",
-            "/customer-ops", "/customer-ops/customer", "/customer-ops/points-rules", "/customer-ops/points-records",
-            "/customer-ops/consumption",
+            "/clinic-ops", "/clinic-ops/clinic", "/clinic-ops/department", "/clinic-ops/doctor", "/clinic-ops/schedule", "/clinic-ops/appointment", "/clinic-ops/appointment-board",
+            "/customer-ops", "/customer-ops/customer", "/customer-ops/customer-tags", "/customer-ops/points-rules", "/customer-ops/points-records",
+            "/customer-ops/consumption", "/customer-ops/recharge-tier", "/customer-ops/member-level", "/customer-ops/recharge-records",
             "/coupon", "/coupon/index", "/coupon/record",
             "/referral", "/referral/index", "/referral/reward",
             "/content", "/content/banner", "/content/notice",
-            "/notification", "/notification/rules", "/notification/history",
+            "/notification", "/notification/rules", "/notification/history", "/notification/template",
             "/system", "/system/user", "/system/role", "/system/menu", "/system/config", "/system/audit"
         )
         for (path in menuPaths) {

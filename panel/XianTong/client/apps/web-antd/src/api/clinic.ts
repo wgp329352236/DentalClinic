@@ -23,3 +23,10 @@ export async function updateClinic(id: number, data: any) {
 export async function deleteClinic(id: number) {
   return requestClient.delete(`/clinics/${id}`);
 }
+
+// 门店到店签到码（后端 HMAC 签名，确定性输出，可重复打印）
+export async function getClinicCheckinCode(id: number) {
+  return requestClient.get<{ clinicId: number; name: string; code: string }>(
+    `/clinics/${id}/checkin-code`,
+  );
+}

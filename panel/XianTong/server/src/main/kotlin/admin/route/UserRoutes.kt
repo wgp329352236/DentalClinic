@@ -41,7 +41,9 @@ fun Route.userRoutes(userService: AdminUserService) {
                 // POST /api/admin/users
                 post {
                     val req = call.receive<CreateUserRequest>()
-                    val id = userService.createUser(req.username, req.password, req.displayName, req.email, req.roleIds)
+                    val id = userService.createUser(
+                        req.username, req.password, req.displayName, req.email, req.roleIds, req.clinicIds
+                    )
                     call.ok(mapOf("id" to id), "创建成功")
                 }
             }
@@ -52,7 +54,7 @@ fun Route.userRoutes(userService: AdminUserService) {
                     val id = call.parameters["id"]?.toLongOrNull()
                         ?: throw ValidationException("无效的用户 ID")
                     val req = call.receive<UpdateUserRequest>()
-                    userService.updateUser(id, req.displayName, req.email, req.roleIds)
+                    userService.updateUser(id, req.displayName, req.email, req.roleIds, req.clinicIds)
                     call.ok<Unit>(message = "更新成功")
                 }
 

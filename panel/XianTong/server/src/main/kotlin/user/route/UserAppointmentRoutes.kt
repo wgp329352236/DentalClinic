@@ -165,6 +165,47 @@ fun Application.userAppointmentRoutes(appointmentService: AppointmentService) {
                 }
 
                 /**
+                 * 扫码到店签到。
+                 * POST /api/v1/appointments/{id}/checkin
+                 * Body: { "code": "dc1.1.<sig>" } —— 小程序扫描门店码后把码原文整体上报。
+                 * 签名真伪由服务层用密钥验签，伪造/明文码一律拒绝；门店营业状态、
+                 * 与预约门店一致性、归属/状态/当天均由服务层校验。
+                 */
+                post("/appointments/{id}/checkin") {
+                    val userId = call.userId()
+                    val appointmentId = call.parameters["id"]?.toLongOrNull()
+
+                    if (appointmentId == null) {
+                        call.respond(ApiResponse<Unit>(code = 400, message = "无效的预约ID"))
+                        return@post
+                    }
+
+                    val request = try {
+                        call.receive<CheckInRequestDto>()
+                    } catch (e: Exception) {
+                        // body 缺失/不是合法 JSON：给出业务化文案，避免抛出序列化原始异常
+                        call.respond(ApiResponse<Unit>(code = 400, message = "无效的门店码，请扫描门店前台二维码"))
+                        return@post
+                    }
+
+                    val code = request.code?.trim().orEmpty()
+                    if (code.isEmpty()) {
+                        call.respond(ApiResponse<Unit>(code = 400, message = "无效的门店码，请扫描门店前台二维码"))
+                        return@post
+                    }
+
+                    val result = appointmentService.checkIn(userId, appointmentId, code)
+                    when (result) {
+                        is AppointmentResult.Success -> {
+                            call.respond(ApiResponse<Unit>(code = 0, message = "签到成功"))
+                        }
+                        is AppointmentResult.Error -> {
+                            call.respond(ApiResponse<Unit>(code = 400, message = result.message))
+                        }
+                    }
+                }
+
+                /**
                  * Reschedule an appointment.
                  * PUT /api/v1/appointments/{id}/reschedule
                  */
@@ -206,6 +247,15 @@ fun Application.userAppointmentRoutes(appointmentService: AppointmentService) {
 
 @Serializable
 data class RescheduleRequest(val appointmentDate: String, val startTime: String)
+
+/**
+ * 扫码签到请求体。
+ * code 为门店前台张贴的 HMAC 签名码原文（格式 dc1.<clinicId>.<signature>），
+ * 由后端验签并解析出门店；声明为可空是为了在缺参时返回业务化文案，
+ * 而不是让 kotlinx.serialization 直接抛 400 反序列化异常。
+ */
+@Serializable
+data class CheckInRequestDto(val code: String? = null)
 
 @Serializable
 data class CreateAppointmentRequestDto(

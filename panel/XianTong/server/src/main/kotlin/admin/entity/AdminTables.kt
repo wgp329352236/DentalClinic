@@ -45,6 +45,31 @@ object AdminRoles : Table("admin_role") {
 }
 
 // ============================================================
+// Admin User-Clinic（账号授权门店，多对多）
+// ============================================================
+
+/**
+ * 管理端账号-门店授权关系表。
+ *
+ * 数据隔离口径：账号拥有 `clinic:data:all` 权限时可见全部门店；
+ * 否则只能看见本表中授权门店的业务数据（预约/客户/消费/充值流水/看板）。
+ * 未授权任何门店的非超管账号看不到业务数据（不是默认放开）。
+ * 账号/角色/菜单等系统管理功能不受门店范围限制。
+ */
+object AdminUserClinics : Table("admin_user_clinic") {
+    val id = long("id").autoIncrement()
+    val userId = long("user_id")
+    val clinicId = long("clinic_id")
+    val createdAt = datetime("created_at").defaultExpression(CurrentTimestamp)
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        uniqueIndex("admin_uc_uk_user_clinic", userId, clinicId)
+        index("admin_uc_idx_clinic_id", false, clinicId)
+    }
+}
+
+// ============================================================
 // Admin User-Role
 // ============================================================
 object AdminUserRoles : Table("admin_user_role") {
@@ -424,7 +449,11 @@ object RechargeRecords : Table("recharge_record") {
     val amount = decimal("amount", 12, 2)     // 充值金额
     val bonusAmount = decimal("bonus_amount", 12, 2).default(0.0.toBigDecimal()) // 赠送金额
     val paymentMethod = varchar("payment_method", 20).default("wechat") // wechat/balance
-    val wechatOrderId = varchar("wechat_order_id", 100).nullable() // 微信支付订单号
+    val wechatOrderId = varchar("wechat_order_id", 100).nullable() // 微信支付订单号(transaction_id)
+    /** 商户系统内部单号（out_trade_no），下单时生成，微信回调/查单均以此关联，唯一 */
+    val outTradeNo = varchar("out_trade_no", 64).nullable()
+    /** 微信预支付交易会话标识（prepay_id），下单成功后回写，失败/未支付为空 */
+    val prepayId = varchar("prepay_id", 64).nullable()
     val status = varchar("status", 20).default("pending") // pending/success/failed/refunded
     val paidAt = datetime("paid_at").nullable()
     val createdAt = datetime("created_at").defaultExpression(CurrentTimestamp)
@@ -434,6 +463,30 @@ object RechargeRecords : Table("recharge_record") {
         index("recharge_recharge_idx_admin_audit_user_id", false, userId)
         index("recharge_recharge_idx_status", false, status)
         index("recharge_recharge_idx_created_at", false, createdAt)
+        // 商户单号唯一：微信回调可能重复推送，幂等入账依赖它唯一定位订单
+        uniqueIndex("recharge_uk_out_trade_no", outTradeNo)
+    }
+}
+
+/**
+ * 充值档位配置表（管理端可配，替代 RechargeService 内的硬编码赠送规则）。
+ *
+ * 命中规则：取启用中、min_amount <= 充值金额 的最高一档，赠送金额 = 充值金额 × bonus_rate。
+ * 历史充值单的赠送额已快照在 recharge_record.bonus_amount，改配置不影响历史账。
+ */
+object RechargeTiers : Table("recharge_tier") {
+    val id = long("id").autoIncrement()
+    val tierName = varchar("tier_name", 50)       // 档位名称，如「充1000送10%」
+    val minAmount = decimal("min_amount", 12, 2)  // 起充门槛
+    val bonusRate = decimal("bonus_rate", 5, 4)   // 赠送比例，0.1000=10%
+    val status = integer("status").default(1)     // 1=启用 0=停用
+    val sortOrder = integer("sort_order").default(0)
+    val createdAt = datetime("created_at").defaultExpression(CurrentTimestamp)
+    val updatedAt = datetime("updated_at").defaultExpression(CurrentTimestamp)
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        uniqueIndex("rtier_uk_min_amount", minAmount)
     }
 }
 
@@ -475,6 +528,40 @@ object UserMemberLevels : Table("user_member_level") {
     init {
         uniqueIndex("umember_uk_user_id", userId)
         index("umember_user_member_idx_level_id", false, levelId)
+    }
+}
+
+/**
+ * 客户标签字典表（管理端运营分组用，如「高价值」「种植意向」「复诊提醒」）。
+ */
+object CustomerTags : Table("customer_tag") {
+    val id = long("id").autoIncrement()
+    val tagName = varchar("tag_name", 30)
+    val color = varchar("color", 20).default("blue") // ant 标签色：blue/green/orange/red/purple...
+    val remark = varchar("remark", 255).nullable()
+    val status = integer("status").default(1) // 1=启用 0=停用
+    val createdAt = datetime("created_at").defaultExpression(CurrentTimestamp)
+    val updatedAt = datetime("updated_at").defaultExpression(CurrentTimestamp)
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        uniqueIndex("ctag_uk_tag_name", tagName)
+    }
+}
+
+/**
+ * 客户-标签关系表（多对多）。
+ */
+object UserTagRels : Table("user_tag_rel") {
+    val id = long("id").autoIncrement()
+    val userId = long("user_id")
+    val tagId = long("tag_id")
+    val createdAt = datetime("created_at").defaultExpression(CurrentTimestamp)
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        uniqueIndex("utag_uk_user_tag", userId, tagId)
+        index("utag_idx_tag_id", false, tagId)
     }
 }
 
@@ -539,6 +626,10 @@ object Appointments : Table("appointment") {
     val arrivedAt = datetime("arrived_at").nullable()
     val completedAt = datetime("completed_at").nullable()
     val noShowCount = integer("no_show_count").default(0) // 累计爽约次数
+    /** 「就诊前一天 20:00」提醒是否已发送（0/1），定时任务幂等标记 */
+    val remindEveningSent = integer("remind_evening_sent").default(0)
+    /** 「就诊当天 10:00」提醒是否已发送（0/1），定时任务幂等标记 */
+    val remindMorningSent = integer("remind_morning_sent").default(0)
     val diagnosis = text("diagnosis").nullable()  // 诊断结果/电子病历摘要
     val treatmentPlan = text("treatment_plan").nullable() // 治疗方案
     val remark = text("remark").nullable()      // 备注
@@ -595,6 +686,16 @@ object PointsRecords : Table("points_record") {
     val sourceId = long("source_id").nullable() // 关联ID（如消费记录ID）
     val expiresAt = datetime("expires_at")      // 过期时间
     val description = text("description").nullable()
+    /**
+     * 该发放批次已被「过期清零」处理的积分数量（0..changeAmount）。
+     *
+     * 定时任务每天扫描到期批次，用它做幂等标记：已标记的部分不重复扣减。
+     * 用户余额可能已通过兑换/抵扣提前消耗，此时批次全额标记但不扣余额（见 PointsExpireService）。
+     * 仅对 changeAmount>0 的发放记录有意义，消耗记录恒为 0。
+     */
+    val expiredAmount = integer("expired_amount").default(0)
+    /** 「到期前 30 天」提醒是否已发送（时间戳，null=未提醒），避免每日任务重复推送 */
+    val expiryNotifiedAt = datetime("expiry_notified_at").nullable()
     val createdAt = datetime("created_at").defaultExpression(CurrentTimestamp)
     override val primaryKey = PrimaryKey(id)
 
@@ -853,4 +954,83 @@ object MpNotices : Table("mp_notice") {
     init {
         index("mp_notice_idx_status_sort", false, status, sortOrder)
     }
+}
+
+// ============================================================
+// 积分商城（需求 3.4.2：积分兑换项目/礼品）
+// ============================================================
+
+/**
+ * 积分商品表。
+ *
+ * goodsType：
+ *   service=到店服务项目（如 500 积分口腔检查 1 次），兑换后生成核销码到店核销；
+ *   item=实物礼品（如 2000 积分电动牙刷），同样凭核销码到店领取。
+ * 两类履约都依赖门店前台，因此订单状态机一致，不做物流配送。
+ *
+ * totalStock=-1 表示不限量；exchangedCount 由兑换事务内条件更新累加，超卖由
+ * `WHERE exchanged_count < total_stock` 的 flipped 行数兜底（见 PointsMallService）。
+ */
+object PointsGoods : Table("points_goods") {
+    val id = long("id").autoIncrement()
+    val name = varchar("name", 100)
+    val goodsType = varchar("goods_type", 20).default("service") // service/item
+    val pointsPrice = integer("points_price")           // 兑换所需积分
+    val coverImage = varchar("cover_image", 500).nullable()
+    val description = varchar("description", 500).nullable()
+    val totalStock = integer("total_stock").default(-1) // -1=不限量
+    val exchangedCount = integer("exchanged_count").default(0)
+    val sortOrder = integer("sort_order").default(0)
+    val status = integer("status").default(1)           // 1=上架 0=下架
+    val createdAt = datetime("created_at").defaultExpression(CurrentTimestamp)
+    val updatedAt = datetime("updated_at").defaultExpression(CurrentTimestamp)
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        index("pgoods_idx_status_sort", false, status, sortOrder)
+    }
+}
+
+/**
+ * 积分兑换订单表。
+ *
+ * 状态机：unused（已兑换待核销）→ used（门店已核销）；
+ * 不设用户侧取消：积分兑换为单向操作，如需退回由管理端人工处理（后续 P2）。
+ * redeemCode 为到店核销码，对用户唯一，前台扫码/录入后核销。
+ */
+object PointsExchangeOrders : Table("points_exchange_order") {
+    val id = long("id").autoIncrement()
+    val userId = long("user_id")
+    val goodsId = long("goods_id")
+    /** 兑换时商品名称/积分的快照：商品后续改名或调价不影响历史订单展示 */
+    val goodsName = varchar("goods_name", 100)
+    val pointsCost = integer("points_cost")
+    val redeemCode = varchar("redeem_code", 32)
+    val status = varchar("status", 20).default("unused") // unused/used
+    val redeemedAt = datetime("redeemed_at").nullable()
+    val redeemedBy = varchar("redeemed_by", 50).nullable() // 核销前台/管理员账号
+    val createdAt = datetime("created_at").defaultExpression(CurrentTimestamp)
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        uniqueIndex("pex_uk_redeem_code", redeemCode)
+        index("pex_idx_user_status", false, userId, status)
+    }
+}
+
+// ============================================================
+// 定时任务运行台账（年度任务等无行级幂等标记的任务用它防重复执行）
+// ============================================================
+
+/**
+ * 系统定时任务运行记录表。
+ *
+ * 预约提醒/积分批次过期这类任务有行级标记位（remind_*_sent、expired_amount）天然幂等；
+ * 但「每年 1 月 1 日会员复评降级」是批量状态迁移，重启当天重复执行会连降多级，
+ * 必须有跨进程的年度执行台账，故落此表（job_key 唯一）。
+ */
+object SystemJobLogs : Table("system_job_log") {
+    val jobKey = varchar("job_key", 64)
+    val lastRunAt = datetime("last_run_at").defaultExpression(CurrentTimestamp)
+    override val primaryKey = PrimaryKey(jobKey)
 }

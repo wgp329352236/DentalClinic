@@ -1,10 +1,13 @@
 <script lang="ts" setup>
+import { onMounted, ref } from 'vue';
+
 import { Page, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
 import { Button, message, Modal, Switch, Tag } from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
+import { getClinics } from '#/api/clinic';
 import {
   deleteUser,
   getUserList,
@@ -13,6 +16,15 @@ import {
 } from '#/api/system';
 
 import UserFormModal from './form-modal.vue';
+
+// 门店ID→名称映射（授权门店列展示用）
+const clinicMap = ref<Record<number, string>>({});
+onMounted(async () => {
+  const clinics = await getClinics();
+  clinicMap.value = Object.fromEntries(
+    clinics.map((c: any) => [c.id, c.name]),
+  );
+});
 
 const [FormModal, formModalApi] = useVbenModal({
   connectedComponent: UserFormModal,
@@ -40,6 +52,12 @@ const [Grid, gridApi] = useVbenVxeGrid({
         title: '角色',
         minWidth: 150,
         slots: { default: 'roles' },
+      },
+      {
+        field: 'clinicIds',
+        title: '授权门店',
+        minWidth: 180,
+        slots: { default: 'clinics' },
       },
       {
         field: 'status',
@@ -136,6 +154,19 @@ async function onDelete(row: any) {
         <Tag v-for="r in row.roles" :key="r.roleCode" color="blue">
           {{ r.roleName }}
         </Tag>
+      </template>
+      <template #clinics="{ row }">
+        <template v-if="row.clinicIds?.length">
+          <Tag
+            v-for="cid in row.clinicIds"
+            :key="cid"
+            class="mb-0.5"
+            color="geekblue"
+          >
+            {{ clinicMap[cid] || `门店#${cid}` }}
+          </Tag>
+        </template>
+        <span v-else class="opacity-50">全部门店 / 未配置</span>
       </template>
       <template #status="{ row }">
         <Switch

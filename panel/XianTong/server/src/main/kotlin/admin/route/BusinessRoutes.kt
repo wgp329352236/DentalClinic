@@ -2,23 +2,42 @@ package com.dentalclinic.admin.route
 
 import com.dentalclinic.admin.auth.adminPrincipal
 import com.dentalclinic.admin.auth.authenticated
+import com.dentalclinic.admin.auth.clinicScope
 import com.dentalclinic.admin.auth.requirePermission
 import com.dentalclinic.admin.dto.response.*
 import com.dentalclinic.admin.service.*
 import com.dentalclinic.admin.util.ValidationException
 import com.dentalclinic.admin.util.ok
+import com.dentalclinic.common.security.CheckinCodeService
 import io.ktor.server.request.*
 import io.ktor.server.routing.*
 
 // ==================== 门诊管理 ====================
 
-fun Route.clinicRoutes(clinicService: ClinicService) {
+fun Route.clinicRoutes(clinicService: ClinicService, checkinCodeService: CheckinCodeService) {
     route("/clinics") {
         authenticated {
             requirePermission("clinic:list") {
                 get {
-                    val data = clinicService.listClinics()
+                    val data = clinicService.listClinics(call.clinicScope())
                     call.ok(data)
+                }
+            }
+            // 取门店到店签到码（HMAC 签名，确定性输出，可重复打印）
+            requirePermission("clinic:list") {
+                get("/{id}/checkin-code") {
+                    val id = call.parameters["id"]?.toLongOrNull()
+                        ?: throw ValidationException("无效的ID")
+                    val clinic = clinicService.getClinic(id)
+                        ?: throw ValidationException("门诊不存在")
+                    val code = checkinCodeService.issue(id)
+                    call.ok(
+                        mapOf(
+                            "clinicId" to id,
+                            "name" to clinic.name,
+                            "code" to code
+                        )
+                    )
                 }
             }
             requirePermission("clinic:create") {
@@ -165,6 +184,9 @@ fun Route.appointmentAdminRoutes(appointmentService: AppointmentAdminService) {
                     val doctorId = call.request.queryParameters["doctorId"]?.toLongOrNull()
                     // userId：供「录入消费」弹窗按所选客户联动其预约列表
                     val userId = call.request.queryParameters["userId"]?.toLongOrNull()
+                    // dateFrom/dateTo：按就诊日期过滤（yyyy-MM-dd），时间轴看板按天查询时两者传同一天
+                    val dateFrom = call.request.queryParameters["dateFrom"]
+                    val dateTo = call.request.queryParameters["dateTo"]
                     // 分页参数保持可选：不传则返回全量，下拉选择器依赖这一行为一次拿全
                     val page = call.request.queryParameters["page"]?.toIntOrNull()
                     val pageSize = call.request.queryParameters["pageSize"]?.toIntOrNull()
@@ -173,10 +195,22 @@ fun Route.appointmentAdminRoutes(appointmentService: AppointmentAdminService) {
                         clinicId = clinicId,
                         doctorId = doctorId,
                         userId = userId,
+                        dateFrom = dateFrom,
+                        dateTo = dateTo,
+                        scope = call.clinicScope(),
                         page = page?.coerceAtLeast(1),
                         pageSize = pageSize?.coerceIn(1, 100)
                     )
                     call.ok(data)
+                }
+            }
+
+            // POST /api/admin/appointments - 代客预约（前台/客服替客户下单，默认 confirmed）
+            requirePermission("appointment:create") {
+                post {
+                    val req = call.receive<AdminCreateAppointmentRequest>()
+                    val id = appointmentService.createAppointment(req, call.clinicScope())
+                    call.ok(mapOf("id" to id), "代客预约成功")
                 }
             }
 
@@ -229,14 +263,17 @@ fun Route.customerRoutes(customerService: CustomerService) {
                 get {
                     val keyword = call.request.queryParameters["keyword"]
                     val clinicId = call.request.queryParameters["clinicId"]?.toLongOrNull()
+                    val tagId = call.request.queryParameters["tagId"]?.toLongOrNull()
                     // 分页参数保持可选：不传则返回全量，「录入消费」弹窗的客户下拉依赖这一行为
                     val page = call.request.queryParameters["page"]?.toIntOrNull()
                     val pageSize = call.request.queryParameters["pageSize"]?.toIntOrNull()
                     val data = customerService.listCustomers(
                         keyword = keyword,
                         clinicId = clinicId,
+                        scope = call.clinicScope(),
                         page = page?.coerceAtLeast(1),
-                        pageSize = pageSize?.coerceIn(1, 100)
+                        pageSize = pageSize?.coerceIn(1, 100),
+                        tagId = tagId
                     )
                     call.ok(data)
                 }

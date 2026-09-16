@@ -35,6 +35,18 @@ fun Route.vbenRoutes() {
                         .toList()
                         .map { it[AdminRoles.roleCode] }
 
+                    // 门店数据范围：拥有 clinic:data:all 视为全店；否则返回授权门店 ID 列表。
+                    // 前端据此决定门店筛选器是否必选/默认值，真正的隔离仍以后端各列表接口的 scope 过滤为准。
+                    val allClinics = principal.permissions.contains("clinic:data:all")
+                    val clinicIds = if (allClinics) {
+                        emptyList()
+                    } else {
+                        AdminUserClinics.selectAll()
+                            .where { AdminUserClinics.userId eq userId }
+                            .toList()
+                            .map { it[AdminUserClinics.clinicId] }
+                    }
+
                     VbenUserInfo(
                         userId = userId,
                         username = user[AdminUsers.username],
@@ -43,6 +55,8 @@ fun Route.vbenRoutes() {
                         desc = roles.firstOrNull() ?: "",
                         homePath = "/dashboard",
                         roles = roles,
+                        allClinics = allClinics,
+                        clinicIds = clinicIds,
                         token = "" // 前端会从 store 中获取
                     )
                 }
@@ -124,6 +138,9 @@ data class VbenUserInfo(
     val desc: String,
     val homePath: String,
     val roles: List<String>,
+    // 是否拥有全部门店数据权限；false 时 clinicIds 为授权门店集合（可能为空=无业务数据）
+    val allClinics: Boolean = false,
+    val clinicIds: List<Long> = emptyList(),
     val token: String
 )
 

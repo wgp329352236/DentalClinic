@@ -82,6 +82,23 @@ data class AppointmentAdminResponse(
 @Serializable
 data class AppointmentStatusRequest(val status: String, val remark: String? = null)
 
+/**
+ * 管理端代客预约请求（前台/客服替客户下单）。
+ * 不经过 C 端爽约黑名单，初始状态直接为 confirmed（到院仍需正常签到流转）。
+ */
+@Serializable
+data class AdminCreateAppointmentRequest(
+    val userId: Long,
+    val clinicId: Long,
+    val doctorId: Long,
+    val departmentId: Long? = null,
+    /** yyyy-MM-dd */
+    val appointmentDate: String,
+    /** HH:mm，必须落在医生当天启用排班的某个时段内 */
+    val startTime: String,
+    val remark: String? = null
+)
+
 @Serializable
 data class AppointmentDetailResponse(
     val appointment: AppointmentDetailDto,
@@ -138,6 +155,7 @@ data class CustomerResponse(
     val memberLevel: Int?,
     val levelName: String?,
     val totalConsumption: Double,
+    val tags: List<CustomerTagDto> = emptyList(),
     val createdAt: String
 )
 
@@ -176,6 +194,7 @@ data class CustomerInfoDto(
     val age: Int?,
     val avatar: String?,
     val primaryClinicId: Long?,
+    val tags: List<CustomerTagDto> = emptyList(),
     val createdAt: String
 )
 

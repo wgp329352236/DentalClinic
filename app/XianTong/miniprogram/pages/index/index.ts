@@ -1,5 +1,5 @@
 // pages/index/index.ts
-import { wechatLogin, getUserProfile, getClinics, getHomeContent } from '../../utils/api'
+import { wechatLogin, getUserProfile, getClinics, getHomeContent, registerWithReferral } from '../../utils/api'
 import type { Clinic, UserInfo, Banner, Notice } from '../../types'
 import { resolveFileUrl } from '../../utils/util'
 
@@ -162,6 +162,9 @@ Page({
             title: '登录成功',
             icon: 'success'
           })
+
+          // 消费分享链接/扫码进入携带的推荐码；失败静默，不影响登录主流程
+          await this.bindPendingReferral()
         } catch (error: any) {
           // 完整输出失败原因（含 errno/errMsg/message），便于排查
           console.error('[Login] 登录接口失败详情:', error)
@@ -178,6 +181,28 @@ Page({
         this.loginFailed(`微信登录失败：${err?.errMsg || '未知错误'}`)
       }
     })
+  },
+
+  /**
+   * 绑定暂存的推荐码（登录成功后调用）。
+   *
+   * 推荐码来自好友分享链接的 ?ref=xxx 或推荐小程序码 scene，由 app.onLaunch/onShow
+   * 捕获暂存。无论绑定成功与否都清空暂存：后端对无效码/自己的码/已被推荐都会拒绝，
+   * 保留重试没有意义；整个过程静默，绝不影响登录主流程。
+   */
+  async bindPendingReferral() {
+    const app = getApp<IAppOption>()
+    const code = app?.globalData?.pendingReferralCode
+    if (!code) return
+
+    try {
+      await registerWithReferral(code)
+      console.log('[Referral] 推荐关系绑定成功:', code)
+    } catch (error) {
+      console.warn('[Referral] 推荐关系绑定失败（已静默忽略）:', error)
+    } finally {
+      app?.setPendingReferralCode(null)
+    }
   },
 
   // 获取当前微信用户资料（未授权或基础库不支持时返回 null）

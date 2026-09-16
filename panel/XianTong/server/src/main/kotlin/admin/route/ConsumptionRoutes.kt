@@ -2,6 +2,7 @@ package com.dentalclinic.admin.route
 
 import com.dentalclinic.admin.auth.adminPrincipal
 import com.dentalclinic.admin.auth.authenticated
+import com.dentalclinic.admin.auth.clinicScope
 import com.dentalclinic.admin.auth.requirePermission
 import com.dentalclinic.admin.service.ConsumptionAdminService
 import com.dentalclinic.admin.service.CreateConsumptionRequest
@@ -59,6 +60,7 @@ fun Route.consumptionRoutes(consumptionService: ConsumptionAdminService) {
                     val response = consumptionService.listConsumptions(
                         userId = userId,
                         clinicId = clinicId,
+                        scope = call.clinicScope(),
                         startDate = startDate,
                         endDate = endDate,
                         page = page.coerceAtLeast(1),

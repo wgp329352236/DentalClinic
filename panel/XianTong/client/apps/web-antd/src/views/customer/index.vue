@@ -6,6 +6,7 @@ import { Button, Tag } from 'ant-design-vue';
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getClinics } from '#/api/clinic';
 import { getCustomers } from '#/api/customer';
+import { getCustomerTags } from '#/api/customerTag';
 
 import CustomerAdjustModal from './adjust-modal.vue';
 import CustomerDetailModal from './detail-modal.vue';
@@ -44,6 +45,19 @@ const [Grid, gridApi] = useVbenVxeGrid({
         fieldName: 'clinicId',
         label: '门诊',
       },
+      {
+        component: 'ApiSelect',
+        componentProps: {
+          allowClear: true,
+          api: getCustomerTags,
+          labelField: 'tagName',
+          placeholder: '全部标签',
+          style: 'width: 100%',
+          valueField: 'id',
+        },
+        fieldName: 'tagId',
+        label: '标签',
+      },
     ],
     submitOnChange: true,
   },
@@ -73,6 +87,12 @@ const [Grid, gridApi] = useVbenVxeGrid({
         slots: { default: 'level' },
       },
       { field: 'totalConsumption', title: '累计消费', width: 110 },
+      {
+        field: 'tags',
+        title: '标签',
+        minWidth: 140,
+        slots: { default: 'tags' },
+      },
       {
         field: 'action',
         title: '操作',
@@ -121,6 +141,19 @@ function onAdjust(row: any) {
       </template>
       <template #level="{ row }">
         <Tag v-if="row.levelName" color="gold">{{ row.levelName }}</Tag>
+        <span v-else>-</span>
+      </template>
+      <template #tags="{ row }">
+        <template v-if="row.tags?.length">
+          <Tag
+            v-for="tag in row.tags"
+            :key="tag.id"
+            :color="tag.color"
+            class="mb-0.5"
+          >
+            {{ tag.tagName }}
+          </Tag>
+        </template>
         <span v-else>-</span>
       </template>
       <template #action="{ row }">

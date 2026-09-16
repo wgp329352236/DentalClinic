@@ -2,6 +2,136 @@
 
 本文件按日期倒序记录 XianTong 项目的代码改动，每条包含：改了什么、为什么改、影响范围。
 
+## 2026-09-16
+
+本轮是需求文档差距分析后的**连续三批交付**（2026-09-15 ~ 09-16）：P0 微信登录/支付真实接入、P1（到店扫码签到、积分商城兑换、四个业务定时任务、推荐关系链路修复）、P2 管理端配置完整性（充值档位/会员等级/客户标签/消息模板 CRUD、充值流水分页、代客预约、预约时间轴看板、账号门店数据授权），另含今日收尾的充值档位/会员等级弹窗前端校验。改动跨三端：后端 19 新增 + 约 30 修改，管理端 14 新增 + 10 修改，小程序 8 修改；新增项目级知识库 CODE_WIKI.md，删除根目录遗留的 API.md 与 lefthook.yml。
+
+各批的验证边界见 V 节：微信真实链路与定时任务**未经真机/线上实测**（凭证缺失时全部自动降级 mock），前端 typecheck 与后端编译均通过。
+
+### M. P0：微信小程序登录与微信支付 V3 真实接入
+
+#### M-1. common/wx 三件套与 mock 降级机制
+
+- **改了什么**：新增 `common/wx/WechatConfig.kt`（104 行，配置解析单一事实源）、`WechatMiniClient.kt`（249 行，code2session、getPhoneNumber、access_token 进程内缓存）、`WechatPayClient.kt`（449 行，JSAPI 统一下单、V3  Authorization 签名、平台证书/回调解密验签）。
+- **原因**：此前微信登录与支付全部是硬编码 mock，无法上线。三端配置统一走 `WechatConfig`，取值优先级为**环境变量 > application.yaml > 空串**；appId/appSecret 任一缺失则登录回落 `mock_openid`，支付任一项缺失则充值下单直接模拟支付成功——保证无凭证的本地环境仍可全链路联调，缺失时启动日志打 WARN 明示。
+- **影响范围**：`WechatMiniClient` 的 access_token 用进程内缓存（带过期时间），单实例部署够用；**多实例部署需迁 Redis**，否则各实例各自刷新会撞微信接口频控。`WechatPayClient` 私钥支持 PEM 文本或 `privateKeyPath` 文件两种注入方式。
+
+#### M-2. 登录链路接真实 code2session / getPhoneNumber
+
+- **改了什么**：`UserAuthService.wechatLogin` 改为「真实调用成功用真实 openid，异常/未配置时回落 mock」；`UserAuthRoutes` 的登录请求体扩展为 `WechatLoginRequest(code, phoneCode?, userInfo?)`，支持把 `wx.getPhoneNumber` 回调的动态令牌换真实手机号，以及 `wx.getUserProfile` 的兜底资料（`WxProfile(nickname, avatarUrl, gender)`）。
+- **原因**：真实接口超时或返回 errcode 时若不回落，本地与故障期间所有用户都无法登录；回落只发生在未配置或调用失败时，生产配齐凭证后走的是真实分支。
+- **影响范围**：C 端登录端点签名兼容（code 必填，phoneCode/userInfo 可选）。手机号占用仍由 `cuser_uk_phone` 唯一索引兜底。
+
+#### M-3. 充值支付链路与订单状态机
+
+- **改了什么**：`RechargeService.kt`（+约 400 行）重写为订单状态管理：下单（pending）→ 支付回调成功幂等入账（success）→ 失败/退款（failed/refunded），微信回调验签解密后按商户订单号幂等处理，重复通知不会重复加钱。`UserRechargeRoutes` 提供 `POST /api/v1/recharge/create`（JSAPI 下单）、`POST /api/v1/recharge/notify`（微信回调，公网路径）、`GET /api/v1/recharge/{id}/status`（前端轮询）、`GET /api/v1/recharge/tiers`（档位展示）。`SchemaMigration` 新增 `migrateRechargeOrderColumns()` 给 `recharge_record` 补 out_trade_no 等订单列。
+- **原因**：支付回调可能重复投递且乱序，入账必须幂等；订单号是对接微信与对账的唯一锚点，不能没有。
+- **影响范围**：**`/notify` 必须是公网 HTTPS 地址**（`WECHAT_PAY_NOTIFY_URL`），本地无法接收真实回调，联调走 mock 分支。
+
+#### M-4. 小程序充值页与 API 层
+
+- **改了什么**：`pages/recharge/recharge.ts`（+约 100 行）改为拉取 `/recharge/tiers` 展示配置化档位、调起 `wx.requestPayment`、支付后轮询订单状态；`utils/api.ts` 新增充值段类型与函数（+124 行）；`typings/index.d.ts` 补 4 个字段。
+- **原因**：档位此前前端硬编码，与 P2 的档位配置化（见 S-3）必须同源，否则运营改了后台小程序不生效。
+
+### N. 启动预检（fail-fast）与密钥配置外置
+
+- **改了什么**：新增 `Preflight.kt`（Ktor 模块，注册在 modules 列表**第一位**，先于所有业务模块）与 `common/config/StartupPreflight.kt`：启动时一次性校验管理端 JWT、用户端 JWT、签到码 HMAC 密钥、数据库连接、微信小程序/支付、推荐分享域名。`APP_ENV=prod` 时任一密钥缺失/残留开发默认值（`admin-default-secret-change-me` 等）→ 汇总后抛 `IllegalStateException` 阻止启动；非生产只打 WARN。新增 `src/main/resources/application-prod.yaml` 生产配置骨架（所有密钥留空，只走环境变量）。`JwtConfig`（管理端）与 `UserJwtConfig`（用户端）的密钥改为 `GlobalConfig.requireSecret(env, yaml, devDefault)` 解析，顺序为环境变量 `ADMIN_JWT_SECRET`/`USER_JWT_SECRET` > yaml > 开发默认值（仅非 prod）。
+- **原因**：配置对象是 lazy 解析的，缺密钥只在首次登录/首次签到才暴露；上线时漏配一个密钥就是线上事故。fail-fast 让错误在部署瞬间暴露，而不是第一个用户触发时。
+- **影响范围**：本地开发无任何配置即可启动（全部降级 + WARN）；**生产部署必须准备的环境变量清单**已写进 application-prod.yaml 文件头注释：DB_URL/DB_USERNAME/DB_PASSWORD、ADMIN_JWT_SECRET、USER_JWT_SECRET、CHECKIN_SIGNING_SECRET、WECHAT_APP_ID/SECRET、WECHAT_MCH_ID/API_V3_KEY/MERCHANT_SERIAL、WECHAT_PRIVATE_KEY_PATH、WECHAT_PAY_NOTIFY_URL。生成方式 `openssl rand -hex 32`，两端 JWT 密钥必须各自独立。
+
+### O. P1：到店扫码签到（HMAC 签名码）
+
+#### O-1. CheckinCodeService 安全模型
+
+- **改了什么**：新增 `common/security/CheckinCodeService.kt`：码格式 `dc1.<clinicId>.<HMAC-SHA256签名>`，签名内容为 `dc1.<clinicId>`，base64url 无填充；`issue(clinicId)` 确定性签发（同店同密钥输出一致，可重复打印），`verify(code)` 校验结构/版本/clinicId 合法性并用 `MessageDigest.isEqual` 恒定时间比较防时序侧信道，任一不通过返回 null。密钥取环境变量 `CHECKIN_SIGNING_SECRET` > yaml，缺失时生成一次性随机密钥并 WARN（重启后已打印码全失效，仅本地用）。
+- **原因**：此前管理端直接把 `{"clinicId":1}` 明文生成二维码，任何人都能自制任意门店的签到码远程签到。clinicId 在码中明文可见无妨——没有服务端密钥就无法伪造合法签名。设计为**不过期的门店静态码**：码要打印张贴在前台长期使用，过期只会迫使反复重贴；需要整体作废时轮换密钥即可。
+
+#### O-2. 后端签到端点的五重校验
+
+- **改了什么**：`UserAppointmentRoutes` 新增 `POST /api/v1/appointments/{id}/checkin`；`AppointmentService.checkin` 依次校验：① 码能验签解出可信 clinicId；② 门店真实存在；③ 门店处于营业状态；④ 扫码门店与预约门店一致（防在家扫自制码）；⑤ 预约归属本人、状态为 pending/confirmed、且为就诊当天。已签到/已完成/已取消/爽约分别给明确文案。
+- **影响范围**：仅新增状态迁移 `pending/confirmed → arrived`，不改既有预约流。
+
+#### O-3. 管理端二维码弹窗
+
+- **改了什么**：新增 `views/clinic/qrcode-modal.vue`：打开时调 `GET /api/admin/clinics/{id}/checkin-code` 从后端取**已签名码原文**，再用浏览器侧 `qrcode.toDataURL` 渲染；门店列表页加「签到码」入口。新增依赖 `qrcode` 与 `@types/qrcode`（package.json + pnpm-lock）。
+- **原因**：签名密钥只在服务端，管理端绝不能自行拼码；渲染放浏览器侧是为了后端不引入图片生成依赖。
+
+#### O-4. 小程序扫码上报
+
+- **改了什么**：`pages/appointments` 预约卡片在「pending/confirmed 且就诊日期为今天」时展示「扫码签到」按钮（前端仅做显隐预判，最终以后端校验为准）；点击 `wx.scanCode` 扫码后把码原文**原样上报**，不在小程序侧解析 clinicId；`checkingIn` 锁防重复调起；用户取消扫码不打扰，失败直接展示后端文案。同批次还接入了 `PUT /appointments/{id}/cancel` 取消预约。
+
+### P. P1：积分商城兑换
+
+- **改了什么**：新增 `user/service/PointsMallService.kt`（223 行）与 `user/route/UserPointsMallRoutes.kt`，端点 `GET /api/v1/points/mall/goods`（可兑换商品）、`POST /api/v1/points/mall/exchange`（扣积分 + 生成唯一核销码）、`GET /api/v1/points/mall/orders`（我的兑换记录）。新增 `points_goods`、`points_exchange_order` 两表，DataSeed 播种两个商品：500 积分「口腔检查（单次）」、2000 积分「电动牙刷」。
+- **设计约定**：兑换是单向操作（扣积分 + 发核销码），用户到店由前台核销；**管理端核销台未做**，为已知遗留。
+- **影响范围**：扣减走 `user_points_summary` 与 `points_records` 流水，余额不足直接报错，不允许为负。
+
+### Q. P1：四个业务定时任务
+
+- **改了什么**：新增 `common/scheduler/` 六个文件：`AppointmentReminderService`（每日 20:05 发次日晚间提醒、10:05 发当日晨间提醒，对应内置模板 appointment_remind_evening/morning）、`AutoNoShowService`（每小时扫描，超时未到诊的 pending/confirmed 自动置 no_show）、`PointsExpireService`（每日，积分过期清零 + 提前 30 天提醒 points_expire_remind）、`MemberLevelReviewService`（年度复评，按消费重算等级），以及 `SchedulerSupport`（守护线程池 + 运行日志）与 `ScheduledNotifier`（优先发微信订阅消息、降级站内信兜底）。新增 `system_job_log` 表做执行记账，任务在 `AdminModule` 启动时装载。
+- **幂等设计**：`appointment` 表加「已提醒」标记位（`migrateAppointmentReminderFlags`），重复执行/重启不重复轰炸；年度复评无行级标记，用 `system_job_log` 里带年份的 jobKey（如 `member_level_review_2026`）占位，1 月 1 日当天反复重启也不会连降多级；积分过期列由 `migratePointsRecordExpiryColumns()` 补。
+- **影响范围**：微信订阅消息依赖真实模板 ID，未配置时全部降级站内信（见 R 节的公开模板接口）；任务用 daemon 线程池，进程退出不阻塞。**多实例部署时定时任务会多实例重复触发**，当前靠幂等记账兜底，后续应加分布式锁。
+
+### R. P1：推荐关系链路修复与订阅模板公开接口
+
+- **改了什么**：① 小程序 `app.ts`（+77 行）在 onLaunch/onShow 捕获 `query.ref`（分享卡片）与 `scene`（小程序码，需 decodeURIComponent 解析 k=v），暂存 globalData + localStorage（登录前可能多次冷启动），首页登录成功后消费并清空。② 后端 `ReferralService` 修正数据模型：推荐码只存在于**自引用占位行**（referrer_id = referee_id = 本人），绑定推荐关系一律**新增真实关系行**而非 UPDATE 占位行——旧逻辑会抹掉被推荐人自己的推荐码导致其后续无法分享；`SchemaMigration` 新增 `migrateReferralRelationIndex()` 建部分唯一索引 `ref_rel_uk_referee_real ON (referee_id) WHERE referrer_id <> referee_id`，保证一人最多一条真实关系。③ `ContentService`/`UserContentRoutes` 新增公开接口 `GET /api/v1/content/subscribe-templates`：只返回启用且已填真实微信模板 ID 的模板；ID 为空的播种占位不返回，小程序拿不到 ID 就不调 `wx.requestSubscribeMessage`（传空 ID 会直接报错），运营在消息模板配置里填入真实 ID 后无需发版即恢复订阅弹窗。
+- **影响范围**：推荐码查询从「按 referrerId 取 limit(1)」改为精确定位自引用行，修复「被推荐后查到的是推荐人的码」的错乱。
+
+### S. P2：管理端配置完整性
+
+#### S-1. 四张配置表 + 迁移 + 菜单权限 seed
+
+- **改了什么**：`AdminTables.kt`（+182 行）新增 7 张表：`recharge_tier`（充值档位）、`customer_tag` + `user_tag_rel`（客户标签与关联）、`admin_user_clinic`（账号-门店授权，见 S-5）、`points_goods`/`points_exchange_order`（积分商城，见 P 节）、`system_job_log`（定时任务记账）；消息模板表 `message_template` 同批启用。`DataSeedService.kt`（+183 行）播种三条内置消息模板（appointment_remind_evening/morning、points_expire_remind，**禁删且 templateKey 锁定**）、两个积分商品，以及菜单：充值档位（/member/tier）、会员等级（/member/level）、充值流水（/recharge/records）、客户标签（/customer/tags）、消息模板（/notification/template）、预约看板（/appointment/board），并补齐对应权限码（recharge_tier:list、member_level:list、recharge:list、customer_tag:list、message_template:list、appointment:create、clinic:data:all 等）。
+- **影响范围**：幂等机制沿用 ensureMenu/权限判重，已部署库重启即生效；新菜单只关联 super_admin，其他角色需在角色管理勾选。新页面路由由 DB 菜单 seed 的 component 路径经 import.meta.glob 自动映射。
+
+#### S-2. ClinicScope 门店数据隔离
+
+- **改了什么**：新增 `admin/auth/ClinicScope.kt`：从当前账号解析 `ClinicScope(all, clinicIds)`——拥有 `clinic:data:all` 权限或 super_admin 为全店；否则取 `admin_user_clinic_rel` 的授权列表；无授权为空范围。看板（DashboardRoutes/AdminDashboardService：预约/营收按业务行 clinicId、客户类指标按 primaryClinicId 过滤，空范围直接返回零值）、预约、客户、消费、充值流水等查询服务全部收窄为接受 scope；`VbenRoutes` 的 userInfo 下发 `clinicIds` 与全店标记供前端控制。
+- **原因**：多门店账号此前能看到全部门店数据，属越权；隔离必须在后端查询层做，前端隐藏入口不算数。
+- **影响范围**：**存量非 super_admin 账号需在用户管理页手工授权门店**，否则看不到任何业务数据（拥有 clinic:data:all 的角色豁免）。
+
+#### S-3. 配置化 CRUD（档位/等级/标签/模板 + 流水分页 + 客户打标）
+
+- **改了什么**：新增 `admin/service/MembershipAdminService.kt`、`admin/route/MembershipAdminRoutes.kt` 与 `dto/request/ManageRequests.kt`、`dto/response/ManageResponse.kt`，端点：`/recharge-tiers` GET/POST/PUT/DELETE、`/member-levels` GET/POST/PUT/DELETE（**有关联客户的等级删除返回 409**）、`/recharge-records` 分页 GET（keyword/clinicId/status/dateFrom/dateTo）、`/customer-tags` CRUD + `/customer-tags/users/{userId}` GET/PUT（客户打标）、`/message-templates` GET/POST/PUT/DELETE（内置模板禁删）。档位逻辑下沉 `common/RechargeTierService.kt` 供 C 端 /recharge/tiers 与管理端共享同一事实源。
+- **管理端页面**：新增 API 文件 `api/{recharge,member,customerTag,messageTemplate}.ts`；页面 `views/member/{tier,level}.vue + 两个 modal`、`views/recharge/records.vue`、`views/customer/tags.vue + tag-modal.vue`、`views/notification/template/{index,form-modal}.vue`；客户列表接入标签列与筛选，客户详情弹窗内可管理标签。
+
+#### S-4. 代客预约 + 日期范围筛选 + 时间轴看板
+
+- **改了什么**：`BusinessServices.kt` 新增 `AppointmentAdminService.createAppointment`：校验日期格式、ClinicScope 门店范围、客户/医生状态、排班匹配、容量冲突；代客预约**默认 confirmed、跳过爽约黑名单检查**（前台替客户操作不应被黑名单拦截）。`GET /api/admin/appointments` 增加 `dateFrom/dateTo`（yyyy-MM-dd）筛选。新增 `views/appointment/board.vue`（时间轴看板：单日单店一次查询、前端按医生/时段分组，可切天切店）与 `create-modal.vue`（代约弹窗）；预约列表页加日期范围筛选；`api/appointment.ts` 同步。
+- **实现注意**：Exposed r2dbc insert 块内列赋值必须用表名限定（`it[Appointments.userId]`），裸列名在多列同名场景编译报歧义。
+
+#### S-5. 账号门店多选授权
+
+- **改了什么**：`views/system/user/form-modal.vue` 增加「授权门店」多选（ApiSelect 绑定 getClinics，空选 = 无任何门店数据，help 文案说明 clinic:data:all 豁免）；新建/编辑均提交 clinicIds，编辑时全量覆盖（含清空）；`UserRequests`/`UserResponses` 增加 clinicIds 字段；用户列表展示授权情况。
+
+### T. 充值档位 / 会员等级弹窗前端校验（今日收尾）
+
+- **改了什么**：`views/member/tier-modal.vue` 与 `level-modal.vue` 在 Vben 表单只有 required/selectRequired 两条内置规则的限制下，采用两层校验：① `componentProps` 实时约束（maxLength+showCount、InputNumber 的 min/max/precision）；② 弹窗打开时拉取全量档位/等级缓存，`onConfirm` 中做类型转换与业务校验——档位：名称 1-30 字、门槛 (0, 999999]、赠送比例 0~1、排序 0-9999 整数、**门槛金额唯一**（以「分」四舍五入取整比较规避浮点误差，比对排除当前编辑项）；等级：编码 1-9999 整数且唯一、名称 1-20 字、升级门槛 0-9999999、折扣 0.01~1、权益说明 ≤500 字。文本提交前 trim，校验失败 `message.error` 并中断。
+- **原因与边界**：唯一性是后端也兜的约束，前端先拦可以少一次请求；拉取列表失败时静默降级为空数组（不阻塞操作，最终以后端校验为准）。
+
+### U. 文档与仓库清理
+
+- **新增 CODE_WIKI.md**（1684 行）：项目级代码知识库，覆盖整体架构、Ktor 模块布局/路由清单/实体表/鉴权、Vben monorepo 结构、小程序页面清单与运行方式，最后更新 2026-09-15。
+- **删除根目录 API.md 与 lefthook.yml**：前者为服务端初始化期的接口文档，已被 CODE_WIKI.md 与各路由实现取代；仓库实际未启用 lefthook 钩子，配置文件为死配置。
+- **.gitignore 增加 `.trae/`**：IDE/代理的本地工作目录（含实施计划等过程文档），不入库。
+
+### V. 验证结果与验证边界
+
+| 验证项 | 命令 | 结果 |
+| --- | --- | --- |
+| 后端编译 | `./gradlew :server:compileKotlin -q --console=plain` | 零输出（成功） |
+| 管理端类型 | `pnpm -F @vben/web-antd run typecheck` | EXIT=0 |
+| 小程序类型 | `npx tsc --noEmit -p tsconfig.json` | 前序批次已验证通过 |
+
+验证边界（上线前必须补的实测）：
+
+1. **微信真实链路未实测**：微信支付 `/notify` 回调需公网 HTTPS，本地无法接收；配齐凭证后必须做真机登录、真机支付、回调验签、退款对账测试。
+2. **定时任务未实跑**：四个任务只做了编译验证与幂等设计，触发时刻（20:05/10:05/整点/每日/1/1）未真实等待验证；多实例部署需补分布式锁。
+3. **e2e 未回归**：本轮未跑 Playwright，管理端新页面（看板/档位/等级/标签/模板/流水）与小程序签到/兑换仅有类型检查与编译保证。
+4. IDE Kotlin 插件（2.1.0）与 stdlib 2.4.0 / Exposed 1.3.1 元数据不匹配，GetDiagnostics 的 Unresolved reference 全为噪音，后端只认 gradle 编译结果。
+
+上线检查清单：① 配齐 application-prod.yaml 文件头所列全部环境变量；② 微信公众平台配置 request/uploadFile 合法域名与支付回调 HTTPS；③ 配置稳定的 CHECKIN_SIGNING_SECRET 后打印各门店签到码；④ 给非 super_admin 角色授权门店；⑤ 录入真实微信订阅消息模板 ID；⑥ 数据库迁移全部幂等（补列/索引/建表），重启自动执行。
+
 ## 2026-09-14
 
 本轮实施需求文档差距分析的**第 1 步**：补齐「小程序个人中心」与「首页内容配置」两条链路，并先清掉四个会在实施过程中直接绊住人的前置阻塞点（B1~B4，见 H 节）。改动跨三端：后端 6 新增 + 8 修改 + 1 迁移，管理端 6 新增 + 1 修改，小程序 16 新增 + 14 修改。

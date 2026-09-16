@@ -36,6 +36,26 @@ fun Application.userContentRoutes(contentService: ContentService) {
                     call.respond(ApiResponse<Unit>(code = code, message = message))
                 }
             }
+
+            /**
+             * 微信订阅消息模板配置（公开）。
+             * GET /api/v1/content/subscribe-templates
+             *
+             * 预约提交成功后，小程序用这里返回的 templateId 调 wx.requestSubscribeMessage
+             * 申请一次性订阅授权（晚间/晨间就诊提醒）。只返回已配置真实模板 ID 且启用的模板，
+             * 未配置时返回空数组，小程序侧不弹授权框、提醒降级站内信。
+             */
+            get("/subscribe-templates") {
+                try {
+                    val templates = contentService.getSubscribeTemplates()
+                    call.respond(ApiResponse(code = 0, message = "success", data = templates))
+                } catch (e: Exception) {
+                    val (code, message) = translateApiError(
+                        logger, "[Content]: 订阅模板配置", "加载失败，请稍后重试", e
+                    )
+                    call.respond(ApiResponse<Unit>(code = code, message = message))
+                }
+            }
         }
     }
 }

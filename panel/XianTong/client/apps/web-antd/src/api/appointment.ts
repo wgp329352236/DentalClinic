@@ -28,3 +28,18 @@ export async function cancelAppointment(id: number, reason?: string) {
 export async function updateMedicalRecord(id: number, data: any) {
   return requestClient.put(`/appointments/${id}/medical-record`, data);
 }
+
+// 代客预约（前台/客服替客户下单，后端默认 confirmed，并校验门店权限/排班/容量）
+export async function createAppointmentByAdmin(data: {
+  userId: number;
+  clinicId: number;
+  doctorId: number;
+  departmentId?: number;
+  /** yyyy-MM-dd */
+  appointmentDate: string;
+  /** HH:mm */
+  startTime: string;
+  remark?: string;
+}) {
+  return requestClient.post('/appointments', data);
+}

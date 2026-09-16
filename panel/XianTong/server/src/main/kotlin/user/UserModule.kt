@@ -2,6 +2,7 @@ package com.dentalclinic.user
 
 import com.dentalclinic.common.FileUploadService
 import com.dentalclinic.common.ReferralRewardService
+import com.dentalclinic.common.security.CheckinCodeService
 import com.dentalclinic.user.route.*
 import com.dentalclinic.user.service.*
 import io.ktor.server.application.*
@@ -28,11 +29,14 @@ fun Application.userRouting() {
     // Service instances (consistent with AdminModule pattern)
     val authService = UserAuthService()
     val profileService = UserProfileService()
-    val appointmentService = AppointmentService()
+    // 门店签到码验签；与 AdminModule 里签发实例读同一密钥配置，签名/验签等价
+    val checkinCodeService = CheckinCodeService()
+    val appointmentService = AppointmentService(checkinCodeService)
     val medicalRecordService = MedicalRecordService()
     val consumptionService = ConsumptionRecordService()
     val rechargeService = RechargeService()
     val pointsService = PointsService()
+    val pointsMallService = PointsMallService()
     // 推荐奖励发放与 admin 端消费录入链路共用同一实现（common 包）
     val referralRewardService = ReferralRewardService()
     val referralService = ReferralService(pointsService, referralRewardService)
@@ -57,6 +61,7 @@ fun Application.userRouting() {
         userMedicalRecordRoutes(medicalRecordService)
         userConsumptionRoutes(consumptionService)
         userPointsRoutes(pointsService)
+        userPointsMallRoutes(pointsMallService)
         userReferralRoutes(referralService)
         userCouponRoutes(couponService)
         userNotificationRoutes(notificationService)

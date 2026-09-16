@@ -32,6 +32,10 @@ object SchemaMigration {
                 migratePointsRuleUniqueActionType()
                 migrateDoctorScheduleUnique()
                 migrateUploadedFileOwnerType()
+                migrateRechargeOrderColumns()
+                migrateAppointmentReminderFlags()
+                migratePointsRecordExpiryColumns()
+                migrateReferralRelationIndex()
             }
         } catch (e: Exception) {
             logger.error("[SchemaMigration] 表结构迁移失败，请检查数据库权限", e)
@@ -153,6 +157,63 @@ object SchemaMigration {
      */
     private suspend fun R2dbcTransaction.migrateUploadedFileOwnerType() {
         addColumnIfMissing("uploaded_file", "owner_type", "VARCHAR(10) NOT NULL DEFAULT 'user'")
+    }
+
+    /**
+     * recharge_record 补微信支付所需列：out_trade_no（商户单号）、prepay_id（预支付会话）。
+     *
+     * 真实微信支付链路中，下单时写 out_trade_no/prepay_id，回调与主动查单都靠
+     * out_trade_no 唯一定位订单，因此还要补唯一索引——重复回调的幂等入账依赖它。
+     * 历史 mock 订单两列为 NULL，不影响唯一索引（PostgreSQL 中 NULL 互不相等）。
+     */
+    private suspend fun R2dbcTransaction.migrateRechargeOrderColumns() {
+        addColumnIfMissing("recharge_record", "out_trade_no", "VARCHAR(64) NULL")
+        addColumnIfMissing("recharge_record", "prepay_id", "VARCHAR(64) NULL")
+        exec("CREATE UNIQUE INDEX IF NOT EXISTS recharge_uk_out_trade_no " +
+            "ON recharge_record (out_trade_no)")
+    }
+
+    /**
+     * appointment 补预约提醒幂等标记列。
+     *
+     * 定时任务在就诊前一天 20:00、当天 10:00 各发一次订阅消息/站内信。
+     * 小时级 tick 会重复扫描到同一批预约，用 0/1 标记位保证每类提醒只发一次。
+     * 历史预约默认 0（未发送），若恰好命中发送窗口会补发，符合业务预期。
+     */
+    private suspend fun R2dbcTransaction.migrateAppointmentReminderFlags() {
+        addColumnIfMissing("appointment", "remind_evening_sent", "INTEGER NOT NULL DEFAULT 0")
+        addColumnIfMissing("appointment", "remind_morning_sent", "INTEGER NOT NULL DEFAULT 0")
+    }
+
+    /**
+     * points_record 补积分批次过期处理列。
+     *
+     * - expired_amount：该批次已被过期任务处理的积分量（达到 changeAmount 即整批处理完，幂等标记）。
+     * - expiry_notified_at：到期前 30 天提醒的发送时间，NULL 表示未提醒。
+     */
+    private suspend fun R2dbcTransaction.migratePointsRecordExpiryColumns() {
+        addColumnIfMissing("points_record", "expired_amount", "INTEGER NOT NULL DEFAULT 0")
+        addColumnIfMissing("points_record", "expiry_notified_at", "TIMESTAMP NULL")
+    }
+
+    /**
+     * referral_relation 唯一索引换型。
+     *
+     * 旧索引 ref_rel_uk_referee_id 是 referee_id 单列唯一：一个用户只能有一行，
+     * 于是「本人推荐码占位行（referrer=referee=本人）」与「真实推荐关系行」无法共存——
+     * 新模型下被推荐人既要保留自己的分享码占位行，又要有一行真实关系。
+     *
+     * 换成 PostgreSQL 部分唯一索引：只约束真实关系行（referrer_id <> referee_id），
+     * 保证一个用户最多被一个人推荐；占位行不参与约束，可与真实行并存。
+     * 旧库每个 referee 至多一行，替换不会因历史重复数据失败。
+     */
+    private suspend fun R2dbcTransaction.migrateReferralRelationIndex() {
+        exec("DROP INDEX IF EXISTS ref_rel_uk_referee_id")
+        exec(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ref_rel_uk_referee_real " +
+                "ON referral_relation (referee_id) WHERE referrer_id <> referee_id"
+        )
+        logger.info("[SchemaMigration] referral_relation 唯一索引已替换为部分唯一索引 ref_rel_uk_referee_real。")
     }
 
     /** 索引是否已存在。 */

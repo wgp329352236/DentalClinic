@@ -243,8 +243,13 @@ class ConsumptionAdminService(
         startDate: String?,
         endDate: String?,
         page: Int,
-        pageSize: Int
+        pageSize: Int,
+        scope: com.dentalclinic.admin.auth.ClinicScope = com.dentalclinic.admin.auth.ClinicScope.ALL
     ): ConsumptionListResponse = dbQuery {
+        // 门店数据隔离：无授权门店直接空结果
+        if (scope.isEmpty) {
+            return@dbQuery ConsumptionListResponse(list = emptyList(), total = 0, page = page, pageSize = pageSize)
+        }
         var query = ConsumptionRecords.selectAll()
 
         if (userId != null) {
@@ -252,6 +257,9 @@ class ConsumptionAdminService(
         }
         if (clinicId != null) {
             query = query.andWhere { ConsumptionRecords.clinicId eq clinicId }
+        }
+        if (!scope.all) {
+            query = query.andWhere { ConsumptionRecords.clinicId inList scope.clinicIds }
         }
         if (!startDate.isNullOrBlank()) {
             val start = LocalDate.parse(startDate).atStartOfDay()

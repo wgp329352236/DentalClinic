@@ -230,6 +230,18 @@ export function rescheduleAppointment(id: number, params: RescheduleParams) {
   return put<Appointment>(`/appointments/${id}/reschedule`, params)
 }
 
+/**
+ * 扫码到店签到
+ *
+ * POST /appointments/{id}/checkin，code 为门店前台张贴的 HMAC 签名码原文
+ * （格式 dc1.<clinicId>.<signature>，由后端签发，扫码后原样上报，不在本地解析）。
+ * 签名真伪、归属本人、门店营业状态、扫码门店与预约门店一致、状态、就诊当天均由后端校验；
+ * 业务失败（伪造码/非本人/门店不一致/非当天等）统一 reject，message 为后端文案。
+ */
+export function checkinAppointment(id: number, code: string) {
+  return post(`/appointments/${id}/checkin`, { code })
+}
+
 // ==================== 钱包/充值 ====================
 
 export interface WalletDetails {
@@ -277,8 +289,49 @@ export interface CreateRechargeParams {
   clinicId: number
 }
 
+/** wx.requestPayment 调起参数（字段名与微信 API 保持一致） */
+export interface WxPayParams {
+  timeStamp: string
+  nonceStr: string
+  package: string
+  signType: string
+  paySign: string
+}
+
+export interface CreateRechargeResult {
+  recordId: number
+  /** pending=需继续调起微信支付（payParams 有值）；success=已到账（mock 模式） */
+  status: 'pending' | 'success' | string
+  /** true 表示后端未配置真实微信支付、本次为模拟入账，仅本地/演示环境出现 */
+  mock: boolean
+  amount: number
+  bonusAmount: number
+  totalAdded?: number | null
+  pointsEarned?: number | null
+  paidAt?: string | null
+  payParams?: WxPayParams | null
+}
+
 export function createRecharge(params: CreateRechargeParams) {
-  return post<{ orderId: number; amount: number }>('/recharge/create', params)
+  return post<CreateRechargeResult>('/recharge/create', params)
+}
+
+export interface RechargeStatusResult {
+  recordId: number
+  /** pending/success/failed/refunded */
+  status: 'pending' | 'success' | 'failed' | 'refunded' | string
+  amount: number
+  bonusAmount: number
+  totalAdded?: number | null
+  pointsEarned?: number | null
+  paidAt?: string | null
+}
+
+/**
+ * 查询充值订单状态（调起支付后轮询；后端对 pending 单会主动向微信查单兜底）
+ */
+export function getRechargeStatus(recordId: number) {
+  return get<RechargeStatusResult>(`/recharge/${recordId}/status`)
 }
 
 // ==================== 积分 ====================
@@ -331,6 +384,57 @@ export function checkin() {
  */
 export function claimProfileCompleteReward() {
   return post<{ pointsEarned: number }>('/points/profile-complete')
+}
+
+// ==================== 积分商城 ====================
+
+export interface PointsGoods {
+  id: number
+  name: string
+  /** service=到店服务项目，item=实物商品 */
+  goodsType: 'service' | 'item' | string
+  pointsPrice: number
+  coverImage?: string | null
+  description?: string | null
+  /** -1 表示不限量 */
+  remainingStock: number
+  sortOrder: number
+}
+
+export interface ExchangeOrder {
+  id: number
+  goodsId: number
+  goodsName: string
+  pointsCost: number
+  /** 到店核销码（PE 开头） */
+  redeemCode: string
+  /** unused=待核销，used=已核销 */
+  status: 'unused' | 'used' | string
+  redeemedAt?: string | null
+  createdAt: string
+}
+
+/**
+ * 积分商城：上架商品列表
+ */
+export function getPointsGoods() {
+  return get<PointsGoods[]>('/points/mall/goods')
+}
+
+/**
+ * 积分商城：兑换商品（扣积分 + 生成核销码）
+ *
+ * 业务失败（已下架/售罄/积分不足）reject，message 为后端文案。
+ */
+export function exchangePointsGoods(goodsId: number) {
+  return post<ExchangeOrder>('/points/mall/exchange', { goodsId })
+}
+
+/**
+ * 积分商城：我的兑换订单（含已核销，最新在前）
+ */
+export function getMyExchangeOrders() {
+  return get<ExchangeOrder[]>('/points/mall/orders')
 }
 
 // ==================== 推荐 ====================
@@ -549,4 +653,22 @@ export interface HomeContent {
  */
 export function getHomeContent() {
   return get<HomeContent>('/content/home', undefined, false)
+}
+
+/** 订阅消息模板配置（管理端 message_templates 中已填微信 templateId 的启用模板） */
+export interface SubscribeTemplate {
+  /** 业务模板标识，如 appointment_remind_evening */
+  templateKey: string
+  /** 微信公众平台模板库中的模板 id */
+  templateId: string
+}
+
+/**
+ * 获取订阅消息模板列表（公开接口）
+ *
+ * 仅返回 status=1 且已配置微信 templateId 的模板；管理端占位（templateId 为空）
+ * 的模板不会下发，小程序拿到空数组时静默跳过 wx.requestSubscribeMessage。
+ */
+export function getSubscribeTemplates() {
+  return get<SubscribeTemplate[]>('/content/subscribe-templates', undefined, false)
 }

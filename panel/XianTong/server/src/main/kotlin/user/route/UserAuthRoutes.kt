@@ -2,6 +2,7 @@ package com.dentalclinic.user.route
 
 import com.dentalclinic.admin.dto.response.ApiResponse
 import com.dentalclinic.user.service.UserAuthService
+import com.dentalclinic.user.service.UserAuthService.WxProfile
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
@@ -25,7 +26,17 @@ fun Application.userAuthRoutes(authService: UserAuthService) {
             post("/wechat-login") {
                 try {
                     val request = call.receive<WechatLoginRequest>()
-                    val response = authService.wechatLogin(request.code)
+                    val response = authService.wechatLogin(
+                        code = request.code,
+                        phoneCode = request.phoneCode,
+                        profile = request.userInfo?.let {
+                            WxProfile(
+                                nickname = it.nickName,
+                                avatarUrl = it.avatarUrl,
+                                gender = it.gender
+                            )
+                        }
+                    )
 
                     call.respond(ApiResponse(
                         code = 0,
@@ -80,7 +91,20 @@ fun Application.userAuthRoutes(authService: UserAuthService) {
 }
 
 @Serializable
-data class WechatLoginRequest(val code: String)
+data class WechatLoginRequest(
+    val code: String,
+    // getPhoneNumber 回调的动态令牌（可选，未授权手机号时为空）
+    val phoneCode: String? = null,
+    // wx.getUserProfile 兜底资料（可选）
+    val userInfo: WxUserInfoDto? = null
+)
+
+@Serializable
+data class WxUserInfoDto(
+    val nickName: String? = null,
+    val avatarUrl: String? = null,
+    val gender: Int? = null
+)
 
 @Serializable
 data class RefreshTokenRequest(val refreshToken: String)

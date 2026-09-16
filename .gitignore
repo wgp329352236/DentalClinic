@@ -10,6 +10,7 @@ panel/XianTong/client/dist/
 *.iml
 .idea/
 .vscode/
+.trae/
 
 # OS
 .DS_Store

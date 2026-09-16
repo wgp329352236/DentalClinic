@@ -6,6 +6,7 @@ import { useVbenModal } from '@vben/common-ui';
 import { message } from 'ant-design-vue';
 
 import { useVbenForm } from '#/adapter/form';
+import { getClinics } from '#/api/clinic';
 import { createUser, getRoleList, updateUser } from '#/api/system';
 
 const emit = defineEmits<{ success: [] }>();
@@ -60,6 +61,23 @@ const [Form, formApi] = useVbenForm({
         style: 'width: 100%',
       },
     },
+    {
+      component: 'ApiSelect',
+      fieldName: 'clinicIds',
+      label: '授权门店',
+      // 数据隔离：不选 = 看不到任何门店业务数据；
+      // 角色含「全部门店数据」权限时该限制不生效
+      componentProps: {
+        mode: 'multiple',
+        allowClear: true,
+        api: getClinics,
+        labelField: 'name',
+        valueField: 'id',
+        placeholder: '不选则无任何门店数据权限',
+        style: 'width: 100%',
+      },
+      help: '控制该账号可见的门店业务数据；角色拥有「全部门店数据」权限时不生效',
+    },
   ],
 });
 
@@ -98,6 +116,7 @@ const [Modal, modalApi] = useVbenModal({
           displayName: data.row.displayName,
           email: data.row.email,
           roleIds: data.row.roles?.map((r: any) => r.id) || [],
+          clinicIds: data.row.clinicIds || [],
         });
       } else {
         formApi.resetForm();
@@ -110,13 +129,19 @@ const [Modal, modalApi] = useVbenModal({
     if (!valid) return;
     const values = await formApi.getValues();
     if (mode.value === 'create') {
-      await createUser(values);
+      await createUser({
+        ...values,
+        // 未选择时 ApiSelect 的值可能为 undefined，后端要求 List<Long>
+        clinicIds: values.clinicIds || [],
+      });
       message.success('创建成功');
     } else {
       await updateUser(editingId.value, {
         displayName: values.displayName,
         email: values.email,
         roleIds: values.roleIds,
+        // 编辑时全量覆盖门店授权（含清空为空数组）
+        clinicIds: values.clinicIds || [],
       });
       message.success('更新成功');
     }

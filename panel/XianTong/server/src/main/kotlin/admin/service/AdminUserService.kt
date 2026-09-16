@@ -5,6 +5,7 @@ import com.dentalclinic.admin.auth.PasswordEncoder
 import com.dentalclinic.admin.dto.response.RoleSimple
 import com.dentalclinic.admin.dto.response.UserListItem
 import com.dentalclinic.admin.entity.AdminRoles
+import com.dentalclinic.admin.entity.AdminUserClinics
 import com.dentalclinic.admin.entity.AdminUserRoles
 import com.dentalclinic.admin.entity.AdminUsers
 import com.dentalclinic.admin.util.ConflictException
@@ -44,6 +45,7 @@ class AdminUserService : BaseService() {
                     email = row[AdminUsers.email],
                     status = row[AdminUsers.status],
                     roles = getUserRoles(userId),
+                    clinicIds = getUserClinics(userId),
                     lastLoginAt = row[AdminUsers.lastLoginAt].toDisplayString(),
                     createdAt = row[AdminUsers.createdAt].toDisplayString() ?: ""
                 )
@@ -71,6 +73,7 @@ class AdminUserService : BaseService() {
             email = row[AdminUsers.email],
             status = row[AdminUsers.status],
             roles = getUserRoles(id),
+            clinicIds = getUserClinics(id),
             lastLoginAt = row[AdminUsers.lastLoginAt].toDisplayString(),
             createdAt = row[AdminUsers.createdAt].toDisplayString() ?: ""
         )
@@ -81,7 +84,8 @@ class AdminUserService : BaseService() {
         password: String,
         displayName: String,
         email: String?,
-        roleIds: List<Long>
+        roleIds: List<Long>,
+        clinicIds: List<Long> = emptyList()
     ): Long = dbQuery {
         // 唯一性检查
         val exists = AdminUsers.selectAll().where { AdminUsers.username eq username }.count() > 0
@@ -101,10 +105,25 @@ class AdminUserService : BaseService() {
             this[AdminUserRoles.roleId] = rId
         })
 
+        // 门店授权全量写入（去重防唯一索引冲突）
+        val distinctClinicIds = clinicIds.distinct()
+        if (distinctClinicIds.isNotEmpty()) {
+            AdminUserClinics.batchInsert(distinctClinicIds, body = { cId ->
+                this[AdminUserClinics.userId] = userId
+                this[AdminUserClinics.clinicId] = cId
+            })
+        }
+
         userId
     }
 
-    suspend fun updateUser(id: Long, displayName: String?, email: String?, roleIds: List<Long>?) = dbQuery {
+    suspend fun updateUser(
+        id: Long,
+        displayName: String?,
+        email: String?,
+        roleIds: List<Long>?,
+        clinicIds: List<Long>? = null
+    ) = dbQuery {
         AdminUsers.selectAll().where { AdminUsers.id eq id }.toList().singleOrNull()
             ?: throw NotFoundException("用户不存在")
 
@@ -119,6 +138,18 @@ class AdminUserService : BaseService() {
                 AdminUserRoles.batchInsert(roleIds, body = { rId ->
                     this[AdminUserRoles.userId] = id
                     this[AdminUserRoles.roleId] = rId
+                })
+            }
+        }
+
+        // 门店授权：非 null 即全量覆盖（含空列表=清空授权）
+        if (clinicIds != null) {
+            AdminUserClinics.deleteWhere { userId eq id }
+            val distinctClinicIds = clinicIds.distinct()
+            if (distinctClinicIds.isNotEmpty()) {
+                AdminUserClinics.batchInsert(distinctClinicIds, body = { cId ->
+                    this[AdminUserClinics.userId] = id
+                    this[AdminUserClinics.clinicId] = cId
                 })
             }
         }
@@ -150,9 +181,17 @@ class AdminUserService : BaseService() {
             ?: throw NotFoundException("用户不存在")
 
         AdminUserRoles.deleteWhere { userId eq id }
+        AdminUserClinics.deleteWhere { userId eq id }
         AdminUsers.deleteWhere { AdminUsers.id eq id }
         AdminRedisClient.deleteAllRefreshTokensForUser(id)
     }
+
+    /** 账号被授权的门店ID列表（数据隔离范围）。 */
+    private suspend fun getUserClinics(userId: Long): List<Long> =
+        AdminUserClinics.selectAll()
+            .where { AdminUserClinics.userId eq userId }
+            .toList()
+            .map { it[AdminUserClinics.clinicId] }
 
     private suspend fun getUserRoles(userId: Long): List<RoleSimple> {
         return AdminUserRoles

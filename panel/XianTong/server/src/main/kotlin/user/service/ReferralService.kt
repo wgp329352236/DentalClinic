@@ -27,11 +27,21 @@ class ReferralService(
     private val dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 
     /**
-     * Get or generate user's referral code.
+     * 获取或生成用户自己的推荐码。
+     *
+     * 推荐码只存在于「自引用占位行」（referrer_id = referee_id = 本人）上。
+     * 真实推荐关系行（referrer_id = 推荐人）只表达「谁推荐了谁」，不承载本人的分享码——
+     * 两类行可以并存（由部分唯一索引 ref_rel_uk_referee_real 保证一个用户最多只有一条真实关系）。
+     *
+     * 因此这里必须精确定位自引用行；用户被推荐后其 referrer_id 维度下会多出真实关系行，
+     * 只按 referrerId 取 limit(1) 可能拿到关系行而错把推荐人的码当成自己的码。
      */
     suspend fun getReferralCode(userId: Long): String = dbQuery {
         val existing = ReferralRelations.selectAll()
-            .where { ReferralRelations.referrerId eq userId }
+            .where {
+                (ReferralRelations.referrerId eq userId) and
+                (ReferralRelations.refereeId eq userId)
+            }
             .limit(1)
             .toList()
             .singleOrNull()
@@ -96,18 +106,39 @@ class ReferralService(
     }
 
     /**
-     * Register a new user with referral code.
-     * Single atomic transaction — all checks and inserts are consistent.
+     * 新用户凭推荐码绑定推荐关系。
+     *
+     * 数据模型（与历史版本不同）：自引用占位行（本人推荐码）与真实推荐关系行并存。
+     * - 被推荐人可能先打开过自己的推荐页（已有占位行），也可能完全没访问过（无行），
+     *   两种情况下绑定关系都是**新增一条真实关系行**，不再 UPDATE 占位行——
+     *   否则会抹掉被推荐人自己的推荐码，导致其后续分享链接失效。
+     * - 一个用户最多一条真实关系行，由部分唯一索引
+     *   `ref_rel_uk_referee_real ON (referee_id) WHERE referrer_id <> referee_id` 兜底。
+     *
+     * 绑定成功同时回写 user.source_type='referral' / referred_by（仅当来源仍是默认 self，
+     * 不覆盖门店录入 store_entry 等更高可信来源）。
+     * 全程单事务。
      */
     suspend fun registerWithReferral(refereeId: Long, referralCode: String): ReferralResult = dbQuery {
-        // Validate referral code
-        val codeRecord = ReferralRelations.selectAll()
-            .where { ReferralRelations.referralCode eq referralCode }
+        // 推荐码以自引用占位行为准；兼容老数据（码只挂在关系行上）再回退一次全表查
+        val codeOwner = ReferralRelations.selectAll()
+            .where {
+                (ReferralRelations.referralCode eq referralCode) and
+                (ReferralRelations.referrerId eq ReferralRelations.refereeId)
+            }
             .toList()
             .firstOrNull()
+            ?: ReferralRelations.selectAll()
+                .where { ReferralRelations.referralCode eq referralCode }
+                .toList()
+                .firstOrNull()
             ?: return@dbQuery ReferralResult.Error("无效的推荐码")
 
-        val referrerId = codeRecord[ReferralRelations.referrerId]
+        val referrerId = codeOwner[ReferralRelations.referrerId]
+
+        if (referrerId == refereeId) {
+            return@dbQuery ReferralResult.Error("不能使用自己的推荐码")
+        }
 
         // Check referrer status
         val referrerStatus = Users.selectAll()
@@ -120,11 +151,7 @@ class ReferralService(
             return@dbQuery ReferralResult.Error("推荐人账户已被禁用")
         }
 
-        if (referrerId == refereeId) {
-            return@dbQuery ReferralResult.Error("不能使用自己的推荐码")
-        }
-
-        // Check if already referred
+        // 被推荐人是否已存在真实推荐关系（占位行不算）
         val alreadyReferred = ReferralRelations.selectAll()
             .where { ReferralRelations.refereeId eq refereeId }
             .toList()
@@ -136,13 +163,22 @@ class ReferralService(
             return@dbQuery ReferralResult.Error("该用户已被推荐")
         }
 
-        // All checks passed, create the relation
+        // 新增真实关系行（与本人占位行并存）
         ReferralRelations.insert {
             it[ReferralRelations.referrerId] = referrerId
             it[ReferralRelations.refereeId] = refereeId
             it[ReferralRelations.referralCode] = referralCode
             it[ReferralRelations.registeredAt] = LocalDateTime.now()
             it[ReferralRelations.rewardStatus] = "pending"
+        }
+
+        // 回写用户来源：只在默认 self 时覆盖，不与门店录入(store_entry)等高可信来源抢可信度。
+        // 条件更新 flipped=0 时静默跳过：推荐关系行已落库，绑定本身仍然成功。
+        Users.update({
+            (Users.id eq refereeId) and (Users.sourceType eq "self")
+        }) {
+            it[Users.referredBy] = referrerId
+            it[Users.sourceType] = "referral"
         }
 
         awardRegistrationReward(referrerId, refereeId)
