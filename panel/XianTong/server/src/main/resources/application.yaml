@@ -54,12 +54,20 @@ user:
 # 所有项留空时相关能力自动降级为 mock（仅限本地联调，启动日志会打 WARN）。
 # 生产环境建议用环境变量注入，避免凭证进配置文件：
 #   WECHAT_APP_ID / WECHAT_APP_SECRET
+#   WECHAT_WXA_ENV_VERSION    # 可选：小程序码目标版本 release/trial/develop，默认 release
 #   WECHAT_MCH_ID / WECHAT_API_V3_KEY / WECHAT_MERCHANT_SERIAL
 #   WECHAT_PRIVATE_KEY 或 WECHAT_PRIVATE_KEY_PATH / WECHAT_PAY_NOTIFY_URL
+#
+# 推广二维码依赖 appId/appSecret：配置齐全后管理端「优惠券模板 → 推广码」生成真实小程序码
+# （扫码直达小程序优惠券页自动领 2 张券，scene=promo=<templateId>）；未配置则降级为普通二维码，
+# 客户微信内长按识别/扫一扫进入小程序走同一领券链路。小程序需先在微信公众平台完成发布/体验版上传，
+# env_version 须与投放目标一致，否则扫码会提示「页面不存在」。
 wechat:
   miniApp:
     appId: ""
     appSecret: ""
+    # 小程序码目标版本：release=线上版（正式投放）、trial=体验版、develop=开发版
+    wxaEnvVersion: "release"
   pay:
     mchId: ""
     apiV3Key: ""              # APIv3 密钥，固定 32 字节

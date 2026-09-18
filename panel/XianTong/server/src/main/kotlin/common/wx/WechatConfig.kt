@@ -21,10 +21,20 @@ object WechatConfig {
     /** 小程序登录/用户能力配置。 */
     data class MiniApp(
         val appId: String,
-        val appSecret: String
+        val appSecret: String,
+        /**
+         * 小程序码（getwxacodeunlimit）生成的目标版本：
+         * release=线上版（默认，扫码即用）、trial=体验版、develop=开发版。
+         * 开发/联调阶段设 trial/develop，正式投放必须 release。
+         */
+        val wxaEnvVersion: String
     ) {
         /** 两项都配齐才启用真实 code2session，任一项缺失都走 mock。 */
         val enabled: Boolean = appId.isNotBlank() && appSecret.isNotBlank()
+
+        /** 小程序码环境版本白名单校验，非法值回落线上版。 */
+        val safeWxaEnvVersion: String =
+            if (wxaEnvVersion in listOf("release", "trial", "develop")) wxaEnvVersion else "release"
     }
 
     /**
@@ -53,11 +63,13 @@ object WechatConfig {
     val miniApp: MiniApp by lazy {
         val appId = resolve("WECHAT_APP_ID", "wechat.miniApp.appId")
         val appSecret = resolve("WECHAT_APP_SECRET", "wechat.miniApp.appSecret")
-        val cfg = MiniApp(appId, appSecret)
+        val wxaEnvVersion = resolve("WECHAT_WXA_ENV_VERSION", "wechat.miniApp.wxaEnvVersion")
+            .ifBlank { "release" }
+        val cfg = MiniApp(appId, appSecret, wxaEnvVersion)
         if (!cfg.enabled) {
             logger.warn(
                 "[Wechat]: 未配置 wechat.miniApp.appId/appSecret（或环境变量 WECHAT_APP_ID/WECHAT_APP_SECRET），" +
-                    "微信登录降级为 mock_openid，仅限本地开发，上线前必须配置真实凭证"
+                    "微信登录降级为 mock_openid，小程序码/推送等依赖凭证的能力同步降级，仅限本地开发，上线前必须配置真实凭证"
             )
         }
         cfg

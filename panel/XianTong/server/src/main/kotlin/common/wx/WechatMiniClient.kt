@@ -199,7 +199,8 @@ object WechatMiniClient {
             put("scene", scene)
             put("page", page)
             put("check_path", false)
-            put("env_version", "release")
+            // release=线上版（正式投放）、trial=体验版、develop=开发版；由配置控制，非法回落 release
+            put("env_version", cfg.safeWxaEnvVersion)
         }
 
         val response = try {
