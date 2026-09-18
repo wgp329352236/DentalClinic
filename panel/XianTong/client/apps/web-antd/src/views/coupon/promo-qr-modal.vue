@@ -6,6 +6,8 @@ import { useVbenModal } from '@vben/common-ui';
 import { Button, message, Spin } from 'ant-design-vue';
 import { toDataURL } from 'qrcode';
 
+import { getCouponPromoQr } from '#/api/coupon';
+
 interface CouponRow {
   id: number;
   name: string;
@@ -13,8 +15,9 @@ interface CouponRow {
 }
 
 const coupon = ref<CouponRow>({ id: 0, name: '' });
-/** 写入二维码的推广参数（promo=<templateId>），小程序扫码后按此领券 */
-const promoParam = ref('');
+/** 展示给用户的主提示（小程序码/普通二维码的差异说明） */
+const hint = ref('');
+/** 最终二维码/小程序码 dataURL（base64 图片或 qrcode 生成的 PNG） */
 const qrDataUrl = ref('');
 const generating = ref(false);
 
@@ -31,20 +34,25 @@ const [Modal, modalApi] = useVbenModal({
     }
 
     coupon.value = row;
-    promoParam.value = '';
+    hint.value = '';
     qrDataUrl.value = '';
     modalApi.setState({ confirmText: '关闭', showCancelButton: false });
 
     generating.value = true;
     try {
-      // 二维码承载场景参数 promo=<templateId>：微信扫码进入小程序后，
-      // 由小程序解析 scene/query 中 promo 值并调用推广领券接口（每人限领 2 张）
-      promoParam.value = `promo=${row.id}`;
-      qrDataUrl.value = await toDataURL(promoParam.value, {
-        errorCorrectionLevel: 'M',
-        margin: 1,
-        width: 320,
-      });
+      const result = await getCouponPromoQr(row.id);
+      if (result.mode === 'miniprogram_code' && result.imageBase64) {
+        // 微信凭证已配置：后端返回真实小程序码（扫码直达小程序，scene=promo=<id>）
+        qrDataUrl.value = `data:image/png;base64,${result.imageBase64}`;
+      } else {
+        // 未配置凭证：后端返回 promo=<templateId> 明文，前端生成普通二维码兜底
+        qrDataUrl.value = await toDataURL(result.payload || `promo=${row.id}`, {
+          errorCorrectionLevel: 'M',
+          margin: 1,
+          width: 320,
+        });
+      }
+      hint.value = result.hint;
     } catch (error: any) {
       message.error(error?.message || '推广码生成失败，请重试');
       modalApi.close();
@@ -111,10 +119,7 @@ function printQr() {
         面额 ¥{{ coupon.faceValue }} · 扫码领 2 张
       </div>
       <div class="mt-3 text-xs leading-5 text-gray-400">
-        打印张贴或线上投放，客户微信扫一扫进入小程序，自动领取 2 张该优惠券（每人限领一次）
-      </div>
-      <div class="mt-1 break-all px-2 text-center font-mono text-xs text-gray-300">
-        {{ promoParam }}
+        {{ hint }}
       </div>
 
       <div class="mt-4 flex gap-3">

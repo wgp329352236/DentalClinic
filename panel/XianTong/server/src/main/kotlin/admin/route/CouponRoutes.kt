@@ -7,8 +7,26 @@ import com.dentalclinic.admin.service.AdminCouponService
 import com.dentalclinic.admin.service.ScanRedeemRequest
 import com.dentalclinic.admin.util.ValidationException
 import com.dentalclinic.admin.util.ok
+import com.dentalclinic.common.wx.WechatMiniClient
 import io.ktor.server.request.*
 import io.ktor.server.routing.*
+import kotlinx.serialization.Serializable
+import java.util.Base64
+
+/**
+ * 推广二维码响应。
+ * mode=miniprogram_code 时携带 imageBase64（微信小程序码图片）；
+ * mode=plain_text 时携带 payload（promo=<templateId>），由前端 qrcode 生成普通二维码兜底。
+ */
+@Serializable
+data class PromoQrResponse(
+    val mode: String,
+    val imageBase64: String? = null,
+    val payload: String? = null,
+    val name: String,
+    val faceValue: Double,
+    val hint: String
+)
 
 /**
  * 后台优惠券管理路由。
@@ -21,6 +39,51 @@ fun Route.couponRoutes(couponService: AdminCouponService) {
                 get("/templates") {
                     val templates = couponService.getCouponTemplates()
                     call.ok(templates)
+                }
+            }
+
+            /**
+             * GET /api/admin/coupons/{id}/promo-qr - 获取推广二维码。
+             *
+             * 微信凭证（appId/appSecret）配置齐全时返回真实小程序码（图片 base64，
+             * 扫码直达小程序优惠券页并携带 scene=promo=<id>）；未配置或微信侧失败时
+             * 返回明文 payload（promo=<id>），由前端 qrcode 生成普通二维码兜底，
+             * 保证「扫码领 2 张券」链路在本地无凭证环境仍可联调。
+             */
+            requirePermission("coupon:view") {
+                get("/{id}/promo-qr") {
+                    val id = call.parameters["id"]?.toLongOrNull()
+                        ?: throw ValidationException("无效的模板ID")
+
+                    val template = couponService.getCouponTemplates()
+                        .firstOrNull { it.id == id }
+                        ?: throw ValidationException("优惠券模板不存在")
+
+                    val scene = "promo=$id"
+                    val page = "pages/coupon/coupon"
+                    val image = WechatMiniClient.getWxaCodeUnlimit(scene, page)
+
+                    if (image != null) {
+                        call.ok(
+                            PromoQrResponse(
+                                mode = "miniprogram_code",
+                                imageBase64 = Base64.getEncoder().encodeToString(image),
+                                name = template.name,
+                                faceValue = template.faceValue,
+                                hint = "微信小程序码：客户微信扫一扫直接进入小程序领取 2 张券"
+                            )
+                        )
+                    } else {
+                        call.ok(
+                            PromoQrResponse(
+                                mode = "plain_text",
+                                payload = scene,
+                                name = template.name,
+                                faceValue = template.faceValue,
+                                hint = "未配置微信小程序凭证，使用普通二维码：打印张贴后客户在微信内长按识别/扫一扫进入小程序领取 2 张券"
+                            )
+                        )
+                    }
                 }
             }
 

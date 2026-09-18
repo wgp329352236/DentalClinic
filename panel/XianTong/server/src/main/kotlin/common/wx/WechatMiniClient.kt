@@ -7,6 +7,7 @@ import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
+import io.ktor.client.statement.readRawBytes
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import kotlinx.coroutines.sync.Mutex
@@ -172,6 +173,69 @@ object WechatMiniClient {
         return false
     }
 
+    /**
+     * 生成小程序码（wxa/getwxacodeunlimit，扫码直接打开小程序指定页）。
+     *
+     * 文档：https://developers.weixin.qq.com/miniprogram/dev/OpenApiDoc/qrcode-link/getwxacodeunlimit.html
+     *
+     * @param scene 场景参数（≤32 个可见字符，不可含中文；扫码进入后在小程序 onLaunch/onShow
+     *              的 options.scene 收到，形如 "promo=9"）
+     * @param page 落地页路径（须为 app.json 已注册页面，不带 query）
+     * @return 小程序码 PNG 图片字节；未配置微信凭证或微信侧失败返回 null，
+     *         由调用方降级为普通二维码（不抛异常，保证功能可用）
+     */
+    suspend fun getWxaCodeUnlimit(scene: String, page: String): ByteArray? {
+        val cfg = WechatConfig.miniApp
+        if (!cfg.enabled) {
+            logger.info("[Wechat]: 未配置小程序凭证，小程序码生成降级为普通二维码")
+            return null
+        }
+        if (scene.isBlank() || scene.length > 32 || page.isBlank()) {
+            logger.warn("[Wechat]: 小程序码参数不合法 scene='{}' page='{}'", scene, page)
+            return null
+        }
+
+        val body = buildJsonObject {
+            put("scene", scene)
+            put("page", page)
+            put("check_path", false)
+            put("env_version", "release")
+        }
+
+        val response = try {
+            val token = getAccessToken()
+            client.post("$API_BASE/wxa/getwxacodeunlimit?access_token=$token") {
+                contentType(ContentType.Application.Json)
+                setBody(body.toString())
+            }
+        } catch (e: Exception) {
+            logger.warn("[Wechat]: 小程序码网络异常 scene={}: {}", scene, e.message)
+            return null
+        }
+
+        val bytes = try {
+            response.readRawBytes()
+        } catch (e: Exception) {
+            logger.warn("[Wechat]: 小程序码响应读取失败 scene={}: {}", scene, e.message)
+            return null
+        }
+        if (bytes.isEmpty()) return null
+
+        // 失败时微信返回 JSON（{errcode,errmsg}），成功时返回图片二进制：按首字节区分
+        if (bytes[0] == '{'.code.toByte() || bytes[0] == '['.code.toByte()) {
+            val text = String(bytes, Charsets.UTF_8)
+            val resp = try {
+                json.decodeFromString<WxaCodeResp>(text)
+            } catch (e: Exception) {
+                logger.warn("[Wechat]: 小程序码响应解析失败: {}", text.take(200))
+                return null
+            }
+            logger.warn("[Wechat]: 小程序码生成失败 errcode={} errmsg={}", resp.errcode, resp.errmsg)
+            return null
+        }
+        return bytes
+    }
+
     /** 获取（必要时刷新）全局 access_token，协程锁保证并发下只刷新一次。 */
     private suspend fun getAccessToken(): String {
         cachedAccessToken?.let {
@@ -243,6 +307,12 @@ object WechatMiniClient {
 
     @Serializable
     private data class SubscribeSendResp(
+        val errcode: Int? = null,
+        val errmsg: String? = null
+    )
+
+    @Serializable
+    private data class WxaCodeResp(
         val errcode: Int? = null,
         val errmsg: String? = null
     )
