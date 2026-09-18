@@ -9,6 +9,8 @@
     "pages/referral/referral",
     "pages/profile/profile",
     "pages/profile-edit/profile-edit",
+    "pages/coupon/coupon",
+    "pages/mall/mall",
     "pages/medical-records/medical-records",
     "pages/medical-record-detail/medical-record-detail",
     "pages/messages/messages"

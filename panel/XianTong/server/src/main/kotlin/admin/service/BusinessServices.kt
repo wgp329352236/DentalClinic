@@ -469,6 +469,60 @@ class AppointmentAdminService : BaseService() {
         }
     }
 
+    /**
+     * 确认预约（仅 pending 状态可确认，流转到 confirmed）。
+     *
+     * 与 updateStatus 的区别：显式校验当前状态，避免误把已取消/已完成的单改回 confirmed，
+     * 给前台一个语义清晰的「确认」动作而非通用状态变更。
+     */
+    suspend fun confirmAppointment(id: Long): Unit = dbQuery {
+        val appointment = Appointments.selectAll()
+            .where { Appointments.id eq id }
+            .toList()
+            .firstOrNull()
+            ?: throw ValidationException("预约不存在")
+        val currentStatus = appointment[Appointments.status]
+        if (currentStatus != "pending") {
+            throw ValidationException("当前状态「${statusText(currentStatus)}」不可确认，仅待确认的预约可确认")
+        }
+        Appointments.update({ Appointments.id eq id }) {
+            it[status] = "confirmed"
+        }
+    }
+
+    /**
+     * 拒绝预约（仅 pending 状态可拒绝，流转到 cancelled，必须填写拒绝原因）。
+     */
+    suspend fun rejectAppointment(id: Long, reason: String): Unit = dbQuery {
+        if (reason.isBlank()) {
+            throw ValidationException("请填写拒绝原因")
+        }
+        val appointment = Appointments.selectAll()
+            .where { Appointments.id eq id }
+            .toList()
+            .firstOrNull()
+            ?: throw ValidationException("预约不存在")
+        val currentStatus = appointment[Appointments.status]
+        if (currentStatus != "pending") {
+            throw ValidationException("当前状态「${statusText(currentStatus)}」不可拒绝，仅待确认的预约可拒绝")
+        }
+        Appointments.update({ Appointments.id eq id }) {
+            it[status] = "cancelled"
+            it[cancelReason] = reason
+            it[cancelledAt] = LocalDateTime.now()
+        }
+    }
+
+    private fun statusText(status: String): String = when (status) {
+        "pending" -> "待确认"
+        "confirmed" -> "已确认"
+        "arrived" -> "已到店"
+        "completed" -> "已完成"
+        "cancelled" -> "已取消"
+        "no_show" -> "爽约"
+        else -> status
+    }
+
     suspend fun updateMedicalRecord(id: Long, req: MedicalRecordUpdateRequest): Unit = dbQuery {
         Appointments.update({ Appointments.id eq id }) {
             if (req.diagnosis != null) {

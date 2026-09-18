@@ -232,6 +232,27 @@ fun Route.appointmentAdminRoutes(appointmentService: AppointmentAdminService) {
                 }
             }
 
+            // PUT /api/admin/appointments/{id}/confirm - 确认预约（仅 pending 可确认）
+            requirePermission("appointment:update") {
+                put("/{id}/confirm") {
+                    val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的ID")
+                    appointmentService.confirmAppointment(id)
+                    call.ok<Unit>(message = "预约已确认")
+                }
+            }
+
+            // PUT /api/admin/appointments/{id}/reject - 拒绝预约（仅 pending 可拒绝，需填原因）
+            requirePermission("appointment:update") {
+                put("/{id}/reject") {
+                    val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的ID")
+                    val req = call.receive<Map<String, String?>>()
+                    val reason = req["reason"]?.trim().orEmpty()
+                    if (reason.isEmpty()) throw ValidationException("请填写拒绝原因")
+                    appointmentService.rejectAppointment(id, reason)
+                    call.ok<Unit>(message = "预约已拒绝")
+                }
+            }
+
             // GET /api/admin/appointments/{id} - 查看预约详情（含病历）
             requirePermission("appointment:view") {
                 get("/{id}") {

@@ -208,6 +208,10 @@ object SchemaMigration {
      * 旧库每个 referee 至多一行，替换不会因历史重复数据失败。
      */
     private suspend fun R2dbcTransaction.migrateReferralRelationIndex() {
+        // 先删约束再删独立索引：旧库中 ref_rel_uk_referee_id 可能是唯一约束
+        // （PostgreSQL 不允许直接 DROP INDEX 被约束引用的索引），也可能只是普通唯一索引。
+        // 两条语句都带 IF EXISTS，约束/索引/两者同时存在三种情况均安全，全部幂等。
+        exec("ALTER TABLE referral_relation DROP CONSTRAINT IF EXISTS ref_rel_uk_referee_id")
         exec("DROP INDEX IF EXISTS ref_rel_uk_referee_id")
         exec(
             "CREATE UNIQUE INDEX IF NOT EXISTS ref_rel_uk_referee_real " +

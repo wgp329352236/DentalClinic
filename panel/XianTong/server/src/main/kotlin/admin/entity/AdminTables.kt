@@ -739,7 +739,8 @@ object ReferralRelations : Table("referral_relation") {
     override val primaryKey = PrimaryKey(id)
 
     init {
-        uniqueIndex("ref_rel_uk_referee_id", refereeId)
+        // 注意：referee_id 的单列唯一约束已由 SchemaMigration 换型为部分唯一索引
+        // ref_rel_uk_referee_real（referrer_id <> referee_id），此处不再声明旧唯一索引。
         index("ref_rel_referral_rel_idx_referrer_id", false, referrerId)
         index("ref_rel_referral_rel_idx_referral_code", false, referralCode)
     }

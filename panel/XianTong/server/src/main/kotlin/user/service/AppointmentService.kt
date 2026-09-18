@@ -2,6 +2,7 @@ package com.dentalclinic.user.service
 
 import com.dentalclinic.admin.entity.*
 import com.dentalclinic.common.BaseService
+import com.dentalclinic.common.config.AppointmentConfig
 import com.dentalclinic.common.security.CheckinCodeService
 import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.Serializable
@@ -23,15 +24,6 @@ class AppointmentService(
     /** 门店签到码验签：只有后端签发的 HMAC 码才能解出可信 clinicId */
     private val checkinCodeService: CheckinCodeService
 ) : BaseService() {
-
-    companion object {
-        /** 距就诊开始不足该小时数，用户不可自助取消/改约（需求 2.x：就诊前 2 小时规则） */
-        private const val CANCEL_DEADLINE_MINUTES = 120L
-        /** 爽约黑名单：窗口内累计爽约达到此次数即禁止在线预约 */
-        private const val NO_SHOW_LIMIT = 3
-        /** 爽约黑名单窗口天数（3 次爽约限预约 30 天） */
-        private const val NO_SHOW_WINDOW_DAYS = 30L
-    }
 
     /**
      * Get all active clinics.
@@ -189,10 +181,19 @@ class AppointmentService(
         val formatter = DateTimeFormatter.ofPattern("HH:mm")
         val dayOfWeek = appointmentDate.dayOfWeek.value
 
+        // 是否允许当天预约（默认允许）
+        if (!AppointmentConfig.allowSameDay() && appointmentDate.isEqual(LocalDate.now())) {
+            return AppointmentResult.Error("暂不支持当天预约，请选择未来日期")
+        }
+
+        // 爽约黑名单阈值与窗口天数由系统配置下发（默认 3 次 / 30 天）
+        val noShowLimit = AppointmentConfig.noShowLimit()
+        val noShowWindowDays = AppointmentConfig.noShowWindowDays()
+
         return dbQuery {
-            // 爽约黑名单：近 30 天内累计 no_show 达到 3 次的用户禁止在线预约（需求：3 次爽约限预约 30 天）。
+            // 爽约黑名单：窗口内累计 no_show 达到阈值的用户禁止在线预约（需求：3 次爽约限预约 30 天）。
             // 按 appointment_date 计数实际爽约单，不依赖可能失修的 no_show_count 冗余列。
-            val noShowSince = LocalDate.now().minusDays(NO_SHOW_WINDOW_DAYS)
+            val noShowSince = LocalDate.now().minusDays(noShowWindowDays)
             val recentNoShowCount = Appointments.selectAll()
                 .where {
                     (Appointments.userId eq userId) and
@@ -200,9 +201,9 @@ class AppointmentService(
                     (Appointments.appointmentDate greaterEq noShowSince)
                 }
                 .count()
-            if (recentNoShowCount >= NO_SHOW_LIMIT) {
+            if (recentNoShowCount >= noShowLimit) {
                 return@dbQuery AppointmentResult.Error(
-                    "您近30天内已有${NO_SHOW_LIMIT}次爽约记录，暂无法在线预约，请联系门店处理"
+                    "您近${noShowWindowDays}天内已有${noShowLimit}次爽约记录，暂无法在线预约，请联系门店处理"
                 )
             }
 
@@ -388,14 +389,17 @@ class AppointmentService(
     }
 
     /**
-     * 距就诊开始是否已不足 2 小时（开始时间已过也视为不足，禁止自助取消/改约）。
-     * 恰好 2 小时仍允许（严格 <），给前台口径留一分钟余量。
+     * 距就诊开始是否已不足 [deadlineMinutes] 分钟（开始时间已过也视为不足，禁止自助取消/改约）。
+     * 恰好等于 deadlineMinutes 仍允许（严格 <），给前台口径留一分钟余量。
      * 历史脏数据（时间格式损坏）不阻断，返回 false 交由状态机兜底。
+     *
+     * deadlineMinutes 由 [AppointmentConfig.cancelDeadlineMinutes] 下发（默认 120 = 2 小时），
+     * 不再硬编码，管理端「系统配置」可热修改。
      */
-    private fun isWithinCancelDeadline(date: LocalDate, startTime: String): Boolean =
+    private fun isWithinCancelDeadline(date: LocalDate, startTime: String, deadlineMinutes: Long): Boolean =
         try {
             val start = LocalDateTime.of(date, LocalTime.parse(startTime))
-            Duration.between(LocalDateTime.now(), start).toMinutes() < CANCEL_DEADLINE_MINUTES
+            Duration.between(LocalDateTime.now(), start).toMinutes() < deadlineMinutes
         } catch (e: DateTimeParseException) {
             false
         }
@@ -403,7 +407,9 @@ class AppointmentService(
     /**
      * Cancel an appointment.
      */
-    suspend fun cancelAppointment(userId: Long, appointmentId: Long): AppointmentResult = dbQuery {
+    suspend fun cancelAppointment(userId: Long, appointmentId: Long): AppointmentResult {
+        val deadlineMinutes = AppointmentConfig.cancelDeadlineMinutes()
+        return dbQuery {
         val appointment = Appointments.selectAll()
             .where {
                 (Appointments.id eq appointmentId) and
@@ -424,13 +430,14 @@ class AppointmentService(
                     AppointmentResult.Error("预约已完成，无法取消")
                 }
                 else -> {
-                    // 就诊前 2 小时内不可自助取消，需联系门店（门店侧管理端不受此限）
+                    // 就诊前 N 分钟内不可自助取消，需联系门店（门店侧管理端不受此限）
                     if (isWithinCancelDeadline(
                             appointment[Appointments.appointmentDate],
-                            appointment[Appointments.startTime]
+                            appointment[Appointments.startTime],
+                            deadlineMinutes
                         )
                     ) {
-                        AppointmentResult.Error("距就诊不足2小时，无法自助取消，请联系门店")
+                        AppointmentResult.Error("距就诊不足${deadlineMinutes / 60}小时，无法自助取消，请联系门店")
                     } else {
                         // Update status
                         Appointments.update({ Appointments.id eq appointmentId }) {
@@ -443,6 +450,7 @@ class AppointmentService(
                     }
                 }
             }
+        }
         }
     }
 
@@ -468,6 +476,8 @@ class AppointmentService(
             return AppointmentResult.Error("不能改约到过去的日期")
         }
 
+        val deadlineMinutes = AppointmentConfig.cancelDeadlineMinutes()
+
         // Pre-check appointment exists and status
         val preCheck = dbQuery {
             Appointments.selectAll()
@@ -491,16 +501,17 @@ class AppointmentService(
             return AppointmentResult.Error("预约已完成")
         }
 
-        // 就诊前 2 小时内不可自助改约（与取消同规则）；已到店签到的单也不允许改约
+        // 就诊前 N 分钟内不可自助改约（与取消同规则）；已到店签到的单也不允许改约
         if (status == "arrived") {
             return AppointmentResult.Error("您已到店签到，无法改约")
         }
         if (isWithinCancelDeadline(
                 preCheck[Appointments.appointmentDate],
-                preCheck[Appointments.startTime]
+                preCheck[Appointments.startTime],
+                deadlineMinutes
             )
         ) {
-            return AppointmentResult.Error("距就诊不足2小时，无法自助改约，请联系门店")
+            return AppointmentResult.Error("距就诊不足${deadlineMinutes / 60}小时，无法自助改约，请联系门店")
         }
 
         val doctorId = preCheck[Appointments.doctorId]

@@ -15,6 +15,8 @@ fun Application.configureRouting() {
         allowHost("localhost:5173")       // Vite dev server default port
         allowHost("localhost:8080")
         allowHost("localhost:3000")
+        allowHost("localhost:5666")       // Vben web-antd dev server（vite.config 固定端口）
+        allowHost("127.0.0.1:5666")
         allowMethod(HttpMethod.Get)
         allowMethod(HttpMethod.Post)
         allowMethod(HttpMethod.Put)

@@ -152,6 +152,16 @@ Page({
     wx.navigateTo({ url: '/pages/messages/messages' })
   },
 
+  // 查看优惠券
+  goToCoupons() {
+    wx.navigateTo({ url: '/pages/coupon/coupon' })
+  },
+
+  // 积分商城
+  goToMall() {
+    wx.navigateTo({ url: '/pages/mall/mall' })
+  },
+
   // 登出
   handleLogout() {
     wx.showModal({

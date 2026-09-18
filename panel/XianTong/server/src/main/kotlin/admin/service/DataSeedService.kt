@@ -32,6 +32,7 @@ object DataSeedService {
             seedPointsRules()
             seedReferralRewardRules()
             seedPointsGoods()
+            seedAppointmentConfigs()
             seedMessageTemplates()
             seedDefaultAdmin()
             seedSuperAdminRole()
@@ -283,6 +284,55 @@ object DataSeedService {
                 it[PointsGoods.status] = 1
             }
             logger.info("[DataSeed]: Created points goods: ${seed.name}")
+        }
+    }
+
+    /**
+     * 播种预约规则配置（需求 3.2.4）。
+     *
+     * 把原先硬编码的取消提前分钟数、爽约次数阈值、爽约窗口天数、是否允许当天预约
+     * 落到 admin_system_config 表，管理端「系统设置 → 系统配置」可直接修改。
+     * 幂等：按 configKey 判重，已存在则跳过（不覆盖管理端调过的值）。
+     */
+    private suspend fun seedAppointmentConfigs() {
+        data class Cfg(val key: String, val value: String, val desc: String)
+        val seeds = listOf(
+            Cfg(
+                key = "appointment.cancel_deadline_minutes",
+                value = "120",
+                desc = "自助取消/改约需提前的分钟数（默认120=2小时）"
+            ),
+            Cfg(
+                key = "appointment.no_show_limit",
+                value = "3",
+                desc = "爽约次数阈值，达到后禁止在线预约"
+            ),
+            Cfg(
+                key = "appointment.no_show_window_days",
+                value = "30",
+                desc = "爽约统计窗口天数"
+            ),
+            Cfg(
+                key = "appointment.allow_same_day",
+                value = "1",
+                desc = "是否允许当天预约（1=允许，0=不允许）"
+            )
+        )
+        for (seed in seeds) {
+            val exists = AdminSystemConfigs.selectAll()
+                .where { AdminSystemConfigs.configKey eq seed.key }
+                .count() > 0
+            if (exists) continue
+            AdminSystemConfigs.insert {
+                it[configKey] = seed.key
+                it[configValue] = seed.value
+                it[configType] = "int"
+                it[category] = "appointment"
+                it[description] = seed.desc
+                it[minValue] = 0
+                it[maxValue] = null
+            }
+            logger.info("[DataSeed]: Created appointment config: ${seed.key} = ${seed.value}")
         }
     }
 

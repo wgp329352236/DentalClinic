@@ -261,10 +261,10 @@ data class CheckInRequestDto(val code: String? = null)
 data class CreateAppointmentRequestDto(
     val clinicId: Long,
     val doctorId: Long,
-    val departmentId: Long?,
+    val departmentId: Long? = null,
     val appointmentDate: String,  // yyyy-MM-dd format
     val startTime: String,
-    val remark: String?
+    val remark: String? = null
 )
 
 @Serializable

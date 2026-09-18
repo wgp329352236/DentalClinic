@@ -201,6 +201,30 @@ export interface Coupon {
   status: 'unused' | 'used' | 'expired'
 }
 
+// 积分商城商品
+export interface PointsGoods {
+  id: number
+  name: string
+  goodsType: 'service' | 'item' | string
+  pointsPrice: number
+  coverImage?: string | null
+  description?: string | null
+  remainingStock: number
+  sortOrder: number
+}
+
+// 积分兑换订单
+export interface ExchangeOrder {
+  id: number
+  goodsId: number
+  goodsName: string
+  pointsCost: number
+  redeemCode: string
+  status: 'unused' | 'used' | string
+  redeemedAt?: string | null
+  createdAt: string
+}
+
 // 消息相关类型
 export interface Message {
   id: number

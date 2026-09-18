@@ -41,9 +41,18 @@
 }
 
 .section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   font-size: 30rpx;
   font-weight: bold;
   margin-bottom: 20rpx;
+}
+
+.section-more {
+  font-size: 24rpx;
+  font-weight: normal;
+  color: #1890ff;
 }
 
 .menu-item {

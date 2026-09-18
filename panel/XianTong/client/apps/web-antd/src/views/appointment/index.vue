@@ -1,10 +1,12 @@
 <script lang="ts" setup>
+import { h } from 'vue';
+
 import { Page, useVbenModal } from '@vben/common-ui';
 
 import { Button, message, Modal, Tag } from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { cancelAppointment, getAppointments } from '#/api/appointment';
+import { cancelAppointment, confirmAppointment, getAppointments, rejectAppointment } from '#/api/appointment';
 import { getClinics } from '#/api/clinic';
 import { getDoctors } from '#/api/doctor';
 
@@ -91,7 +93,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
       {
         field: 'action',
         title: '操作',
-        width: 140,
+        width: 200,
         fixed: 'right',
         slots: { default: 'action' },
       },
@@ -130,6 +132,47 @@ async function onCancel(row: any) {
     },
   });
 }
+
+// 确认预约：仅待确认（pending）状态可操作
+async function onConfirm(row: any) {
+  Modal.confirm({
+    title: '确认预约',
+    content: `确认该预约（客户：${row.userName || row.userId}）？确认后状态将变为「已确认」。`,
+    async onOk() {
+      await confirmAppointment(row.id);
+      message.success('预约已确认');
+      gridApi.query();
+    },
+  });
+}
+
+// 拒绝预约：需填写拒绝原因，流转为已取消
+function onReject(row: any) {
+  let rejectReason = '';
+  Modal.confirm({
+    title: '拒绝预约',
+    content: h('div', { style: 'margin-top: 12px' }, [
+      h('textarea', {
+        rows: 3,
+        placeholder: '请输入拒绝原因',
+        style: 'width: 100%; padding: 8px; border: 1px solid #d9d9d9; border-radius: 4px; resize: vertical; box-sizing: border-box;',
+        onInput: (e: Event) => { rejectReason = (e.target as HTMLTextAreaElement).value; },
+      }),
+    ]),
+    okText: '确认拒绝',
+    okType: 'danger',
+    async onOk() {
+      const reason = rejectReason.trim();
+      if (!reason) {
+        message.warning('请填写拒绝原因');
+        return Promise.reject();
+      }
+      await rejectAppointment(row.id, reason);
+      message.success('预约已拒绝');
+      gridApi.query();
+    },
+  });
+}
 </script>
 
 <template>
@@ -143,6 +186,10 @@ async function onCancel(row: any) {
       </template>
       <template #action="{ row }">
         <Button type="link" size="small" @click="onDetail(row)">详情</Button>
+        <template v-if="row.status === 'pending'">
+          <Button type="link" size="small" @click="onConfirm(row)">确认</Button>
+          <Button type="link" size="small" danger @click="onReject(row)">拒绝</Button>
+        </template>
         <Button
           v-if="row.status !== 'cancelled' && row.status !== 'completed'"
           type="link"

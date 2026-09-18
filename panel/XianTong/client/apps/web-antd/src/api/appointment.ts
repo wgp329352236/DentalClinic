@@ -24,6 +24,16 @@ export async function cancelAppointment(id: number, reason?: string) {
   return requestClient.put(`/appointments/${id}/cancel`, { reason });
 }
 
+// 确认预约（仅待确认状态可确认）
+export async function confirmAppointment(id: number) {
+  return requestClient.put(`/appointments/${id}/confirm`);
+}
+
+// 拒绝预约（仅待确认状态可拒绝，需填写原因）
+export async function rejectAppointment(id: number, reason: string) {
+  return requestClient.put(`/appointments/${id}/reject`, { reason });
+}
+
 // 更新病历（诊断 / 治疗方案）
 export async function updateMedicalRecord(id: number, data: any) {
   return requestClient.put(`/appointments/${id}/medical-record`, data);

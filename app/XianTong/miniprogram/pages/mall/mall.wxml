@@ -1,0 +1,70 @@
+<!--pages/mall/mall.wxml-->
+<view class="container">
+  <!-- 积分余额头 -->
+  <view class="balance-header">
+    <view class="balance-label">我的积分</view>
+    <view class="balance-value">{{pointsBalance}}</view>
+  </view>
+
+  <!-- Tab 切换 -->
+  <view class="tabs">
+    <view
+      class="tab-item {{activeTab === 'goods' ? 'tab-active' : ''}}"
+      data-tab="goods"
+      bindtap="onTabChange"
+    >积分兑换</view>
+    <view
+      class="tab-item {{activeTab === 'orders' ? 'tab-active' : ''}}"
+      data-tab="orders"
+      bindtap="onTabChange"
+    >兑换记录</view>
+  </view>
+
+  <!-- 商品列表 -->
+  <view class="goods-list" wx:if="{{activeTab === 'goods' && goods.length > 0}}">
+    <view class="goods-card" wx:for="{{goods}}" wx:key="id">
+      <image class="goods-cover" src="{{item.coverImageResolved}}" mode="aspectFill" wx:if="{{item.coverImage}}"></image>
+      <view class="goods-cover goods-cover-placeholder" wx:else>🎁</view>
+      <view class="goods-info">
+        <view class="goods-name">{{item.name}}</view>
+        <view class="goods-desc" wx:if="{{item.description}}">{{item.description}}</view>
+        <view class="goods-type-tag">{{item.goodsType === 'service' ? '到店服务' : '实物商品'}}</view>
+      </view>
+      <view class="goods-bottom">
+        <view class="goods-points">{{item.pointsPrice}} 积分</view>
+        <button
+          class="btn-exchange"
+          size="mini"
+          data-id="{{item.id}}"
+          bindtap="onExchange"
+          disabled="{{item.remainingStock === 0 || exchanging}}"
+        >
+          {{item.remainingStock === 0 ? '已售罄' : '兑换'}}
+        </button>
+      </view>
+    </view>
+  </view>
+
+  <view class="empty-state" wx:if="{{activeTab === 'goods' && goods.length === 0 && !loading}}">
+    <view class="empty-text">暂无可兑换商品</view>
+  </view>
+
+  <!-- 兑换记录 -->
+  <view class="order-list" wx:if="{{activeTab === 'orders' && orders.length > 0}}">
+    <view class="order-card" wx:for="{{orders}}" wx:key="id">
+      <view class="order-header">
+        <view class="order-name">{{item.goodsName}}</view>
+        <view class="order-status {{item.status === 'unused' ? 'status-unused' : 'status-used'}}">{{item.statusText}}</view>
+      </view>
+      <view class="order-code">核销码：{{item.redeemCode}}</view>
+      <view class="order-meta">
+        <text>消耗 {{item.pointsCost}} 积分</text>
+        <text>{{item.createdAt}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="empty-state" wx:if="{{activeTab === 'orders' && orders.length === 0 && !loading}}">
+    <view class="empty-text">暂无兑换记录</view>
+  </view>
+</view>
