@@ -27,6 +27,8 @@ export interface WechatLoginResponse {
   accessToken: string
   refreshToken: string
   isNewUser: boolean
+  /** 微信手机号授权登录后由后端回带（未授权手机号时为空串/缺失），编辑资料页只读使用 */
+  phone?: string
 }
 
 /**
@@ -507,6 +509,22 @@ export function getCoupons(status?: string) {
  */
 export function redeemCoupon(couponCode: string, appointmentId?: number) {
   return post('/coupons/redeem', { couponCode, appointmentId })
+}
+
+/** 推广领券返回的单张券 */
+export interface PromoClaimedCoupon {
+  couponCode: string
+  couponName: string
+  faceValue: number
+  validTo: string
+}
+
+/**
+ * 推广领券：扫码进入小程序自动领取 2 张（幂等，每人每模板限领一次）。
+ * POST /coupons/promo-claim
+ */
+export function claimPromoCoupons(templateId: number) {
+  return post<{ coupons: PromoClaimedCoupon[] }>('/coupons/promo-claim', { templateId })
 }
 
 // ==================== 消息通知 ====================

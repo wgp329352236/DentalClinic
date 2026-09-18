@@ -185,6 +185,62 @@ class CouponService : BaseService() {
     }
 
     /**
+     * 推广领券（扫码进入小程序自动领取，需求：领 2 张）。
+     *
+     * 与 [claimCoupon] 的差异：
+     * ① 幂等：该用户只要领过该模板任意一张（含此前普通领取），直接拒绝，
+     *    防止扫码反复刷券；判定依据是 user_coupon 中 userId+templateId 是否有记录。
+     * ② 一次发 2 张：循环 [claimCoupon] 两次，两张券码互不相同。
+     *
+     * 校验（模板存在/启用/有效期/库存）复用 claimCoupon 内部逻辑，
+     * 任一失败即整体失败，不产生部分发放。
+     */
+    suspend fun claimPromo(userId: Long, templateId: Long): PromoClaimResult = dbQuery {
+        val template = CouponTemplates.selectAll()
+            .where { CouponTemplates.id eq templateId }
+            .toList()
+            .singleOrNull()
+        if (template == null) {
+            return@dbQuery PromoClaimResult.Error("优惠券模板不存在")
+        }
+
+        // 幂等：该用户该模板已领过则不再发放
+        val alreadyClaimed = UserCoupons.selectAll()
+            .where { (UserCoupons.userId eq userId) and (UserCoupons.templateId eq templateId) }
+            .count() > 0
+        if (alreadyClaimed) {
+            return@dbQuery PromoClaimResult.Error("您已领取过该推广优惠券")
+        }
+
+        // 发 2 张：任一失败则整体失败（模板校验在 claimCoupon 内完成）
+        val first = when (val r1 = claimCoupon(userId, templateId)) {
+            is CouponClaimResult.Error -> return@dbQuery PromoClaimResult.Error(r1.message)
+            is CouponClaimResult.Success -> r1
+        }
+        val second = when (val r2 = claimCoupon(userId, templateId)) {
+            is CouponClaimResult.Error -> return@dbQuery PromoClaimResult.Error(r2.message)
+            is CouponClaimResult.Success -> r2
+        }
+
+        PromoClaimResult.Success(
+            coupons = listOf(
+                PromoClaimedCoupon(
+                    couponCode = first.couponCode,
+                    couponName = first.couponName,
+                    faceValue = first.faceValue,
+                    validTo = first.validTo
+                ),
+                PromoClaimedCoupon(
+                    couponCode = second.couponCode,
+                    couponName = second.couponName,
+                    faceValue = second.faceValue,
+                    validTo = second.validTo
+                )
+            )
+        )
+    }
+
+    /**
      * Generate unique coupon code.
      */
     private fun generateCouponCode(templateId: Long, userId: Long): String {
@@ -261,6 +317,22 @@ sealed class CouponClaimResult {
     @Serializable
     data class Error(val message: String) : CouponClaimResult()
 }
+
+/** 推广领券结果（一次领 2 张）。 */
+sealed class PromoClaimResult {
+    @Serializable
+    data class Success(val coupons: List<PromoClaimedCoupon>) : PromoClaimResult()
+    @Serializable
+    data class Error(val message: String) : PromoClaimResult()
+}
+
+@Serializable
+data class PromoClaimedCoupon(
+    val couponCode: String,
+    val couponName: String,
+    val faceValue: Double,
+    val validTo: String
+)
 
 @Serializable
 data class CouponDetailDto(

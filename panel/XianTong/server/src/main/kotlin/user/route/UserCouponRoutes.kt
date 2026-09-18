@@ -89,6 +89,45 @@ fun Application.userCouponRoutes(couponService: CouponService) {
             }
 
             /**
+             * 推广领券：扫码进入小程序自动领取 2 张券（幂等，每人每模板限领一次）。
+             * POST /api/v1/coupons/promo-claim
+             * Body: { "templateId": 1 }
+             */
+            post("/promo-claim") {
+                val userId = call.userId()
+
+                try {
+                    val request = call.receive<PromoClaimRequest>()
+                    if (request.templateId == null) {
+                        call.respond(ApiResponse<Unit>(code = 400, message = "缺少模板ID"))
+                        return@post
+                    }
+                    val result = couponService.claimPromo(userId, request.templateId)
+
+                    when (result) {
+                        is PromoClaimResult.Success -> {
+                            call.respond(ApiResponse(
+                                code = 0,
+                                message = "领取成功",
+                                data = mapOf("coupons" to result.coupons)
+                            ))
+                        }
+                        is PromoClaimResult.Error -> {
+                            call.respond(ApiResponse<Unit>(code = 400, message = result.message))
+                        }
+                    }
+                } catch (e: Exception) {
+                    val (code, message) = translateApiError(
+                        logger,
+                        "[Coupon]: 用户 $userId 推广领券",
+                        "领取失败，请稍后重试",
+                        e
+                    )
+                    call.respond(ApiResponse<Unit>(code = code, message = message))
+                }
+            }
+
+            /**
              * Claim a coupon by template ID.
              * POST /api/v1/coupons/claim/{templateId}
              */
@@ -138,4 +177,7 @@ fun Application.userCouponRoutes(couponService: CouponService) {
 
 @Serializable
 data class RedeemCouponRequest(val couponCode: String, val appointmentId: Long?)
+
+@Serializable
+data class PromoClaimRequest(val templateId: Long? = null)
 

@@ -1,5 +1,5 @@
 // pages/coupon/coupon.ts
-import { getCoupons } from '../../utils/api'
+import { claimPromoCoupons, getCoupons } from '../../utils/api'
 import { checkLogin } from '../../utils/auth'
 import type { Coupon } from '../../types'
 
@@ -23,8 +23,43 @@ Page({
   },
 
   onShow() {
-    if (!getApp<IAppOption>().globalData.token) return
+    const app = getApp<IAppOption>()
+    if (!app.globalData.token) return
     this.loadCoupons()
+    // 扫码进入（scene/query 携带 promo=<templateId>）：自动领取推广优惠券
+    if (app.globalData.pendingPromoTemplateId) {
+      this.claimPromo(app.globalData.pendingPromoTemplateId)
+    }
+  },
+
+  /**
+   * 推广领券：调用后端一次领 2 张，成功后清空暂存并刷新列表。
+   * 幂等在服务端：每人每模板限领一次，重复扫码提示已领取。
+   */
+  async claimPromo(templateId: number) {
+    try {
+      const result = await claimPromoCoupons(templateId)
+      if (result.code === 0 && result.data && result.data.coupons.length > 0) {
+        const coupons = result.data.coupons
+        wx.showModal({
+          title: '领取成功',
+          content: `已领取 ${coupons.length} 张「${coupons[0].couponName}」，请查看下方优惠券列表`,
+          showCancel: false,
+          confirmText: '知道了'
+        })
+        // 消费完成：清空暂存，避免下次进入重复弹窗
+        getApp<IAppOption>().setPendingPromo(null)
+        this.loadCoupons()
+      } else {
+        // 幂等/业务失败（如已领取过）：提示并清空暂存，防止每次进入都弹
+        wx.showToast({ title: result.message || '领取失败', icon: 'none' })
+        getApp<IAppOption>().setPendingPromo(null)
+      }
+    } catch (error: any) {
+      const msg = error?.message || error?.errMsg || '领取失败'
+      wx.showToast({ title: msg, icon: 'none' })
+      // 网络异常不清空暂存，下次进入重试
+    }
   },
 
   onTabChange(e: any) {

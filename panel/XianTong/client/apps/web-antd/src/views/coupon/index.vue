@@ -8,6 +8,7 @@ import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { deleteCouponTemplate, getCouponTemplates } from '#/api/coupon';
 
 import CouponFormModal from './form-modal.vue';
+import PromoQrModalComponent from './promo-qr-modal.vue';
 
 const couponTypeMap: Record<string, string> = {
   cash: '现金券',
@@ -17,6 +18,11 @@ const couponTypeMap: Record<string, string> = {
 
 const [FormModal, formModalApi] = useVbenModal({
   connectedComponent: CouponFormModal,
+  destroyOnClose: true,
+});
+
+const [PromoQrModal, promoQrModalApi] = useVbenModal({
+  connectedComponent: PromoQrModalComponent,
   destroyOnClose: true,
 });
 
@@ -76,6 +82,10 @@ function onEdit(row: any) {
   formModalApi.setData({ mode: 'edit', row }).open();
 }
 
+function onPromoQr(row: any) {
+  promoQrModalApi.setData({ row }).open();
+}
+
 async function onDelete(row: any) {
   Modal.confirm({
     title: '删除优惠券模板',
@@ -93,6 +103,7 @@ async function onDelete(row: any) {
 <template>
   <Page auto-content-height>
     <FormModal @success="gridApi.query()" />
+    <PromoQrModal />
     <Grid table-title="优惠券模板">
       <template #toolbar-tools>
         <Button type="primary" @click="onCreate">
@@ -115,6 +126,7 @@ async function onDelete(row: any) {
       </template>
       <template #action="{ row }">
         <Button type="link" size="small" @click="onEdit(row)">编辑</Button>
+        <Button type="link" size="small" @click="onPromoQr(row)">推广码</Button>
         <Button type="link" size="small" danger @click="onDelete(row)">
           删除
         </Button>

@@ -4,10 +4,20 @@ import type { UserInfo } from './types'
 /** 待绑定推荐码的本地缓存键：登录完成前可能经历多次冷启动，需持久化等待登录后消费 */
 const REFERRAL_STORAGE_KEY = 'pendingReferralCode'
 
+/** 待领取推广券模板的本地缓存键（扫码进入领取 2 张券，场景同推荐码） */
+const PROMO_STORAGE_KEY = 'pendingPromoTemplateId'
+
 interface AppGlobalData {
   userInfo: UserInfo | null
   token: string
   clinics: any[]
+  /**
+   * 微信登录时拿到的手机号（open-type="getPhoneNumber" 授权得到）。
+   *
+   * 编辑资料页的手机号只读、取自此处，不允许用户手动改；
+   * 仅在用户重新走微信手机号授权时更新。未授权手机号时为空串。
+   */
+  wechatPhone: string
   /**
    * 首页点门店后要带进预约页的门诊 id。
    *
@@ -24,19 +34,32 @@ interface AppGlobalData {
    * 捕获后暂存到 globalData + storage，登录成功后由首页消费并清空。
    */
   pendingReferralCode: string | null
+  /**
+   * 待领取的推广优惠券模板 id（扫码进入领 2 张券）。
+   *
+   * 来源与推荐码一致：query.promo=xxx 或 scene 中 "promo=xxx"。
+   * 由优惠券页在 onShow 消费：调推广领券接口后清空（含 storage）。
+   */
+  pendingPromoTemplateId: number | null
 }
 
 /**
- * 从小程序启动/切前台参数中提取推荐码。
+ * 从启动参数 query 中提取指定 key 的值。
+ */
+function extractQueryParam(options: any, key: string): string {
+  const value = options?.query?.[key]
+  return typeof value === 'string' && value.trim() ? value.trim() : ''
+}
+
+/**
+ * 从小程序启动/切前台参数中提取「键值对」型参数（ref / promo）。
  *
- * 优先取 query.ref（分享链接）；没有再解析 scene（小程序码扫码进入，
+ * 优先取 query.<key>（分享链接）；没有再解析 scene（小程序码扫码进入，
  * 微信传入的是 encodeURIComponent 后的 k=v&k=v 串）。提取失败返回空串。
  */
-function extractReferralCode(options: any): string {
-  const queryRef = options?.query?.ref
-  if (typeof queryRef === 'string' && queryRef.trim()) {
-    return queryRef.trim()
-  }
+function extractSceneParam(options: any, key: string): string {
+  const queryValue = extractQueryParam(options, key)
+  if (queryValue) return queryValue
 
   const scene = options?.scene
   if (typeof scene === 'string' && scene.trim()) {
@@ -45,15 +68,20 @@ function extractReferralCode(options: any): string {
       const pair = decoded
         .split('&')
         .map(part => part.split('='))
-        .find(([key]) => key === 'ref')
+        .find(([k]) => k === key)
       const value = pair && pair.length > 1 ? pair.slice(1).join('=') : ''
       if (value) return value.trim()
     } catch (error) {
-      console.warn('[App] scene 参数解析失败:', scene, error)
+      console.warn(`[App] scene 参数解析失败(${key}):`, scene, error)
     }
   }
 
   return ''
+}
+
+/** 提取推荐码（兼容旧调用方与旧参数名） */
+function extractReferralCode(options: any): string {
+  return extractSceneParam(options, 'ref')
 }
 
 App<IAppOption>({
@@ -61,8 +89,10 @@ App<IAppOption>({
     userInfo: null,
     token: '',
     clinics: [],
+    wechatPhone: '',
     pendingClinicId: null,
-    pendingReferralCode: null
+    pendingReferralCode: null,
+    pendingPromoTemplateId: null
   } as AppGlobalData,
 
   onLaunch(options) {
@@ -83,6 +113,12 @@ App<IAppOption>({
     if (code) {
       this.setPendingReferralCode(code)
     }
+
+    // 推广领券：扫码/分享携带 promo=<templateId> 时暂存，待优惠券页消费
+    const promo = extractSceneParam(options, 'promo') || wx.getStorageSync(PROMO_STORAGE_KEY) || ''
+    if (promo) {
+      this.setPendingPromo(promo)
+    }
   },
 
   onShow(options) {
@@ -91,12 +127,23 @@ App<IAppOption>({
     if (code) {
       this.setPendingReferralCode(code)
     }
+
+    // 推广领券同推荐码：后台被唤起时以最新 promo 覆盖
+    const promo = extractSceneParam(options, 'promo')
+    if (promo) {
+      this.setPendingPromo(promo)
+    }
   },
 
   // 设置用户信息
   setUserInfo(userInfo: UserInfo) {
     this.globalData.userInfo = userInfo
     wx.setStorageSync('userInfo', userInfo)
+  },
+
+  // 设置微信登录手机号（更新全局态）
+  setWechatPhone(phone: string) {
+    this.globalData.wechatPhone = phone || ''
   },
 
   // 设置 Token
@@ -121,6 +168,21 @@ App<IAppOption>({
       wx.setStorageSync(REFERRAL_STORAGE_KEY, value)
     } else {
       wx.removeStorageSync(REFERRAL_STORAGE_KEY)
+    }
+  },
+
+  /**
+   * 暂存/清除待领取的推广券模板 id。
+   * 传 null/空串/非法数字时同时清掉 globalData 与 storage（优惠券页消费完成时调用）。
+   */
+  setPendingPromo(promo: string | null) {
+    const templateId = promo ? Number(promo) : NaN
+    const value = Number.isFinite(templateId) && templateId > 0 ? templateId : null
+    this.globalData.pendingPromoTemplateId = value
+    if (value) {
+      wx.setStorageSync(PROMO_STORAGE_KEY, String(value))
+    } else {
+      wx.removeStorageSync(PROMO_STORAGE_KEY)
     }
   },
 
