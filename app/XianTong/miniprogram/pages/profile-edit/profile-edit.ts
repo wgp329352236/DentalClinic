@@ -38,10 +38,19 @@ Page({
       if (result.code === 0 && result.data) {
         const d = result.data
         this.originalAvatar = d.avatar || ''
+
+        // 手机号优先取微信登录时拿到的手机号（只读），其次用后端资料里的 phone
+        const app = getApp<IAppOption>()
+        const wechatPhone = app?.globalData?.wechatPhone || ''
+        const phone = wechatPhone || d.phone || ''
+
+        // 昵称默认为手机号后 4 位（仅当资料里没有昵称时兜底）
+        const nickname = d.nickname || this.defaultNickname(phone)
+
         this.setData({
-          nickname: d.nickname || '',
+          nickname,
           realName: d.realName || '',
-          phone: d.phone || '',
+          phone,
           gender: d.gender || 1,
           age: d.age ?? '',
           avatar: resolveFileUrl(d.avatar)
@@ -51,6 +60,13 @@ Page({
       console.error('[ProfileEdit] 加载资料失败:', error)
       wx.showToast({ title: '加载失败', icon: 'none' })
     }
+  },
+
+  /** 昵称默认规则：手机号后 4 位；无手机号时回退微信用户名 */
+  defaultNickname(phone: string): string {
+    const trimmed = (phone || '').trim()
+    if (/^1\d{10}$/.test(trimmed)) return trimmed.slice(-4)
+    return ''
   },
 
   // 选择并上传头像
@@ -92,10 +108,6 @@ Page({
     this.setData({ realName: e.detail.value })
   },
 
-  onPhoneInput(e: any) {
-    this.setData({ phone: e.detail.value })
-  },
-
   onAgeInput(e: any) {
     this.setData({ age: e.detail.value })
   },
@@ -108,12 +120,7 @@ Page({
   async onSave() {
     if (this.data.submitting) return
 
-    const phone = this.data.phone.trim()
-    // 前端先校验格式，省一次往返；手机号是否被占用由后端唯一索引判定并回 409 文案
-    if (phone && !/^1[3-9]\d{9}$/.test(phone)) {
-      wx.showToast({ title: '手机号格式不正确', icon: 'none' })
-      return
-    }
+    // 手机号取自微信登录，只读、不上传；这里仅校验昵称/姓名/年龄
     const age = this.data.age
     if (age !== '' && (Number(age) < 0 || Number(age) > 150)) {
       wx.showToast({ title: '年龄需在 0-150 之间', icon: 'none' })
@@ -126,7 +133,6 @@ Page({
       await updateUserProfile({
         nickname: this.data.nickname.trim() || undefined,
         realName: this.data.realName.trim() || undefined,
-        phone: phone || undefined,
         gender: this.data.gender,
         age: age === '' ? undefined : Number(age),
         avatar: this.originalAvatar || undefined

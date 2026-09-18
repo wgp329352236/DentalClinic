@@ -201,16 +201,34 @@ export function uploadFile<T = any>(url: string, filePath: string, name = 'file'
 
 // ==================== 模拟数据服务 ====================
 
+/**
+ * 解析 query string 为对象（mock 模式下用于还原 GET 参数）
+ */
+function parseQueryString(query?: string): Record<string, string> {
+  const params: Record<string, string> = {}
+  if (!query) return params
+  query.split('&').forEach(pair => {
+    if (!pair) return
+    const [key, value] = pair.split('=')
+    params[decodeURIComponent(key)] = decodeURIComponent(value || '')
+  })
+  return params
+}
+
 async function mockRequest<T = any>(options: RequestOptions): Promise<ApiResponse<T>> {
   // 模拟网络延迟
   await new Promise(resolve => setTimeout(resolve, 300))
 
   const { url, method, data } = options
-  const path = url.split('?')[0]
+  const [path, queryString] = url.split('?')
+
+  // GET 的参数在 query 里（data 为 undefined），需一并交给 mock，
+  // 否则 mock 拿不到筛选/分页参数，列表永远是全部数据
+  const query = parseQueryString(queryString)
 
   // mock 调用失败时直接 reject（async 函数抛出即 reject），
   // 与真实 API 模式"业务错误统一 reject"的语义保持一致
-  const result = await mockApiService.call(path, method || 'GET', data)
+  const result = await mockApiService.call(path, method || 'GET', { ...query, ...(data || {}) })
 
   // 兼容 mock 处理器直接返回业务错误对象（{ code, message }）的情况：
   // 不把失败响应包装成成功，避免调用方拿到 code !== 0 的"假成功"

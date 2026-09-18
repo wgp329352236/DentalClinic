@@ -140,6 +140,12 @@ Page({
           app.setToken(result.data.accessToken)
           wx.setStorageSync('refreshToken', result.data.refreshToken)
 
+          // 微信登录手机号：授权手机号登录后由后端回带（mock 也回带），
+          // 编辑资料页的手机号只读、取自此处
+          if (result.data.phone) {
+            app.setWechatPhone(result.data.phone)
+          }
+
           // 新用户或本地无用户信息时，拉取用户资料
           if (result.data.isNewUser || !app.globalData.userInfo) {
             await this.loadUserProfile()
