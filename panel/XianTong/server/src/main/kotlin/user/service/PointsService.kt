@@ -72,6 +72,53 @@ class PointsService : BaseService() {
     }
 
     /**
+     * 积分汇总（需求 3.4.3）：本月获取/消耗 + 积分有效期分布。
+     *
+     * - monthlyEarned/monthlySpent：按当月（自然月）所有记录汇总，消耗取绝对值；
+     * - expiryGroups：按每批积分的过期月份聚合「剩余未过期」积分
+     *   （changeAmount - 已过期清分量 expiredAmount），仅统计未过期批次，
+     *   按过期月份升序排列，便于页面展示「哪个月份有多少积分会过期」。
+     */
+    suspend fun getPointsSummary(userId: Long): PointsSummaryDto = dbQuery {
+        val monthStart = LocalDate.now().withDayOfMonth(1).atStartOfDay()
+        val now = LocalDateTime.now()
+        val monthFormatter = DateTimeFormatter.ofPattern("yyyy-MM")
+
+        val allRows = PointsRecords.selectAll()
+            .where { PointsRecords.userId eq userId }
+            .toList()
+
+        val monthlyEarned = allRows
+            .filter { it[PointsRecords.createdAt] >= monthStart && it[PointsRecords.changeAmount] > 0 }
+            .sumOf { it[PointsRecords.changeAmount] }
+        val monthlySpent = allRows
+            .filter { it[PointsRecords.createdAt] >= monthStart && it[PointsRecords.changeAmount] < 0 }
+            .sumOf { Math.abs(it[PointsRecords.changeAmount]) }
+
+        // 有效期分布：仅统计未过期的正积分批次，按到期月份聚合剩余量
+        val expiryMap = linkedMapOf<String, Int>()
+        allRows
+            .filter { it[PointsRecords.changeAmount] > 0 && it[PointsRecords.expiresAt] > now }
+            .forEach { row ->
+                val remaining = row[PointsRecords.changeAmount] - row[PointsRecords.expiredAmount]
+                if (remaining > 0) {
+                    val month = row[PointsRecords.expiresAt].format(monthFormatter)
+                    expiryMap[month] = (expiryMap[month] ?: 0) + remaining
+                }
+            }
+        val expiryGroups = expiryMap
+            .map { (month, points) -> ExpiryGroup(expireMonth = month, points = points) }
+            .sortedBy { it.expireMonth }
+
+        PointsSummaryDto(
+            totalBalance = allRows.sumOf { it[PointsRecords.changeAmount] },
+            monthlyEarned = monthlyEarned,
+            monthlySpent = monthlySpent,
+            expiryGroups = expiryGroups
+        )
+    }
+
+    /**
      * Daily check-in to earn points.
      */
     suspend fun checkIn(userId: Long): PointsResult = dbQuery {
@@ -166,6 +213,20 @@ class PointsService : BaseService() {
 data class PointsBalanceDto(
     val totalBalance: Int,
     val updatedAt: String
+)
+
+@Serializable
+data class PointsSummaryDto(
+    val totalBalance: Int,
+    val monthlyEarned: Int,
+    val monthlySpent: Int,
+    val expiryGroups: List<ExpiryGroup>
+)
+
+@Serializable
+data class ExpiryGroup(
+    val expireMonth: String,
+    val points: Int
 )
 
 @Serializable

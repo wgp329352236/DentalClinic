@@ -28,6 +28,16 @@ fun Application.userPointsRoutes(pointsService: PointsService) {
             }
 
             /**
+             * Get points summary (monthly earned/spent + expiry distribution).
+             * GET /api/v1/points/summary
+             */
+            get("/summary") {
+                val userId = call.userId()
+                val summary = pointsService.getPointsSummary(userId)
+                call.respond(ApiResponse(code = 0, message = "success", data = summary))
+            }
+
+            /**
              * Get points records with pagination.
              * GET /api/v1/points/records?page=1&pageSize=20
              */

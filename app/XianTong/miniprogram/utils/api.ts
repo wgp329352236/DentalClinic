@@ -367,6 +367,27 @@ export function getPointsBalance() {
   return get<PointsBalance>('/points/balance')
 }
 
+/** 积分有效期分布：某过期月份剩余未过期积分 */
+export interface ExpiryGroup {
+  expireMonth: string
+  points: number
+}
+
+/** 积分汇总（本月获取/消耗 + 有效期分布，需求 3.4.3） */
+export interface PointsSummary {
+  totalBalance: number
+  monthlyEarned: number
+  monthlySpent: number
+  expiryGroups: ExpiryGroup[]
+}
+
+/**
+ * 获取积分汇总：本月获取/消耗 + 按过期月份分布的剩余积分
+ */
+export function getPointsSummary() {
+  return get<PointsSummary>('/points/summary')
+}
+
 /**
  * 获取积分记录
  */

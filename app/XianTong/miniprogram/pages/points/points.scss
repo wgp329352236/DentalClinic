@@ -52,3 +52,15 @@
 .record-item:last-child {
   border-bottom: none;
 }
+
+.expiry-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16rpx 0;
+  border-bottom: 1rpx dashed #f0f0f0;
+}
+
+.expiry-item:last-child {
+  border-bottom: none;
+}

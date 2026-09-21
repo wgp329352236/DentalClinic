@@ -1,11 +1,13 @@
 // pages/points/points.ts
-import { getPointsBalance, getPointsRecords, checkin } from '../../utils/api'
+import { getPointsSummary, getPointsRecords, checkin } from '../../utils/api'
 import { checkLogin } from '../../utils/auth'
 import type { PointsInfo, PointsRecord } from '../../types'
 
 Page({
   data: {
     pointsInfo: null as PointsInfo | null,
+    // 积分有效期分布：[{ expireMonth: "2027-09", points: 100 }]，按过期月份升序
+    expiryGroups: [] as { expireMonth: string; points: number }[],
     pointsRecords: [] as PointsRecord[],
     loading: false,
     checkedIn: false
@@ -18,22 +20,23 @@ Page({
     this.checkCheckinStatus()
   },
 
-  // 加载积分余额（GET /points/balance）
+  // 加载积分汇总（GET /points/summary：余额 + 本月获得/消耗 + 有效期分布）
   async loadPoints() {
     try {
-      const result = await getPointsBalance()
+      const result = await getPointsSummary()
       if (result.code === 0 && result.data) {
         this.setData({
           pointsInfo: {
             balance: result.data.totalBalance,
-            monthlyEarned: 0, // 后端暂无本月获得/消耗统计
-            monthlySpent: 0
-          }
+            monthlyEarned: result.data.monthlyEarned,
+            monthlySpent: result.data.monthlySpent
+          },
+          expiryGroups: result.data.expiryGroups || []
         })
       }
     } catch (error) {
       // 未登录/过期等认证错误由 request.ts 统一处理（跳回首页），这里兜底避免未捕获异常
-      console.warn('[Points] 加载积分失败:', error)
+      console.warn('[Points] 加载积分汇总失败:', error)
     }
   },
 
