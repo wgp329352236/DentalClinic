@@ -7,6 +7,7 @@ import com.dentalclinic.admin.entity.ReferralRelations
 import com.dentalclinic.admin.entity.ReferralRewards
 import com.dentalclinic.admin.entity.UserCoupons
 import com.dentalclinic.admin.entity.UserWallets
+import com.dentalclinic.common.config.ReferralActivityConfig
 import kotlinx.coroutines.flow.toList
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.SortOrder
@@ -327,6 +328,9 @@ class ReferralRewardService : BaseService() {
     ): Int {
         if (desired <= 0) return 0
 
+        // 双倍奖励活动期内翻倍（仅积分，赠余额/新人券不参与），翻倍后仍受月度上限约束
+        val effective = if (ReferralActivityConfig.doubleBonusActive()) desired * 2 else desired
+
         // 上限与有效期取自 referral 规则，便于管理端「推荐活动管理」在线调整
         val rule = findRule("referral")
         val limit = rule?.get(PointsRules.monthlyLimit) ?: DEFAULT_MONTHLY_POINTS_LIMIT
@@ -339,9 +343,9 @@ class ReferralRewardService : BaseService() {
             return 0
         }
 
-        val actual = minOf(desired, remaining)
-        if (actual < desired) {
-            logger.info("[ReferralReward] 用户 $userId 本月推荐积分额度不足，$sourceType 由 $desired 截断为 $actual。")
+        val actual = minOf(effective, remaining)
+        if (actual < effective) {
+            logger.info("[ReferralReward] 用户 $userId 本月推荐积分额度不足，$sourceType 由 $effective 截断为 $actual。")
         }
 
         addPointsToUser(

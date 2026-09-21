@@ -33,6 +33,7 @@ object DataSeedService {
             seedReferralRewardRules()
             seedPointsGoods()
             seedAppointmentConfigs()
+            seedReferralActivityConfigs()
             seedMessageTemplates()
             seedDefaultAdmin()
             seedSuperAdminRole()
@@ -333,6 +334,52 @@ object DataSeedService {
                 it[maxValue] = null
             }
             logger.info("[DataSeed]: Created appointment config: ${seed.key} = ${seed.value}")
+        }
+    }
+
+    /**
+     * 播种推荐活动配置（需求 4.8：限时双倍奖励活动）。
+     *
+     * 默认关闭（enabled=0），由管理端「系统设置 → 系统配置」按需开启并设定起止日期。
+     * 幂等：按 configKey 判重，已存在则跳过（不覆盖管理端已配置的活动值）。
+     */
+    private suspend fun seedReferralActivityConfigs() {
+        data class Cfg(val key: String, val value: String, val type: String, val desc: String)
+        val seeds = listOf(
+            Cfg(
+                key = "referral.double_bonus_enabled",
+                value = "0",
+                type = "int",
+                desc = "是否启用推荐双倍奖励活动（1=启用，0=关闭）"
+            ),
+            Cfg(
+                key = "referral.double_bonus_start",
+                value = "",
+                type = "string",
+                desc = "双倍奖励活动开始日期（含当天，yyyy-MM-dd）"
+            ),
+            Cfg(
+                key = "referral.double_bonus_end",
+                value = "",
+                type = "string",
+                desc = "双倍奖励活动结束日期（含当天，yyyy-MM-dd）"
+            )
+        )
+        for (seed in seeds) {
+            val exists = AdminSystemConfigs.selectAll()
+                .where { AdminSystemConfigs.configKey eq seed.key }
+                .count() > 0
+            if (exists) continue
+            AdminSystemConfigs.insert {
+                it[configKey] = seed.key
+                it[configValue] = seed.value
+                it[configType] = seed.type
+                it[category] = "referral"
+                it[description] = seed.desc
+                it[minValue] = null
+                it[maxValue] = null
+            }
+            logger.info("[DataSeed]: Created referral activity config: ${seed.key}")
         }
     }
 
