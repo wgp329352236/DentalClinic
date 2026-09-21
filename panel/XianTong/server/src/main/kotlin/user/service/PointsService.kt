@@ -75,9 +75,10 @@ class PointsService : BaseService() {
      * 积分汇总（需求 3.4.3）：本月获取/消耗 + 积分有效期分布。
      *
      * - monthlyEarned/monthlySpent：按当月（自然月）所有记录汇总，消耗取绝对值；
-     * - expiryGroups：按每批积分的过期月份聚合「剩余未过期」积分
-     *   （changeAmount - 已过期清分量 expiredAmount），仅统计未过期批次，
-     *   按过期月份升序排列，便于页面展示「哪个月份有多少积分会过期」。
+     * - expiryGroups：有效期分布采用 FIFO 冲抵——积分消耗（兑换/抵扣/手动扣减）不按批次
+     *   归因，故先统计真实消费量（排除 points_expired 过期清零），再按获得时间序依次冲抵
+     *   最早的未过期批次，剩余的按到期月份聚合升序返回。保证 sum(expiryGroups) 恒等于
+     *   当前可用余额对应的未过期积分，不再虚高。
      */
     suspend fun getPointsSummary(userId: Long): PointsSummaryDto = dbQuery {
         val monthStart = LocalDate.now().withDayOfMonth(1).atStartOfDay()
@@ -95,17 +96,34 @@ class PointsService : BaseService() {
             .filter { it[PointsRecords.createdAt] >= monthStart && it[PointsRecords.changeAmount] < 0 }
             .sumOf { Math.abs(it[PointsRecords.changeAmount]) }
 
-        // 有效期分布：仅统计未过期的正积分批次，按到期月份聚合剩余量
-        val expiryMap = linkedMapOf<String, Int>()
-        allRows
+        // 有效期分布（FIFO 冲抵）：积分消耗不按批次归因，先统计「真实消费量」
+        // （含兑换/抵扣/手动扣减，排除 points_expired 过期清零——它已按批次全额标记，
+        // 从 expiredAmount 体现，无需再参与冲抵），再按获得时间序冲抵最早的未过期批次。
+        val consumed = allRows
+            .filter { it[PointsRecords.changeAmount] < 0 && it[PointsRecords.sourceType] != "points_expired" }
+            .sumOf { Math.abs(it[PointsRecords.changeAmount]) }
+
+        val pending = allRows
             .filter { it[PointsRecords.changeAmount] > 0 && it[PointsRecords.expiresAt] > now }
-            .forEach { row ->
+            .sortedBy { it[PointsRecords.createdAt] }
+            .map { row ->
+                // 未过期批次尚未被清零，remaining 即当前仍有可用潜力
                 val remaining = row[PointsRecords.changeAmount] - row[PointsRecords.expiredAmount]
-                if (remaining > 0) {
-                    val month = row[PointsRecords.expiresAt].format(monthFormatter)
-                    expiryMap[month] = (expiryMap[month] ?: 0) + remaining
-                }
+                row to remaining
             }
+
+        val expiryMap = linkedMapOf<String, Int>()
+        var restConsumed = consumed
+        pending.forEach { (row, remaining) ->
+            if (remaining <= 0) return@forEach
+            val deducted = minOf(remaining, restConsumed)
+            val net = remaining - deducted
+            restConsumed -= deducted
+            if (net > 0) {
+                val month = row[PointsRecords.expiresAt].format(monthFormatter)
+                expiryMap[month] = (expiryMap[month] ?: 0) + net
+            }
+        }
         val expiryGroups = expiryMap
             .map { (month, points) -> ExpiryGroup(expireMonth = month, points = points) }
             .sortedBy { it.expireMonth }
