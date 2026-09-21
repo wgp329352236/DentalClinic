@@ -11,12 +11,30 @@ import {
   setUserTags,
   type CustomerTag,
 } from '#/api/customerTag';
+import { getReferralTree, type ReferralTreeNode } from '#/api/referral';
 
 const genderMap: Record<number, string> = { 0: '未知', 1: '男', 2: '女' };
 
 const user = ref<any>({});
 const wallet = ref<any>({});
 const memberLevel = ref<any>({});
+
+// 推荐链路：把树拍平成带缩进层级的列表，扁平展示避免引入递归组件
+const referralRows = ref<
+  { node: ReferralTreeNode; level: number }[]
+>([]);
+
+/** 将推荐树先序遍历拍平为带层级的列表 */
+function flattenTree(
+  node: ReferralTreeNode | null,
+  level = 0,
+): { node: ReferralTreeNode; level: number }[] {
+  if (!node) return [];
+  return [
+    { node, level },
+    ...(node.children || []).flatMap((child) => flattenTree(child, level + 1)),
+  ];
+}
 
 // 贴标签：全量标签候选项 + 当前客户已选 + 保存状态
 const allTags = ref<CustomerTag[]>([]);
@@ -30,9 +48,10 @@ const [Modal, modalApi] = useVbenModal({
     if (isOpen) {
       const data = modalApi.getData<{ id: number }>();
       const customerId = data?.id ?? 0;
-      const [res, tags] = await Promise.all([
+      const [res, tags, tree] = await Promise.all([
         getCustomerDetail(customerId),
         getCustomerTags(),
+        getReferralTree(customerId).catch(() => null),
       ]);
       user.value = res.user || {};
       wallet.value = res.wallet || {};
@@ -43,6 +62,7 @@ const [Modal, modalApi] = useVbenModal({
         value: tag.id,
       }));
       selectedTagIds.value = (res.user?.tags || []).map((tag: any) => tag.id);
+      referralRows.value = flattenTree(tree || null);
     }
   },
 });
@@ -132,6 +152,33 @@ async function onSaveTags() {
         >
           {{ allTags.find((tag) => tag.id === tagId)?.tagName || tagId }}
         </Tag>
+      </div>
+    </div>
+
+    <!-- 推荐链路图（需求 4.4 谁推荐了谁）：扁平缩进展示多层推荐关系 -->
+    <div class="mt-4 border-t pt-3">
+      <div class="mb-2 text-sm font-medium">推荐链路</div>
+      <div
+        v-for="(row, idx) in referralRows"
+        :key="row.node.userId + '-' + idx"
+        class="flex items-center gap-2 py-1 text-sm"
+        :style="{ paddingLeft: row.level * 20 + 'px' }"
+      >
+        <span v-if="row.level > 0" class="text-gray-300">└</span>
+        <span class="font-medium">{{ row.node.name }}</span>
+        <span v-if="row.node.phone" class="text-gray-400">
+          {{ row.node.phone }}
+        </span>
+        <Tag v-if="row.level > 0" :color="row.node.converted ? 'green' : 'default'">
+          {{ row.node.converted ? '已首消' : '未首消' }}
+        </Tag>
+        <span v-if="row.level === 0" class="text-gray-400">（本人）</span>
+      </div>
+      <div
+        v-if="referralRows.length <= 1"
+        class="py-2 text-sm text-gray-400"
+      >
+        暂无下级推荐人
       </div>
     </div>
   </Modal>

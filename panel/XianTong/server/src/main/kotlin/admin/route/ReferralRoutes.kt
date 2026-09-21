@@ -17,6 +17,18 @@ import io.ktor.server.routing.*
 fun Route.referralRoutes(referralService: AdminReferralService) {
     route("/referrals") {
         authenticated {
+            // GET /api/admin/referrals/tree?userId=1 - 推荐链路树（需求 4.4 谁推荐了谁）
+            requirePermission("referral:view") {
+                get("/tree") {
+                    val userId = call.request.queryParameters["userId"]?.toLongOrNull()
+                        ?: throw ValidationException("缺少用户ID")
+                    val depth = call.request.queryParameters["depth"]?.toIntOrNull()?.coerceIn(1, 5) ?: 3
+                    val tree = referralService.getReferralTree(userId, depth)
+                        ?: throw ValidationException("用户不存在")
+                    call.ok(tree)
+                }
+            }
+
             // GET /api/admin/referrals/relations - 分页查询推荐关系列表
             requirePermission("referral:view") {
                 get("/relations") {

@@ -270,6 +270,65 @@ class AdminReferralService : BaseService() {
         GrantReferralRewardResult.Success(rewardId)
     }
 
+    /**
+     * 构建以某客户为根的推荐链路树（需求 4.4「谁推荐了谁」）。
+     *
+     * 下行递归：从根开始，逐层列出其直接推荐的被推荐人，最多展开 [maxDepth] 层。
+     * 用 visited 集合防环（推荐关系为森林结构，理论上无环，但作为健壮性兜底）。
+     *
+     * @return 用户不存在时返回 null
+     */
+    suspend fun getReferralTree(userId: Long, maxDepth: Int = 3): ReferralTreeNode? = dbQuery {
+        val rootRow = Users.selectAll()
+            .where { Users.id eq userId }
+            .toList()
+            .singleOrNull()
+            ?: return@dbQuery null
+
+        // 一次性加载全量用户与推荐关系，避免递归里逐层 N+1 查询。
+        // 推荐关系量级在门店范围内可控，全量加载 + 内存建树比深度递归更稳。
+        val allUsers = Users.selectAll().toList()
+            .associateBy { it[Users.id] }
+        val relationsByReferrer = ReferralRelations.selectAll()
+            .where { ReferralRelations.referrerId neq ReferralRelations.refereeId }
+            .toList()
+            .groupBy { it[ReferralRelations.referrerId] }
+
+        val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+        val visited = mutableSetOf(userId)
+
+        fun buildNode(uid: Long, depth: Int): ReferralTreeNode {
+            val row = allUsers[uid]
+            val name = row?.get(Users.nickname)
+                ?: row?.get(Users.realName)
+                ?: "用户$uid"
+            val children = if (depth >= maxDepth) {
+                emptyList()
+            } else {
+                (relationsByReferrer[uid] ?: emptyList())
+                    .mapNotNull { rel ->
+                        val refereeId = rel[ReferralRelations.refereeId]
+                        if (refereeId in visited) return@mapNotNull null
+                        visited.add(refereeId)
+                        buildNode(refereeId, depth + 1).copy(
+                            recommendedAt = rel[ReferralRelations.registeredAt].format(formatter),
+                            converted = rel[ReferralRelations.firstConsumedAt] != null
+                        )
+                    }
+            }
+            return ReferralTreeNode(
+                userId = uid,
+                name = name,
+                phone = row?.get(Users.phone),
+                recommendedAt = null,
+                converted = false,
+                children = children
+            )
+        }
+
+        buildNode(userId, depth = 0)
+    }
+
     /** 批量加载用户行，构建 id -> ResultRow 映射。 */
     private suspend fun loadUsersMap(userIds: List<Long>): Map<Long, org.jetbrains.exposed.v1.core.ResultRow> {
         if (userIds.isEmpty()) return emptyMap()
@@ -336,6 +395,18 @@ data class ReferralStatisticsDto(
     val grantedRewardCount: Int,
     val pendingRewardCount: Int,
     val totalRewardValue: Double
+)
+
+/** 推荐链路树节点（需求 4.4）。converted 表示该被推荐人是否已完成首消。 */
+@Serializable
+data class ReferralTreeNode(
+    val userId: Long,
+    val name: String,
+    val phone: String?,
+    /** 作为被推荐人的注册时间；根节点为 null */
+    val recommendedAt: String?,
+    val converted: Boolean,
+    val children: List<ReferralTreeNode>
 )
 
 @Serializable
