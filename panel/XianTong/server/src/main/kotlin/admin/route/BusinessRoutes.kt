@@ -323,7 +323,7 @@ fun Route.customerRoutes(customerService: CustomerService) {
                 put("/{id}/level") {
                     val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的客户ID")
                     val req = call.receive<LevelAdjustRequest>()
-                    customerService.adjustLevel(id, req.levelCode)
+                    customerService.adjustLevel(id, req.levelCode, req.reason)
                     call.ok<Unit>(message = "会员等级调整成功")
                 }
             }

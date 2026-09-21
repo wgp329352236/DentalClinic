@@ -975,29 +975,68 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
         )
     }
 
-    suspend fun adjustLevel(userId: Long, levelCode: Int): Unit = dbQuery {
-        val level = MemberLevels.selectAll()
+    suspend fun adjustLevel(userId: Long, levelCode: Int, reason: String): Unit = dbQuery {
+        if (reason.isBlank()) {
+            throw ValidationException("调整原因不能为空")
+        }
+        val target = MemberLevels.selectAll()
             .where { MemberLevels.levelCode eq levelCode }
             .toList().firstOrNull()
-        val targetLevelId = level?.get(MemberLevels.id)
             ?: throw ValidationException("无效的会员等级代码")
 
         val existing = UserMemberLevels.selectAll()
             .where { UserMemberLevels.userId eq userId }
             .toList().firstOrNull()
 
+        // 调整前的等级编码：无关联视为新客户建档（null），用于判定升降级方向
+        val oldLevelCode = existing?.let { row ->
+            MemberLevels.selectAll()
+                .where { MemberLevels.id eq row[UserMemberLevels.levelId] }
+                .toList().firstOrNull()
+                ?.get(MemberLevels.levelCode)
+        }
+
         if (existing == null) {
             UserMemberLevels.insert {
                 it[UserMemberLevels.userId] = userId
-                it[UserMemberLevels.levelId] = targetLevelId
+                it[UserMemberLevels.levelId] = target[MemberLevels.id]
                 it[UserMemberLevels.effectiveFrom] = LocalDateTime.now()
             }
         } else {
             UserMemberLevels.update({ UserMemberLevels.userId eq userId }) {
-                it[UserMemberLevels.levelId] = targetLevelId
+                it[UserMemberLevels.levelId] = target[MemberLevels.id]
                 it[UserMemberLevels.effectiveFrom] = LocalDateTime.now()
             }
         }
+
+        // 等级未变化时不下发通知，避免无意义打扰
+        if (oldLevelCode == levelCode) return@dbQuery
+
+        val upgraded = oldLevelCode == null || levelCode > oldLevelCode
+        sendNotification(
+            userId = userId,
+            title = if (upgraded) "会员等级提升" else "会员等级调整",
+            content = buildLevelAdjustNotice(
+                levelName = target[MemberLevels.levelName],
+                discountRate = target[MemberLevels.discountRate],
+                upgraded = upgraded,
+                reason = reason
+            ),
+            msgType = "system"
+        )
+    }
+
+    /** 手动调整等级通知正文（需求 3.6.1）：新等级 + 诊疗折扣 + 调整原因。 */
+    private fun buildLevelAdjustNotice(
+        levelName: String,
+        discountRate: BigDecimal,
+        upgraded: Boolean,
+        reason: String
+    ): String {
+        val discount = discountRate.multiply(BigDecimal.TEN).stripTrailingZeros().toPlainString()
+        val verb = if (upgraded) "提升" else "调整"
+        return "您的会员等级已${verb}为「$levelName」，可享 $discount 折诊疗折扣。" +
+            "调整原因：${reason.take(100)}。"
     }
 
     suspend fun adjustPoints(userId: Long, req: PointsAdjustRequest, operator: String) {
