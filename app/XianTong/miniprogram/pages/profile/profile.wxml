@@ -105,6 +105,20 @@
     </view>
   </view>
 
+  <!-- 账户与隐私（需求 5.2 数据导出/删除） -->
+  <view class="card">
+    <view class="menu-item" bindtap="handleExport">
+      <view class="menu-icon">📥</view>
+      <view class="menu-label">导出个人数据</view>
+      <view class="menu-arrow">›</view>
+    </view>
+    <view class="menu-item" bindtap="handleDeleteAccount">
+      <view class="menu-icon">🗑️</view>
+      <view class="menu-label menu-danger">注销账户</view>
+      <view class="menu-arrow">›</view>
+    </view>
+  </view>
+
   <!-- 退出登录 -->
   <view style="padding: 20rpx;">
     <button class="btn-outline btn-danger" bindtap="handleLogout">退出登录</button>

@@ -57,6 +57,10 @@ class UserAuthService : BaseService() {
             val isNewUser: Boolean
 
             if (existingRow != null) {
+                // 已注销账户：禁止复用原 openid 再次登录（需求 5.2 用户数据删除）
+                if (existingRow[Users.status] == 0) {
+                    throw AccountDeletedException()
+                }
                 // Existing user - update last login, and backfill previously missing info
                 userId = existingRow[Users.id]
                 Users.update({ Users.id eq userId }) {
@@ -176,3 +180,6 @@ data class WechatLoginResponse(
     val refreshToken: String,
     val isNewUser: Boolean
 )
+
+/** 账户已注销（status=0）后再次尝试登录时抛出，路由层映射为 403「账号已注销」。 */
+class AccountDeletedException : RuntimeException("账号已注销，无法登录")

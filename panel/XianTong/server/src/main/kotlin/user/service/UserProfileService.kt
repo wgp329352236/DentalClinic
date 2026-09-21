@@ -2,6 +2,7 @@ package com.dentalclinic.user.service
 
 import com.dentalclinic.admin.entity.MemberLevels
 import com.dentalclinic.admin.entity.UserMemberLevels
+import com.dentalclinic.admin.entity.UserPointsSummary
 import com.dentalclinic.admin.entity.UserWallets
 import com.dentalclinic.admin.entity.Users
 import com.dentalclinic.common.BaseService
@@ -14,6 +15,7 @@ import org.jetbrains.exposed.v1.r2dbc.selectAll
 import org.jetbrains.exposed.v1.r2dbc.update
 import org.slf4j.LoggerFactory
 import java.math.BigDecimal
+import java.time.LocalDateTime
 
 /**
  * C 端个人资料服务。
@@ -136,6 +138,78 @@ class UserProfileService : BaseService() {
     }
 
     /**
+     * 导出当前用户全部个人数据（需求 5.2 数据可携带权）。
+     *
+     * 汇总用户主表、钱包、会员等级、积分等个人相关信息，供用户自行下载 JSON 存档。
+     * 不下发 openid——它是平台内部标识，对用户本人无意义且属可复用凭证，不应外泄。
+     *
+     * @return 用户不存在时返回 null
+     */
+    suspend fun exportProfile(userId: Long): UserDataExportDto? = dbQuery {
+        val user = Users.selectAll()
+            .where { Users.id eq userId }
+            .toList()
+            .singleOrNull()
+            ?: return@dbQuery null
+
+        val wallet = UserWallets.selectAll()
+            .where { UserWallets.userId eq userId }
+            .toList()
+            .singleOrNull()
+
+        val levelRow = UserMemberLevels.selectAll()
+            .where { UserMemberLevels.userId eq userId }
+            .toList()
+            .singleOrNull()
+
+        val levelName = levelRow?.let { lr ->
+            MemberLevels.selectAll()
+                .where { MemberLevels.id eq lr[UserMemberLevels.levelId] }
+                .toList()
+                .singleOrNull()
+                ?.get(MemberLevels.levelName)
+        }
+
+        val points = UserPointsSummary.selectAll()
+            .where { UserPointsSummary.userId eq userId }
+            .toList()
+            .singleOrNull()
+
+        UserDataExportDto(
+            userId = user[Users.id],
+            nickname = user[Users.nickname],
+            realName = user[Users.realName],
+            phone = user[Users.phone],
+            gender = user[Users.gender],
+            age = user[Users.age],
+            avatar = user[Users.avatar],
+            sourceType = user[Users.sourceType],
+            registeredAt = user[Users.createdAt].toString(),
+            balance = wallet?.get(UserWallets.balance)?.toDouble() ?: 0.0,
+            bonusBalance = wallet?.get(UserWallets.bonusBalance)?.toDouble() ?: 0.0,
+            levelName = levelName,
+            accumulatedConsumption = levelRow?.get(UserMemberLevels.accumulatedConsumption)?.toDouble() ?: 0.0,
+            totalPoints = points?.get(UserPointsSummary.totalBalance) ?: 0,
+            exportedAt = LocalDateTime.now().toString()
+        )
+    }
+
+    /**
+     * 注销当前账户（需求 5.2 用户数据删除）。
+     *
+     * 采用软删除：status 置 0，保留业务记录以满足财务/审计追溯，同时通过
+     * [com.dentalclinic.user.service.UserAuthService] 登录拦截使该账户无法再次登录。
+     *
+     * @return true 表示注销成功；false 表示用户不存在
+     */
+    suspend fun deleteAccount(userId: Long): Boolean = dbQuery {
+        Users.update({ Users.id eq userId }) {
+            it[Users.status] = 0
+            it[Users.updatedAt] = LocalDateTime.now()
+        } > 0
+    }
+
+    /**
      * 解析 member_level.benefits。
      *
      * 库里存的是 `{"benefits":["预约优先","生日祝福"]}` 形式的 JSON 文本，列类型是 text
@@ -196,3 +270,23 @@ sealed class ProfileUpdateResult {
     data object NotFound : ProfileUpdateResult()
     data class Error(val message: String) : ProfileUpdateResult()
 }
+
+/** 用户个人数据导出（需求 5.2 数据可携带权）。 */
+@Serializable
+data class UserDataExportDto(
+    val userId: Long,
+    val nickname: String?,
+    val realName: String?,
+    val phone: String?,
+    val gender: Int?,
+    val age: Int?,
+    val avatar: String?,
+    val sourceType: String,
+    val registeredAt: String,
+    val balance: Double,
+    val bonusBalance: Double,
+    val levelName: String?,
+    val accumulatedConsumption: Double,
+    val totalPoints: Int,
+    val exportedAt: String
+)

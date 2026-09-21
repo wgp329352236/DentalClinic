@@ -1,5 +1,5 @@
 // API 服务层 - 封装所有后端接口调用
-import { get, post, put } from './request'
+import { get, post, put, del } from './request'
 
 // ==================== 认证相关 ====================
 
@@ -95,6 +95,39 @@ export function getUserProfile() {
  */
 export function updateUserProfile(params: UpdateProfileParams) {
   return put<null>('/profile/me', params)
+}
+
+/** 个人数据导出（需求 5.2 数据可携带权） */
+export interface UserDataExport {
+  userId: number
+  nickname?: string
+  realName?: string
+  phone?: string
+  gender?: number
+  age?: number
+  avatar?: string
+  sourceType: string
+  registeredAt: string
+  balance: number
+  bonusBalance: number
+  levelName?: string
+  accumulatedConsumption: number
+  totalPoints: number
+  exportedAt: string
+}
+
+/**
+ * 导出当前用户全部个人数据（JSON，供下载存档）
+ */
+export function exportProfile() {
+  return get<UserDataExport>('/profile/export')
+}
+
+/**
+ * 注销当前账户（软删除，注销后无法登录）
+ */
+export function deleteAccount() {
+  return del<null>('/profile/me')
 }
 
 // ==================== 门诊/科室/医生 ====================

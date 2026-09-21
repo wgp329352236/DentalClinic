@@ -78,6 +78,48 @@ fun Application.userProfileRoutes(profileService: UserProfileService) {
                     call.respond(ApiResponse<Unit>(code = code, message = message))
                 }
             }
+
+            /**
+             * 导出当前用户全部个人数据（需求 5.2 数据可携带权）。
+             * GET /api/v1/profile/export
+             */
+            get("/export") {
+                val userId = call.userId()
+                try {
+                    val data = profileService.exportProfile(userId)
+                    if (data != null) {
+                        call.respond(ApiResponse(code = 0, message = "success", data = data))
+                    } else {
+                        call.respond(ApiResponse<Unit>(code = 404, message = "用户不存在"))
+                    }
+                } catch (e: Exception) {
+                    val (code, message) = translateApiError(
+                        logger, "[Profile]: 用户 $userId 导出数据", "导出失败，请稍后重试", e
+                    )
+                    call.respond(ApiResponse<Unit>(code = code, message = message))
+                }
+            }
+
+            /**
+             * 注销当前账户（需求 5.2 用户数据删除，软删除置 status=0）。
+             * DELETE /api/v1/profile/me
+             */
+            delete("/me") {
+                val userId = call.userId()
+                try {
+                    val ok = profileService.deleteAccount(userId)
+                    if (ok) {
+                        call.respond(ApiResponse<Unit>(code = 0, message = "账户已注销"))
+                    } else {
+                        call.respond(ApiResponse<Unit>(code = 404, message = "用户不存在"))
+                    }
+                } catch (e: Exception) {
+                    val (code, message) = translateApiError(
+                        logger, "[Profile]: 用户 $userId 注销账户", "注销失败，请稍后重试", e
+                    )
+                    call.respond(ApiResponse<Unit>(code = code, message = message))
+                }
+            }
             }
         }
     }

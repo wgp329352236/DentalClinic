@@ -1,5 +1,5 @@
 // pages/profile/profile.ts
-import { getUserProfile, getCoupons, getUnreadCount } from '../../utils/api'
+import { exportProfile, deleteAccount, getUserProfile, getCoupons, getUnreadCount } from '../../utils/api'
 import { checkLogin } from '../../utils/auth'
 import { resolveFileUrl } from '../../utils/util'
 import type { UserInfo, Coupon } from '../../types'
@@ -174,6 +174,54 @@ Page({
           wx.reLaunch({
             url: '/pages/index/index'
           })
+        }
+      }
+    })
+  },
+
+  // 导出个人数据（需求 5.2 数据可携带权）：JSON 复制到剪贴板
+  async handleExport() {
+    try {
+      const result = await exportProfile()
+      if (result.code === 0 && result.data) {
+        const json = JSON.stringify(result.data, null, 2)
+        await wx.setClipboardData({ data: json })
+        wx.showModal({
+          title: '导出成功',
+          content: '个人数据（JSON）已复制到剪贴板，可粘贴到备忘录或文件自行保存。',
+          showCancel: false,
+          confirmText: '知道了'
+        })
+      } else {
+        wx.showToast({ title: result.message || '导出失败', icon: 'none' })
+      }
+    } catch (error: any) {
+      wx.showToast({ title: error?.message || '导出失败', icon: 'none' })
+    }
+  },
+
+  // 注销账户（需求 5.2 用户数据删除）：二次确认后软删除并退出
+  handleDeleteAccount() {
+    wx.showModal({
+      title: '注销账户',
+      content: '注销后账户将无法登录，相关权益（余额/积分/优惠券）不可恢复。确定要注销吗？',
+      confirmColor: '#ff4d4f',
+      success: async (res) => {
+        if (!res.confirm) return
+        try {
+          const result = await deleteAccount()
+          if (result.code === 0) {
+            wx.showToast({ title: '账户已注销', icon: 'success' })
+            const app = getApp<IAppOption>()
+            app.logout()
+            setTimeout(() => {
+              wx.reLaunch({ url: '/pages/index/index' })
+            }, 1200)
+          } else {
+            wx.showToast({ title: result.message || '注销失败', icon: 'none' })
+          }
+        } catch (error: any) {
+          wx.showToast({ title: error?.message || '注销失败', icon: 'none' })
         }
       }
     })

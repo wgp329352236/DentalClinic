@@ -1,6 +1,7 @@
 package com.dentalclinic.user.route
 
 import com.dentalclinic.admin.dto.response.ApiResponse
+import com.dentalclinic.user.service.AccountDeletedException
 import com.dentalclinic.user.service.UserAuthService
 import com.dentalclinic.user.service.UserAuthService.WxProfile
 import io.ktor.server.application.*
@@ -48,6 +49,8 @@ fun Application.userAuthRoutes(authService: UserAuthService) {
                             isNewUser = response.isNewUser
                         )
                     ))
+                } catch (e: AccountDeletedException) {
+                    call.respond(ApiResponse<Unit>(code = 403, message = "账号已注销，无法登录"))
                 } catch (e: Exception) {
                     // scene 里不拼 request.code：微信登录凭证不应落入日志
                     val (code, message) = translateApiError(
