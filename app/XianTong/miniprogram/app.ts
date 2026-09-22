@@ -1,5 +1,6 @@
 // app.ts
 import type { UserInfo } from './types'
+import { preloadSubscribeTemplates } from './utils/util'
 
 /** 待绑定推荐码的本地缓存键：登录完成前可能经历多次冷启动，需持久化等待登录后消费 */
 const REFERRAL_STORAGE_KEY = 'pendingReferralCode'
@@ -119,6 +120,9 @@ App<IAppOption>({
     if (promo) {
       this.setPendingPromo(promo)
     }
+
+    // 预加载订阅消息模板 ID（业务点击事件里同步调 wx.requestSubscribeMessage 需要）
+    preloadSubscribeTemplates().catch(() => {})
   },
 
   onShow(options) {

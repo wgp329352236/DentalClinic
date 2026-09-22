@@ -725,11 +725,18 @@ class ConsumptionAdminService(
         accumulated: BigDecimal,
         relatedId: Long
     ) {
-        sendNotification(
+        // 微信订阅消息优先，未配置/未授权时自动降级站内信
+        ScheduledNotifier.notify(
             userId = userId,
+            templateKey = "level_change",
             title = "会员等级提升",
             content = "恭喜！您的累计消费已达 ${accumulated.money()} 元，会员等级提升为" +
                 "「${level[MemberLevels.levelName]}」，可享 ${formatDiscount(level[MemberLevels.discountRate])} 诊疗折扣。",
+            subscribeData = mapOf(
+                "thing1" to level[MemberLevels.levelName],
+                "thing2" to "等级提升"
+            ),
+            page = "/pages/profile/profile",
             msgType = "system",
             relatedId = relatedId
         )

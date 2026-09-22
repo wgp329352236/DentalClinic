@@ -1,6 +1,7 @@
 // pages/recharge/recharge.ts
 import { getRechargeTiers, createRecharge, getRechargeStatus } from '../../utils/api'
 import { checkLogin } from '../../utils/auth'
+import { requestSubscribeMessage } from '../../utils/util'
 import type { WxPayParams } from '../../utils/api'
 
 interface RechargePlan {
@@ -58,6 +59,13 @@ Page({
 
   // 确认充值
   async handleRecharge() {
+    // 订阅消息授权引导：充值后会触发充值成功/消费成功/等级变动等通知
+    requestSubscribeMessage([
+      "recharge_success",
+      "consumption_success",
+      "level_change"
+    ])
+
     const { selectedPlan, customAmount } = this.data
 
     let amount = 0

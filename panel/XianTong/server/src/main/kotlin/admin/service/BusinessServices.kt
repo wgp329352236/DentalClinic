@@ -480,14 +480,21 @@ class AppointmentAdminService : BaseService() {
             it[cancelledAt] = LocalDateTime.now()
         }
         
-        // P1-6: 预约取消通知
+        // P1-6: 预约取消通知（微信订阅消息优先，降级站内信）
         if (appointment != null) {
             val userId = appointment[Appointments.userId]
             val reasonText = if (reason.isNullOrBlank()) "未说明" else reason
-            sendNotification(
+            ScheduledNotifier.notify(
                 userId = userId,
+                templateKey = "appointment_cancelled",
                 title = "预约已取消",
                 content = "您的预约已取消，原因：$reasonText。如需重新预约，请在小程序操作。",
+                subscribeData = mapOf(
+                    "date1" to appointment[Appointments.appointmentDate].toString(),
+                    "time2" to "${appointment[Appointments.startTime]}-${appointment[Appointments.endTime]}",
+                    "thing3" to reasonText.take(20)
+                ),
+                page = "/pages/appointments/appointments",
                 msgType = "system",
                 relatedId = id
             )
@@ -514,14 +521,21 @@ class AppointmentAdminService : BaseService() {
             it[status] = "confirmed"
         }
         
-        // P1-6: 预约确认通知
+        // P1-6: 预约确认通知（微信订阅消息优先，降级站内信）
         val userId = appointment[Appointments.userId]
         val appointmentDate = appointment[Appointments.appointmentDate]
         val startTime = appointment[Appointments.startTime]
-        sendNotification(
+        ScheduledNotifier.notify(
             userId = userId,
+            templateKey = "appointment_confirmed",
             title = "预约已确认",
             content = "您的预约已确认，就诊时间：$appointmentDate $startTime，请准时到院。",
+            subscribeData = mapOf(
+                "date1" to appointmentDate.toString(),
+                "time2" to startTime,
+                "thing3" to "预约已确认"
+            ),
+            page = "/pages/appointments/appointments",
             msgType = "system",
             relatedId = id
         )
@@ -548,6 +562,23 @@ class AppointmentAdminService : BaseService() {
             it[cancelReason] = reason
             it[cancelledAt] = LocalDateTime.now()
         }
+
+        // P1-6: 预约拒绝通知（微信订阅消息优先，降级站内信）
+        val userId = appointment[Appointments.userId]
+        ScheduledNotifier.notify(
+            userId = userId,
+            templateKey = "appointment_rejected",
+            title = "预约申请未通过",
+            content = "您的预约申请未通过，原因：${reason.take(50)}。如有疑问请联系门店。",
+            subscribeData = mapOf(
+                "date1" to appointment[Appointments.appointmentDate].toString(),
+                "time2" to appointment[Appointments.startTime],
+                "thing3" to reason.take(20)
+            ),
+            page = "/pages/appointments/appointments",
+            msgType = "system",
+            relatedId = id
+        )
     }
 
     private fun statusText(status: String): String = when (status) {

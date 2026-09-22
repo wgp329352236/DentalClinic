@@ -35,7 +35,6 @@ dependencies {
     implementation(libs.exposed.r2dbc)                    // Exposed R2DBC 异步驱动支持
     implementation(libs.postgresql.r2dbc)                 // PostgreSQL R2DBC 驱动
 
-
     // Ktor HTTP 客户端（飞书 API 调用等）
     implementation(libs.ktor.client.core)                 // HTTP 客户端核心
     implementation(libs.ktor.client.cio)                  // CIO 异步引擎

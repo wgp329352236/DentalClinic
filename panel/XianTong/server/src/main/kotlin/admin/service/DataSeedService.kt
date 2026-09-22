@@ -496,6 +496,26 @@ object DataSeedService {
                 templateKey = "referral_reward",
                 title = "推荐奖励到账通知",
                 content = "您有一笔推荐奖励已到账，点击查看详情。"
+            ),
+            MessageTemplateSeed(
+                templateKey = "appointment_confirmed",
+                title = "预约已确认",
+                content = "您的预约已确认，请准时到院就诊。"
+            ),
+            MessageTemplateSeed(
+                templateKey = "appointment_cancelled",
+                title = "预约已取消",
+                content = "您的预约已取消，如需重新预约请在小程序操作。"
+            ),
+            MessageTemplateSeed(
+                templateKey = "appointment_rejected",
+                title = "预约申请未通过",
+                content = "您的预约申请未通过，如有疑问请联系门店。"
+            ),
+            MessageTemplateSeed(
+                templateKey = "recharge_success",
+                title = "充值成功通知",
+                content = "您的充值已到账，可前往钱包查看余额。"
             )
         )
 

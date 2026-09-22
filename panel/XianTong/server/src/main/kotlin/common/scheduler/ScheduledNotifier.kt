@@ -33,7 +33,7 @@ object ScheduledNotifier : BaseService() {
         templateKey: String,
         title: String,
         content: String,
-        subscribeData: Map<String, String>,
+        subscribeData: Map<String, String> = emptyMap(),
         page: String? = null,
         msgType: String = "system",
         relatedId: Long? = null

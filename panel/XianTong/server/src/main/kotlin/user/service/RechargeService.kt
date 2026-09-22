@@ -6,6 +6,7 @@ import com.dentalclinic.admin.entity.UserWallets
 import com.dentalclinic.admin.entity.Users
 import com.dentalclinic.admin.util.ConflictException
 import com.dentalclinic.common.BaseService
+import com.dentalclinic.common.scheduler.ScheduledNotifier
 import com.dentalclinic.common.RechargeTierService
 import com.dentalclinic.common.wx.JsapiPayParams
 import com.dentalclinic.common.wx.WechatConfig
@@ -392,14 +393,22 @@ class RechargeService(
         // 充值积分（需求 3.4.1）
         awardRechargePoints(userId, amount, recordId)
         
-        // P1-6: 充值成功通知
+        // P1-6: 充值成功通知（微信订阅消息优先，降级站内信）
         val totalAmount = amount.add(bonusAmount)
-        sendNotification(
+        val balanceNow = change.balanceAfter.add(change.bonusAfter)
+        ScheduledNotifier.notify(
             userId = userId,
+            templateKey = "recharge_success",
             title = "充值成功",
-            content = "您充值 ${amount} 元已到账" + 
-                (if (bonusAmount > BigDecimal.ZERO) "，赠送 ${bonusAmount} 元" else "") + 
-                "，当前余额 ${change.balanceAfter.add(change.bonusAfter)} 元。",
+            content = "您充值 ${amount} 元已到账" +
+                (if (bonusAmount > BigDecimal.ZERO) "，赠送 ${bonusAmount} 元" else "") +
+                "，当前余额 ${balanceNow} 元。",
+            subscribeData = mapOf(
+                "amount1" to amount.toPlainString(),
+                "thing2" to if (bonusAmount > BigDecimal.ZERO) "含赠送 ${bonusAmount}" else "无赠送",
+                "amount3" to balanceNow.toPlainString()
+            ),
+            page = "/pages/wallet/wallet",
             msgType = "system",
             relatedId = recordId
         )

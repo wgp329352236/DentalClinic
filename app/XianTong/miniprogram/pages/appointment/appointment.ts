@@ -1,5 +1,6 @@
 // pages/appointment/appointment.ts
 import { getClinics, getDepartments, getDoctors, getDoctorSlots, createAppointment } from '../../utils/api'
+import { requestSubscribeMessage } from '../../utils/util'
 import type { Clinic, Department, Doctor, TimeSlot } from '../../types'
 
 Page({
@@ -177,6 +178,13 @@ Page({
 
   // 提交预约
   async submitAppointment() {
+    // 订阅消息授权引导：必须在点击事件的同步链上调用，不能放到 await 之后
+    requestSubscribeMessage([
+      "appointment_confirmed",
+      "appointment_remind_evening",
+      "appointment_remind_morning"
+    ])
+
     const { selectedClinicId, selectedDoctorId, selectedDepartmentId, selectedSlot } = this.data
 
     if (!selectedClinicId || !selectedDoctorId || !selectedDepartmentId || !selectedSlot) {
