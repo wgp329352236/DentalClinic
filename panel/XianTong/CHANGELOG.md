@@ -2,6 +2,14 @@
 
 本文件按日期倒序记录 XianTong 项目的代码改动，每条包含：改了什么、为什么改、影响范围。
 
+## 2026-09-22
+
+### 安全修复：PostgreSQL R2DBC 驱动升级（CVE-2025-59432）
+
+- **改了什么**：`gradle/libs.versions.toml` 中 `postgresql` 版本从 `1.0.7.RELEASE` 升级到 `1.1.3.RELEASE`（`org.postgresql:r2dbc-postgresql`）。
+- **原因**：Mend.io 扫描发现旧版本传递依赖 `com.ongres.scram:common:2.1`，存在 CVE-2025-59432（CVSS 7.5）时序攻击漏洞——SCRAM 认证中使用 `Arrays.equals` 短路比较密钥/签名，攻击者可通过计时侧通道推断认证凭据。1.1.3.RELEASE 将 scram 依赖升级到 `com.ongres.scram:scram-common:3.2`，改用 `MessageDigest.isEqual` 常量时间比较，彻底修复此漏洞。
+- **影响范围**：仅 `libs.versions.toml` 版本号变更，`build.gradle.kts` 无需改动（`libs.postgresql.r2dbc` 引用自动跟随）。R2DBC 驱动 API 向后兼容，无业务代码需调整。
+
 ## 2026-09-16
 
 本轮是需求文档差距分析后的**连续三批交付**（2026-09-15 ~ 09-16）：P0 微信登录/支付真实接入、P1（到店扫码签到、积分商城兑换、四个业务定时任务、推荐关系链路修复）、P2 管理端配置完整性（充值档位/会员等级/客户标签/消息模板 CRUD、充值流水分页、代客预约、预约时间轴看板、账号门店数据授权），另含今日收尾的充值档位/会员等级弹窗前端校验。改动跨三端：后端 19 新增 + 约 30 修改，管理端 14 新增 + 10 修改，小程序 8 修改；新增项目级知识库 CODE_WIKI.md，删除根目录遗留的 API.md 与 lefthook.yml。
