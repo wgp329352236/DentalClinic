@@ -6,6 +6,8 @@ import com.dentalclinic.common.config.DBConfig
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
+import io.ktor.utils.io.*
+import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.v1.r2dbc.insert
 import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
 import org.slf4j.LoggerFactory
@@ -53,6 +55,30 @@ val AuditPlugin = createRouteScopedPlugin("AuditPlugin") {
 
             val responseCode = call.response.status()?.value
 
+            // 捕获请求体（需求 P0-5：审计日志记录请求参数）
+            val requestParams = try {
+                val body = call.receiveText()
+                if (body.isNotBlank()) {
+                    // 尝试解析为 JSON 并重新序列化（去除敏感字段如密码）
+                    val json = Json.parseToJsonElement(body)
+                    val sanitized = when (json) {
+                        is kotlinx.serialization.json.JsonObject -> {
+                            val filtered = json.toMutableMap().apply {
+                                remove("password")
+                                remove("token")
+                                remove("secret")
+                            }
+                            kotlinx.serialization.json.JsonObject(filtered)
+                        }
+                        else -> json
+                    }
+                    sanitized.toString().take(2000) // 限制长度
+                } else null
+            } catch (e: Exception) {
+                auditLogger.debug("[Audit]: 无法解析请求体: ${e.message}")
+                null
+            }
+
             suspendTransaction(DBConfig.database) {
                 AdminAuditLogs.insert {
                     it[AdminAuditLogs.userId] = userId
@@ -60,6 +86,7 @@ val AuditPlugin = createRouteScopedPlugin("AuditPlugin") {
                     it[AdminAuditLogs.operationType] = operationType
                     it[AdminAuditLogs.targetResource] = targetResource
                     it[AdminAuditLogs.targetId] = targetId
+                    it[AdminAuditLogs.requestParams] = requestParams
                     it[AdminAuditLogs.ipAddress] = ipAddress
                     it[AdminAuditLogs.userAgent] = userAgent?.take(255)
                     it[AdminAuditLogs.responseCode] = responseCode

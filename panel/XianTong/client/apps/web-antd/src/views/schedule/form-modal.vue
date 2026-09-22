@@ -65,6 +65,14 @@ const [Form, formApi] = useVbenForm({
       rules: 'required',
       componentProps: { min: 1, precision: 0, style: 'width: 100%' },
     },
+    {
+      component: 'InputNumber',
+      fieldName: 'slotDuration',
+      label: '时段时长(分钟)',
+      defaultValue: 30,
+      rules: 'required',
+      componentProps: { min: 15, max: 120, precision: 0, style: 'width: 100%' },
+    },
   ],
 });
 

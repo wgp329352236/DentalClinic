@@ -122,6 +122,14 @@ Page({
     })
   },
 
+  // 改约（跳转到预约页，携带预约ID）
+  onRescheduleAppointment(e: any) {
+    const id = Number(e.currentTarget.dataset.id)
+    wx.navigateTo({
+      url: `/pages/appointment/appointment?rescheduleId=${id}`
+    })
+  },
+
   // 获取可取消的预约
   getCancellableAppointments() {
     return this.data.appointments.filter(appt =>

@@ -195,16 +195,23 @@ class UserProfileService : BaseService() {
     }
 
     /**
-     * 注销当前账户（需求 5.2 用户数据删除）。
+     * 注销当前账户（需求 5.2 用户数据删除 + P0-4 合规：隐名化）。
      *
-     * 采用软删除：status 置 0，保留业务记录以满足财务/审计追溯，同时通过
+     * 采用隐名化删除：将手机号、姓名等 PII 替换为 "DELETED_{userId}" 占位符，
+     * 保留业务记录以满足财务/审计追溯，同时通过
      * [com.dentalclinic.user.service.UserAuthService] 登录拦截使该账户无法再次登录。
      *
      * @return true 表示注销成功；false 表示用户不存在
      */
     suspend fun deleteAccount(userId: Long): Boolean = dbQuery {
+        val anonymizedPhone = "DELETED_$userId"
+        val anonymizedName = "已注销用户"
         Users.update({ Users.id eq userId }) {
             it[Users.status] = 0
+            it[Users.phone] = anonymizedPhone
+            it[Users.realName] = anonymizedName
+            it[Users.nickname] = anonymizedName
+            it[Users.avatar] = null
             it[Users.updatedAt] = LocalDateTime.now()
         } > 0
     }

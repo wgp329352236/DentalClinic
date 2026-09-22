@@ -3,7 +3,7 @@ import { ref } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
 
-import { message } from 'ant-design-vue';
+import { message, Modal } from 'ant-design-vue';
 
 import { useVbenForm } from '#/adapter/form';
 import { adjustLevel, adjustPoints, adjustWallet } from '#/api/customer';
@@ -112,25 +112,50 @@ const [Modal, modalApi] = useVbenModal({
     const { valid } = await formApi.validate();
     if (!valid) return;
     const values = await formApi.getValues();
+
+    // 二次确认对话框（需求 P0-5 合规：关键操作需二次确认）
+    let confirmTitle = '';
+    let confirmContent = '';
     if (values.adjustType === 'wallet') {
-      await adjustWallet(customerId.value, {
-        amount: values.amount,
-        reason: values.reason,
-      });
+      confirmTitle = '确认调整余额';
+      confirmContent = `即将为客户调整余额 ${values.amount >= 0 ? '+' : ''}${values.amount} 元，原因：${values.reason}。此操作将记入审计日志，是否继续？`;
     } else if (values.adjustType === 'level') {
-      await adjustLevel(customerId.value, {
-        levelCode: values.levelCode,
-        reason: values.reason,
-      });
+      const levelNames: Record<number, string> = { 1: '普通会员', 2: '银卡会员', 3: '金卡会员', 4: '钻石会员' };
+      confirmTitle = '确认调整会员等级';
+      confirmContent = `即将将客户等级调整为「${levelNames[values.levelCode] || values.levelCode}」，原因：${values.reason}。此操作将记入审计日志，是否继续？`;
     } else {
-      await adjustPoints(customerId.value, {
-        amount: values.pointsAmount,
-        reason: values.reason,
-      });
+      confirmTitle = '确认调整积分';
+      confirmContent = `即将为客户调整积分 ${values.pointsAmount >= 0 ? '+' : ''}${values.pointsAmount} 分，原因：${values.reason}。此操作将记入审计日志，是否继续？`;
     }
-    message.success('调整成功');
-    emit('success');
-    modalApi.close();
+
+    Modal.confirm({
+      title: confirmTitle,
+      content: confirmContent,
+      okText: '确认执行',
+      cancelText: '取消',
+      okType: 'danger',
+      async onOk() {
+        if (values.adjustType === 'wallet') {
+          await adjustWallet(customerId.value, {
+            amount: values.amount,
+            reason: values.reason,
+          });
+        } else if (values.adjustType === 'level') {
+          await adjustLevel(customerId.value, {
+            levelCode: values.levelCode,
+            reason: values.reason,
+          });
+        } else {
+          await adjustPoints(customerId.value, {
+            amount: values.pointsAmount,
+            reason: values.reason,
+          });
+        }
+        message.success('调整成功');
+        emit('success');
+        modalApi.close();
+      },
+    });
   },
 });
 </script>

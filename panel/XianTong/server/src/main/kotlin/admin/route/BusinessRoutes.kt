@@ -285,6 +285,9 @@ fun Route.customerRoutes(customerService: CustomerService) {
                     val keyword = call.request.queryParameters["keyword"]
                     val clinicId = call.request.queryParameters["clinicId"]?.toLongOrNull()
                     val tagId = call.request.queryParameters["tagId"]?.toLongOrNull()
+                    val memberLevel = call.request.queryParameters["memberLevel"]?.toIntOrNull()
+                    val startDate = call.request.queryParameters["startDate"]
+                    val endDate = call.request.queryParameters["endDate"]
                     // 分页参数保持可选：不传则返回全量，「录入消费」弹窗的客户下拉依赖这一行为
                     val page = call.request.queryParameters["page"]?.toIntOrNull()
                     val pageSize = call.request.queryParameters["pageSize"]?.toIntOrNull()
@@ -294,7 +297,10 @@ fun Route.customerRoutes(customerService: CustomerService) {
                         scope = call.clinicScope(),
                         page = page?.coerceAtLeast(1),
                         pageSize = pageSize?.coerceIn(1, 100),
-                        tagId = tagId
+                        tagId = tagId,
+                        memberLevel = memberLevel,
+                        startDate = startDate,
+                        endDate = endDate
                     )
                     call.ok(data)
                 }
@@ -335,6 +341,16 @@ fun Route.customerRoutes(customerService: CustomerService) {
                     val principal = call.adminPrincipal()
                     customerService.adjustPoints(id, req, principal.username)
                     call.ok<Unit>(message = "积分调整成功")
+                }
+            }
+
+            // P2-18: 更新客户备注
+            requirePermission("customer:update") {
+                put("/{id}/remark") {
+                    val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的客户ID")
+                    val req = call.receive<RemarkUpdateRequest>()
+                    customerService.updateRemark(id, req.remark)
+                    call.ok<Unit>(message = "备注更新成功")
                 }
             }
         }

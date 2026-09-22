@@ -7,6 +7,7 @@ import com.dentalclinic.admin.util.ConflictException
 import com.dentalclinic.admin.util.ForbiddenException
 import com.dentalclinic.admin.util.ValidationException
 import com.dentalclinic.common.BaseService
+import com.dentalclinic.common.scheduler.ScheduledNotifier
 import kotlinx.coroutines.flow.toList
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
@@ -93,6 +94,8 @@ class ClinicService : BaseService() {
             it[closeTime] = req.closeTime
             it[description] = req.description
             it[coverImage] = req.coverImage
+            it[latitude] = req.latitude
+            it[longitude] = req.longitude
             it[status] = req.status
             it[sortOrder] = req.sortOrder
         } get Clinics.id
@@ -107,6 +110,8 @@ class ClinicService : BaseService() {
             it[closeTime] = req.closeTime
             it[description] = req.description
             it[coverImage] = req.coverImage
+            it[latitude] = req.latitude
+            it[longitude] = req.longitude
             it[status] = req.status
             it[sortOrder] = req.sortOrder
         }
@@ -221,6 +226,7 @@ class DoctorService : BaseService() {
             it[specialties] = req.specialties
             it[introduction] = req.introduction
             it[avatar] = req.avatar
+            it[status] = req.status
         }
         DoctorClinicRels.deleteWhere { DoctorClinicRels.doctorId eq id }
         for (c in req.clinicIds) {
@@ -268,6 +274,7 @@ class ScheduleService : BaseService() {
             it[startTime] = req.startTime
             it[endTime] = req.endTime
             it[maxAppointments] = req.maxAppointments
+            it[slotDuration] = req.slotDuration
             it[isEnabled] = 1
         } get DoctorSchedules.id
     }
@@ -462,10 +469,28 @@ class AppointmentAdminService : BaseService() {
     }
 
     suspend fun cancelAppointment(id: Long, reason: String?): Unit = dbQuery {
+        val appointment = Appointments.selectAll()
+            .where { Appointments.id eq id }
+            .toList()
+            .firstOrNull()
+        
         Appointments.update({ Appointments.id eq id }) {
             it[status] = "cancelled"
             it[cancelReason] = reason
             it[cancelledAt] = LocalDateTime.now()
+        }
+        
+        // P1-6: 预约取消通知
+        if (appointment != null) {
+            val userId = appointment[Appointments.userId]
+            val reasonText = if (reason.isNullOrBlank()) "未说明" else reason
+            sendNotification(
+                userId = userId,
+                title = "预约已取消",
+                content = "您的预约已取消，原因：$reasonText。如需重新预约，请在小程序操作。",
+                msgType = "system",
+                relatedId = id
+            )
         }
     }
 
@@ -488,6 +513,18 @@ class AppointmentAdminService : BaseService() {
         Appointments.update({ Appointments.id eq id }) {
             it[status] = "confirmed"
         }
+        
+        // P1-6: 预约确认通知
+        val userId = appointment[Appointments.userId]
+        val appointmentDate = appointment[Appointments.appointmentDate]
+        val startTime = appointment[Appointments.startTime]
+        sendNotification(
+            userId = userId,
+            title = "预约已确认",
+            content = "您的预约已确认，就诊时间：$appointmentDate $startTime，请准时到院。",
+            msgType = "system",
+            relatedId = id
+        )
     }
 
     /**
@@ -664,7 +701,10 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
         keyword: String?, clinicId: Long?,
         page: Int? = null, pageSize: Int? = null,
         scope: ClinicScope = ClinicScope.ALL,
-        tagId: Long? = null
+        tagId: Long? = null,
+        memberLevel: Int? = null,
+        startDate: String? = null,
+        endDate: String? = null
     ): CustomerListResponse = dbQuery {
         // 门店数据隔离：客户归属按首选就诊门店 primaryClinicId 判定
         if (scope.isEmpty) {
@@ -682,6 +722,25 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
             }
             ids
         } else null
+        
+        // P2-18: 会员等级筛选：先定位该等级的 userId 集合
+        val levelUserIds: List<Long>? = if (memberLevel != null) {
+            val levelId = MemberLevels.selectAll()
+                .where { MemberLevels.levelCode eq memberLevel }
+                .toList()
+                .firstOrNull()?.get(MemberLevels.id)
+            if (levelId != null) {
+                val ids = UserMemberLevels.selectAll()
+                    .where { UserMemberLevels.levelId eq levelId }
+                    .toList()
+                    .map { it[UserMemberLevels.userId] }
+                if (ids.isEmpty()) {
+                    return@dbQuery CustomerListResponse(list = emptyList(), total = 0, page = page, pageSize = pageSize)
+                }
+                ids
+            } else null
+        } else null
+        
         var query = Users.selectAll()
         if (clinicId != null) {
             query = query.andWhere { Users.primaryClinicId eq clinicId }
@@ -691,6 +750,18 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
         }
         if (tagUserIds != null) {
             query = query.andWhere { Users.id inList tagUserIds }
+        }
+        if (levelUserIds != null) {
+            query = query.andWhere { Users.id inList levelUserIds }
+        }
+        // P2-18: 注册日期范围筛选
+        if (!startDate.isNullOrBlank()) {
+            val start = java.time.LocalDate.parse(startDate).atStartOfDay()
+            query = query.andWhere { Users.createdAt greaterEq start }
+        }
+        if (!endDate.isNullOrBlank()) {
+            val end = java.time.LocalDate.parse(endDate).atTime(23, 59, 59)
+            query = query.andWhere { Users.createdAt lessEq end }
         }
         // keyword 下推到 SQL：原先是「全表捞出再内存过滤」，客户量增长后每翻一页都要扫全表，
         // 且内存过滤使分页无法在数据库层完成（total 与当页数据必须同源）。
@@ -859,6 +930,7 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
                 avatar = user[Users.avatar],
                 primaryClinicId = user[Users.primaryClinicId],
                 tags = detailTags,
+                remark = user[Users.remark],
                 createdAt = user[Users.createdAt].toString()
             ),
             wallet = CustomerWalletDto(
@@ -1013,15 +1085,22 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
         if (oldLevelCode == levelCode) return@dbQuery
 
         val upgraded = oldLevelCode == null || levelCode > oldLevelCode
-        sendNotification(
+        val noticeContent = buildLevelAdjustNotice(
+            levelName = target[MemberLevels.levelName],
+            discountRate = target[MemberLevels.discountRate],
+            upgraded = upgraded,
+            reason = reason
+        )
+        ScheduledNotifier.notify(
             userId = userId,
+            templateKey = "level_change",
             title = if (upgraded) "会员等级提升" else "会员等级调整",
-            content = buildLevelAdjustNotice(
-                levelName = target[MemberLevels.levelName],
-                discountRate = target[MemberLevels.discountRate],
-                upgraded = upgraded,
-                reason = reason
+            content = noticeContent,
+            subscribeData = mapOf(
+                "thing1" to target[MemberLevels.levelName],
+                "thing2" to if (upgraded) "等级提升" else "等级调整"
             ),
+            page = "/pages/profile/index",
             msgType = "system"
         )
     }
@@ -1045,5 +1124,13 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
         }
         // Delegate to AdminPointsService for the actual points operation
         pointsService.adjustUserPoints(userId, req.amount, req.reason, operator)
+    }
+
+    // P2-18: 更新客户备注
+    suspend fun updateRemark(userId: Long, remark: String?) = dbQuery {
+        Users.update({ Users.id eq userId }) {
+            it[Users.remark] = remark
+            it[Users.updatedAt] = LocalDateTime.now()
+        }
     }
 }

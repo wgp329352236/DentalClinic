@@ -369,6 +369,58 @@ export function getRechargeStatus(recordId: number) {
   return get<RechargeStatusResult>(`/recharge/${recordId}/status`)
 }
 
+// ==================== 消费记录 ====================
+
+export interface ConsumptionRecord {
+  id: number
+  amount: number
+  balanceUsed: number
+  wechatPaid: number
+  pointsEarned: number
+  pointsUsed: number
+  pointsDeduct: number
+  description?: string
+  clinicName?: string
+  appointmentDate?: string
+  doctorName?: string
+  departmentName?: string
+  createdAt: string
+}
+
+export interface ConsumptionRecordsResponse {
+  list: ConsumptionRecord[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+export interface ConsumptionStatistics {
+  totalAmount: number
+  totalRecords: number
+  monthAmount: number
+  monthRecords: number
+}
+
+/**
+ * 获取消费记录列表
+ */
+export function getConsumptionRecords(params?: {
+  page?: number
+  pageSize?: number
+  startDate?: string
+  endDate?: string
+  clinicId?: number
+}) {
+  return get<ConsumptionRecordsResponse>('/consumption/records', params)
+}
+
+/**
+ * 获取消费统计
+ */
+export function getConsumptionStatistics() {
+  return get<ConsumptionStatistics>('/consumption/statistics')
+}
+
 // ==================== 积分 ====================
 
 export interface PointsBalance {

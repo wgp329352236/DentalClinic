@@ -88,6 +88,12 @@ const [Grid, gridApi] = useVbenVxeGrid({
         width: 90,
         slots: { default: 'deduction' },
       },
+      {
+        field: 'pointsDeduct',
+        title: '积分抵扣',
+        width: 95,
+        slots: { default: 'deduction' },
+      },
       { field: 'payAmount', title: '实付', width: 90 },
       { field: 'balanceUsed', title: '余额支付', width: 100 },
       { field: 'wechatPaid', title: '微信支付', width: 100 },

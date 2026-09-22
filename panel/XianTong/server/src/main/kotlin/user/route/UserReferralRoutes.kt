@@ -51,6 +51,37 @@ fun Application.userReferralRoutes(referralService: ReferralService) {
             }
 
             /**
+             * Get referral QR code (P2-16).
+             * GET /api/v1/referral/qrcode
+             */
+            get("/qrcode") {
+                val userId = call.userId()
+                val code = referralService.getReferralCode(userId)
+                
+                // Try to generate WeChat mini program QR code
+                val qrImage = try {
+                    com.dentalclinic.common.wx.WechatMiniClient.getWxaCodeUnlimit(
+                        scene = "ref=$code",
+                        page = "pages/index/index"
+                    )
+                } catch (e: Exception) {
+                    logger.warn("[Referral] 生成小程序码失败: ${e.message}")
+                    null
+                }
+                
+                if (qrImage != null) {
+                    call.respondBytes(qrImage, io.ktor.http.ContentType.Image.PNG)
+                } else {
+                    // Fallback: return plain text for frontend QR code generation
+                    call.respond(ApiResponse(
+                        code = 0,
+                        message = "success",
+                        data = mapOf("payload" to "ref=$code")
+                    ))
+                }
+            }
+
+            /**
              * Get referral records (people referred by user).
              * GET /api/v1/referral/records?page=1&pageSize=20
              */
@@ -63,11 +94,12 @@ fun Application.userReferralRoutes(referralService: ReferralService) {
                 call.respond(ApiResponse(
                     code = 0,
                     message = "success",
-                    data = PageResponse(
-                        list = response.list,
-                        total = response.total,
-                        page = response.page,
-                        pageSize = response.pageSize
+                    data = mapOf(
+                        "list" to response.list,
+                        "total" to response.total,
+                        "monthlyCount" to response.monthlyCount,
+                        "page" to response.page,
+                        "pageSize" to response.pageSize
                     )
                 ))
             }

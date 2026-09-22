@@ -37,6 +37,7 @@ data class ClinicRequest(
     val name: String, val address: String, val phone: String,
     val openTime: String, val closeTime: String,
     val description: String? = null, val coverImage: String? = null,
+    val latitude: Double? = null, val longitude: Double? = null,
     val status: Int = 1, val sortOrder: Int = 0
 )
 
@@ -47,14 +48,16 @@ data class DepartmentRequest(val clinicId: Long, val name: String, val descripti
 data class DoctorRequest(
     val name: String, val title: String, val specialties: String,
     val introduction: String? = null, val avatar: String? = null,
-    val clinicIds: List<Long> = emptyList()
+    val clinicIds: List<Long> = emptyList(),
+    val status: Int = 1 // 1=在职 0=离职
 )
 
 @Serializable
 data class ScheduleRequest(
     val doctorId: Long, val dayOfWeek: Int,
     val startTime: String, val endTime: String,
-    val maxAppointments: Int = 1
+    val maxAppointments: Int = 1,
+    val slotDuration: Int = 30
 )
 
 // ==================== 预约管理 ====================
@@ -195,6 +198,7 @@ data class CustomerInfoDto(
     val avatar: String?,
     val primaryClinicId: Long?,
     val tags: List<CustomerTagDto> = emptyList(),
+    val remark: String? = null,
     val createdAt: String
 )
 
@@ -231,5 +235,8 @@ data class WalletAdjustResult(
 
 @Serializable
 data class LevelAdjustRequest(val levelCode: Int, val reason: String)
+
+@Serializable
+data class RemarkUpdateRequest(val remark: String?)
 
 // PointsAdjustRequest is defined in AdminPointsService.kt (com.dentalclinic.admin.service)

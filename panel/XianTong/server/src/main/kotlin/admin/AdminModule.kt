@@ -13,6 +13,7 @@ import com.dentalclinic.common.config.SchemaMigration
 import com.dentalclinic.common.scheduler.AppointmentReminderService
 import com.dentalclinic.common.scheduler.AutoNoShowService
 import com.dentalclinic.common.scheduler.MemberLevelReviewService
+import com.dentalclinic.common.scheduler.NotificationRuleEngine
 import com.dentalclinic.common.scheduler.PointsExpireService
 import io.ktor.http.*
 import io.ktor.server.application.*
@@ -114,6 +115,8 @@ fun Application.adminModule() {
     AutoNoShowService.start()
     PointsExpireService.start()
     MemberLevelReviewService.start()
+    // P1-11: 通知规则执行引擎（每小时）
+    NotificationRuleEngine.start()
 }
 
 
@@ -237,6 +240,9 @@ fun Application.adminRouting() {
     val contentService = AdminContentService()
     val fileUploadService = FileUploadService()
 
+    // P1-9: 积分商城核销台
+    val adminPointsMallService = AdminPointsMallService()
+
     routing {
         // Admin API
         route("/api/admin") {
@@ -268,6 +274,9 @@ fun Application.adminRouting() {
             rechargeRecordRoutes(rechargeRecordAdminService)
             customerTagRoutes(customerTagAdminService)
             messageTemplateRoutes(messageTemplateAdminService)
+
+            // P1-9: 积分商城核销台
+            adminPointsMallRoutes(adminPointsMallService)
 
             // Miniprogram content config & file upload
             contentAdminRoutes(contentService)

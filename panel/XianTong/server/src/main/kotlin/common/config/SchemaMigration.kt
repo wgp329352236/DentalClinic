@@ -28,6 +28,7 @@ object SchemaMigration {
         try {
             suspendTransaction(DBConfig.database) {
                 migrateConsumptionRecord()
+                migrateUserPhoneHash()
                 migratePointsRuleUnitAmount()
                 migratePointsRuleUniqueActionType()
                 migrateDoctorScheduleUnique()
@@ -54,7 +55,12 @@ object SchemaMigration {
             addColumnIfMissing("consumption_record", "user_coupon_id", "BIGINT NULL"),
             addColumnIfMissing("consumption_record", "pay_amount", "DECIMAL(12,2) NOT NULL DEFAULT 0"),
             addColumnIfMissing("consumption_record", "status", "VARCHAR(20) NOT NULL DEFAULT 'success'"),
-            addColumnIfMissing("consumption_record", "operator_name", "VARCHAR(50) NULL")
+            addColumnIfMissing("consumption_record", "operator_name", "VARCHAR(50) NULL"),
+            addColumnIfMissing("consumption_record", "points_used", "INTEGER NOT NULL DEFAULT 0"),
+            addColumnIfMissing("consumption_record", "points_deduct", "DECIMAL(12,2) NOT NULL DEFAULT 0"),
+            addColumnIfMissing("consumption_record", "payment_status", "VARCHAR(20) NOT NULL DEFAULT 'success'"),
+            addColumnIfMissing("consumption_record", "out_trade_no", "VARCHAR(64) NULL"),
+            addColumnIfMissing("consumption_record", "prepay_id", "VARCHAR(64) NULL")
         ).count { it }
 
         if (added == 0) return
@@ -63,6 +69,22 @@ object SchemaMigration {
         exec("UPDATE consumption_record SET original_amount = amount WHERE original_amount = 0")
         exec("UPDATE consumption_record SET pay_amount = balance_used + wechat_paid WHERE pay_amount = 0")
         logger.info("[SchemaMigration] consumption_record 补齐 $added 个字段并回填历史数据。")
+    }
+
+    /**
+     * user 表补 phone_hash 列（需求 P0-4 合规：手机号盲索引）。
+     *
+     * 为未来手机号加密存储做准备：phone_hash 存储手机号的 SHA-256 哈希，
+     * 用于按手机号查询时的盲索引匹配。历史数据 phone_hash 为 NULL，
+     * 待后续迁移脚本批量计算回填。
+     */
+    private suspend fun R2dbcTransaction.migrateUserPhoneHash() {
+        addColumnIfMissing("user", "phone_hash", "VARCHAR(64) NULL")
+        // P2-18: 客户备注字段
+        addColumnIfMissing("user", "remark", "TEXT NULL")
+        // P2-19: 门店经纬度字段（用于距离计算）
+        addColumnIfMissing("clinic", "latitude", "DOUBLE PRECISION NULL")
+        addColumnIfMissing("clinic", "longitude", "DOUBLE PRECISION NULL")
     }
 
     /**

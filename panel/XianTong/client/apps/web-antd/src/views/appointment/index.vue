@@ -72,6 +72,24 @@ const [Grid, gridApi] = useVbenVxeGrid({
         fieldName: 'doctorId',
         label: '医生',
       },
+      {
+        component: 'DatePicker',
+        componentProps: {
+          style: 'width: 100%',
+          type: 'date',
+        },
+        fieldName: 'startDate',
+        label: '开始日期',
+      },
+      {
+        component: 'DatePicker',
+        componentProps: {
+          style: 'width: 100%',
+          type: 'date',
+        },
+        fieldName: 'endDate',
+        label: '结束日期',
+      },
     ],
     submitOnChange: true,
   },

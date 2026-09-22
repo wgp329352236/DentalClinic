@@ -55,6 +55,18 @@ const [Modal, modalApi] = useVbenModal({
               -￥{{ settlement.couponDeduct ?? 0 }}
             </span>
           </div>
+          <div v-if="(settlement.pointsDeduct ?? 0) > 0">
+            <span class="opacity-60">积分抵扣：</span>
+            <span class="text-red-500">
+              -￥{{ settlement.pointsDeduct ?? 0 }}
+            </span>
+          </div>
+          <div v-if="(settlement.pointsDeduct ?? 0) > 0">
+            <span class="opacity-60">消耗积分：</span>
+            <span class="text-red-500">
+              -{{ settlement.pointsUsed ?? 0 }}
+            </span>
+          </div>
           <div>
             <span class="opacity-60">折后应付：</span>
             ￥{{ settlement.amount ?? 0 }}

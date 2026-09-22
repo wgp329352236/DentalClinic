@@ -3,6 +3,7 @@ package com.dentalclinic.user
 import com.dentalclinic.common.FileUploadService
 import com.dentalclinic.common.ReferralRewardService
 import com.dentalclinic.common.security.CheckinCodeService
+import com.dentalclinic.common.security.SmsVerificationService
 import com.dentalclinic.user.route.*
 import com.dentalclinic.user.service.*
 import io.ktor.server.application.*
@@ -45,6 +46,10 @@ fun Application.userRouting() {
     val fileUploadService = FileUploadService()
     // 首页轮播图/公告，管理端在 AdminContentService 里维护
     val contentService = ContentService()
+    // 消费支付服务（需求 P0-3：余额不足时微信支付补齐）
+    val consumptionPaymentService = UserConsumptionPaymentService()
+    // P1-10: 短信验证码服务（手机号修改校验）
+    val smsVerificationService = SmsVerificationService()
 
     routing {
         // Public auth endpoints
@@ -59,7 +64,7 @@ fun Application.userRouting() {
         userRechargeRoutes(rechargeService)
         userAppointmentRoutes(appointmentService)
         userMedicalRecordRoutes(medicalRecordService)
-        userConsumptionRoutes(consumptionService)
+        userConsumptionRoutes(consumptionService, consumptionPaymentService)
         userPointsRoutes(pointsService)
         userPointsMallRoutes(pointsMallService)
         userReferralRoutes(referralService)
@@ -67,5 +72,7 @@ fun Application.userRouting() {
         userNotificationRoutes(notificationService)
         fileUploadRoutes(fileUploadService)
         testReferralRoutes(referralService)
+        // P1-10: 短信验证码
+        smsVerificationRoutes(smsVerificationService)
     }
 }

@@ -8,6 +8,7 @@ import com.dentalclinic.admin.entity.ReferralRewards
 import com.dentalclinic.admin.entity.UserCoupons
 import com.dentalclinic.admin.entity.UserWallets
 import com.dentalclinic.common.config.ReferralActivityConfig
+import com.dentalclinic.common.scheduler.ScheduledNotifier
 import kotlinx.coroutines.flow.toList
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.SortOrder
@@ -73,7 +74,8 @@ class ReferralRewardService : BaseService() {
     }
 
     /**
-     * 首消奖励：推荐人得积分 + 赠送余额，被推荐人得新人诊疗券。
+     * 首消奖励：推荐人得注册奖励(20积分) + 首消奖励(100积分+50元)，被推荐人得注册奖励(50积分) + 新人券。
+     * P1-8: 注册奖励延迟到首消后发放。
      */
     private suspend fun grantFirstConsumptionReward(
         relation: ResultRow,
@@ -84,6 +86,25 @@ class ReferralRewardService : BaseService() {
         val now = LocalDateTime.now()
         val relationId = relation[ReferralRelations.id]
 
+        // P1-8: 推荐人注册奖励 (20积分)
+        val registrationPoints = awardCappedPoints(
+            userId = referrerId,
+            desired = REGISTRATION_REFERRER_POINTS,
+            sourceType = SOURCE_REGISTRATION,
+            description = "推荐注册奖励-推荐人",
+            sourceId = consumptionRecordId
+        )
+
+        // P1-8: 被推荐人注册奖励 (50积分)
+        val refereeRegistrationPoints = awardCappedPoints(
+            userId = refereeId,
+            desired = REFEREE_REGISTRATION_POINTS,
+            sourceType = SOURCE_REGISTRATION,
+            description = "推荐注册奖励-被推荐人",
+            sourceId = consumptionRecordId
+        )
+
+        // 首消奖励：推荐人得积分 + 赠送余额
         val points = awardCappedPoints(
             userId = referrerId,
             desired = firstConsumptionPoints(),
@@ -97,7 +118,7 @@ class ReferralRewardService : BaseService() {
             .where { UserWallets.userId eq referrerId }
             .toList()
             .singleOrNull()
-        val bonus = FIRST_CONSUMPTION_BONUS
+        val bonus = firstConsumptionBonusYuan()
         if (wallet != null) {
             val bonusBefore = wallet[UserWallets.bonusBalance]
             val bonusAfter = bonusBefore.add(bonus)
@@ -125,6 +146,31 @@ class ReferralRewardService : BaseService() {
             logger.warn("[ReferralReward] 推荐人 $referrerId 无钱包记录，跳过 $bonus 元赠送余额发放。")
         }
 
+        // P1-8: 记录推荐人注册奖励
+        ReferralRewards.insert {
+            it[ReferralRewards.relationId] = relationId
+            it[ReferralRewards.referrerId] = referrerId
+            it[ReferralRewards.refereeId] = refereeId
+            it[ReferralRewards.rewardType] = "points"
+            it[ReferralRewards.rewardValue] = BigDecimal(registrationPoints)
+            it[ReferralRewards.stage] = "registration"
+            it[ReferralRewards.status] = "granted"
+            it[ReferralRewards.grantedAt] = now
+        }
+
+        // P1-8: 记录被推荐人注册奖励
+        ReferralRewards.insert {
+            it[ReferralRewards.relationId] = relationId
+            it[ReferralRewards.referrerId] = referrerId
+            it[ReferralRewards.refereeId] = refereeId
+            it[ReferralRewards.rewardType] = "points"
+            it[ReferralRewards.rewardValue] = BigDecimal(refereeRegistrationPoints)
+            it[ReferralRewards.stage] = "registration"
+            it[ReferralRewards.status] = "granted"
+            it[ReferralRewards.grantedAt] = now
+        }
+
+        // 记录推荐人首消奖励
         ReferralRewards.insert {
             it[ReferralRewards.relationId] = relationId
             it[ReferralRewards.referrerId] = referrerId
@@ -144,18 +190,36 @@ class ReferralRewardService : BaseService() {
 
         val couponValue = grantNewcomerCoupon(refereeId)
 
-        // 需求 3.6.1：推荐奖励发放时 → 站内消息，内容为奖励类型与数量
-        sendNotification(
+        // 需求 3.6.1 + P1-7：推荐奖励发放时 → 微信订阅消息，降级站内信
+        val totalReferrerPoints = registrationPoints + points
+        val rewardContent = buildString {
+            append("您推荐的好友已完成首次消费，获得注册奖励 $registrationPoints 积分 + 首消奖励 $points 积分")
+            if (wallet != null) append("、${bonus.setScale(2, RoundingMode.HALF_UP)} 元赠送余额")
+            append("。")
+        }
+        ScheduledNotifier.notify(
             userId = referrerId,
+            templateKey = "referral_reward",
             title = "推荐奖励到账",
-            content = buildString {
-                append("您推荐的好友已完成首次消费，获得 $points 积分")
-                if (wallet != null) append("、${bonus.setScale(2, RoundingMode.HALF_UP)} 元赠送余额")
-                append("。")
-            },
+            content = rewardContent,
+            subscribeData = mapOf(
+                "thing1" to "推荐奖励",
+                "amount2" to "$totalReferrerPoints 积分" + (if (wallet != null) " + ${bonus.setScale(2, RoundingMode.HALF_UP)} 元" else "")
+            ),
+            page = "/pages/referral/index",
             msgType = "activity",
             relatedId = consumptionRecordId
         )
+
+        // P1-8: 被推荐人注册奖励通知
+        sendNotification(
+            userId = refereeId,
+            title = "推荐注册奖励到账",
+            content = "您通过推荐注册获得 $refereeRegistrationPoints 积分奖励。",
+            msgType = "activity",
+            relatedId = consumptionRecordId
+        )
+
         if (couponValue != null) {
             sendNotification(
                 userId = refereeId,
@@ -240,7 +304,8 @@ class ReferralRewardService : BaseService() {
             .toList()
             .count { row -> row[ReferralRelations.referrerId] != row[ReferralRelations.refereeId] }
 
-        if (referralCount < TIER_REFERRAL_THRESHOLD) return
+        val threshold = tierReferralThreshold()
+        if (referralCount < threshold) return
 
         val alreadyGranted = ReferralRewards.selectAll()
             .where {
@@ -249,11 +314,12 @@ class ReferralRewardService : BaseService() {
             .count() > 0
         if (alreadyGranted) return
 
+        val rewardPoints = tierRewardPoints()
         val points = awardCappedPoints(
             userId = referrerId,
-            desired = TIER_REWARD_POINTS,
+            desired = rewardPoints,
             sourceType = SOURCE_TIER,
-            description = "推荐满${TIER_REFERRAL_THRESHOLD}人阶梯奖励",
+            description = "推荐满${threshold}人阶梯奖励",
             sourceId = consumptionRecordId
         )
 
@@ -271,7 +337,7 @@ class ReferralRewardService : BaseService() {
         sendNotification(
             userId = referrerId,
             title = "推荐阶梯奖励到账",
-            content = "累计推荐满 $TIER_REFERRAL_THRESHOLD 人，额外获得 $points 积分。",
+            content = "累计推荐满 $threshold 人，额外获得 $points 积分。",
             msgType = "activity",
             relatedId = consumptionRecordId
         )
@@ -407,6 +473,12 @@ class ReferralRewardService : BaseService() {
         /** 被推荐人首消后获得的新人券模板名称 */
         const val NEWCOMER_COUPON_NAME = "推荐新人券"
 
+        /** P1-8: 推荐人注册奖励积分 (需求 3.5.2) */
+        private const val REGISTRATION_REFERRER_POINTS = 20
+
+        /** P1-8: 被推荐人注册奖励积分 (需求 3.5.2) */
+        private const val REFEREE_REGISTRATION_POINTS = 50
+
         /** 持续奖励：每消费满 1000 元发 10 积分 */
         private const val ONGOING_AMOUNT_STEP = 1000
         private const val ONGOING_POINTS_PER_STEP = 10
@@ -424,6 +496,40 @@ class ReferralRewardService : BaseService() {
 
         /** 积分有效期兜底值（月） */
         private const val DEFAULT_VALIDITY_MONTHS = 12
+
+        /**
+         * P2-17: 读取可配置的推荐首消赠送余额（元）。
+         */
+        private suspend fun firstConsumptionBonusYuan(): BigDecimal = try {
+            val value = com.dentalclinic.common.config.ReferralActivityConfig.getInt(
+                "referral.first_consumption_bonus_yuan", 50
+            )
+            BigDecimal(value)
+        } catch (e: Exception) {
+            FIRST_CONSUMPTION_BONUS
+        }
+
+        /**
+         * P2-17: 读取可配置的阶梯奖励人数阈值。
+         */
+        private suspend fun tierReferralThreshold(): Int = try {
+            com.dentalclinic.common.config.ReferralActivityConfig.getInt(
+                "referral.tier_threshold_count", TIER_REFERRAL_THRESHOLD
+            )
+        } catch (e: Exception) {
+            TIER_REFERRAL_THRESHOLD
+        }
+
+        /**
+         * P2-17: 读取可配置的阶梯奖励积分数。
+         */
+        private suspend fun tierRewardPoints(): Int = try {
+            com.dentalclinic.common.config.ReferralActivityConfig.getInt(
+                "referral.tier_reward_points", TIER_REWARD_POINTS
+            )
+        } catch (e: Exception) {
+            TIER_REWARD_POINTS
+        }
     }
 }
 

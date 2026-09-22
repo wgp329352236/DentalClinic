@@ -391,6 +391,19 @@ class RechargeService(
 
         // 充值积分（需求 3.4.1）
         awardRechargePoints(userId, amount, recordId)
+        
+        // P1-6: 充值成功通知
+        val totalAmount = amount.add(bonusAmount)
+        sendNotification(
+            userId = userId,
+            title = "充值成功",
+            content = "您充值 ${amount} 元已到账" + 
+                (if (bonusAmount > BigDecimal.ZERO) "，赠送 ${bonusAmount} 元" else "") + 
+                "，当前余额 ${change.balanceAfter.add(change.bonusAfter)} 元。",
+            msgType = "system",
+            relatedId = recordId
+        )
+        
         return true
     }
 

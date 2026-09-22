@@ -41,6 +41,9 @@ fun Route.consumptionRoutes(consumptionService: ConsumptionAdminService) {
                     if (request.userCouponId != null && request.userCouponId <= 0) {
                         throw ValidationException("无效的优惠券ID")
                     }
+                    if (request.usePoints < 0) {
+                        throw ValidationException("积分抵扣数量不能为负数")
+                    }
 
                     val result = consumptionService.createConsumption(request, principal.username)
                     call.ok(result, "录入成功")

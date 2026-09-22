@@ -24,7 +24,10 @@
 
       <!-- 操作按钮 -->
       <view class="flex-between" wx:if="{{item.status === 'pending' || item.status === 'confirmed'}}">
-        <button class="btn-outline btn-sm" data-id="{{item.id}}" bindtap="onCancelAppointment">取消预约</button>
+        <view class="flex gap-10">
+          <button class="btn-outline btn-sm" data-id="{{item.id}}" bindtap="onRescheduleAppointment">改约</button>
+          <button class="btn-outline btn-sm" data-id="{{item.id}}" bindtap="onCancelAppointment">取消预约</button>
+        </view>
         <!-- 仅就诊当天展示扫码签到（非当天的未来预约签到会被后端拒绝，按钮直接收起） -->
         <button wx:if="{{item.canCheckin}}" class="btn-checkin btn-sm" data-id="{{item.id}}" loading="{{checkingIn}}" bindtap="onScanCheckin">扫码签到</button>
         <view wx:else></view>

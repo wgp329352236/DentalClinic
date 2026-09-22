@@ -68,6 +68,19 @@ const [Form, formApi] = useVbenForm({
         valueField: 'id',
       },
     },
+    {
+      component: 'Select',
+      fieldName: 'status',
+      label: '状态',
+      defaultValue: 1,
+      componentProps: {
+        style: 'width: 100%',
+        options: [
+          { label: '在职', value: 1 },
+          { label: '离职', value: 0 },
+        ],
+      },
+    },
   ],
 });
 
@@ -86,6 +99,7 @@ const [Modal, modalApi] = useVbenModal({
           introduction: data.row.introduction,
           avatar: data.row.avatar,
           clinicIds: data.row.clinicIds ?? [],
+          status: data.row.status ?? 1,
         });
       } else {
         formApi.resetForm();

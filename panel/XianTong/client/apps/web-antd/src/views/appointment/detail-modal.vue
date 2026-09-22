@@ -33,7 +33,20 @@ const [Form, formApi] = useVbenForm({
           { label: '已到店', value: 'arrived' },
           { label: '已完成', value: 'completed' },
           { label: '已取消', value: 'cancelled' },
+          { label: '爽约', value: 'no_show' },
         ],
+      },
+    },
+    {
+      component: 'Input',
+      fieldName: 'cancelReason',
+      label: '取消/爽约原因',
+      componentProps: { placeholder: '选填，取消或爽约时填写' },
+      dependencies: {
+        if(values) {
+          return values.status === 'cancelled' || values.status === 'no_show';
+        },
+        triggerFields: ['status'],
       },
     },
     {
@@ -67,6 +80,7 @@ const [Modal, modalApi] = useVbenModal({
       consumption.value = res.consumption || {};
       formApi.setValues({
         status: info.value.status,
+        cancelReason: info.value.cancelReason,
         remark: info.value.remark,
         diagnosis: info.value.diagnosis,
         treatmentPlan: info.value.treatmentPlan,
@@ -78,6 +92,7 @@ const [Modal, modalApi] = useVbenModal({
     await updateAppointmentStatus(appointmentId.value, {
       status: values.status,
       remark: values.remark,
+      cancelReason: values.cancelReason,
     });
     await updateMedicalRecord(appointmentId.value, {
       diagnosis: values.diagnosis,

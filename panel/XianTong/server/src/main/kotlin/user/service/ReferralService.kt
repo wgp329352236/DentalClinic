@@ -75,6 +75,13 @@ class ReferralService(
             row[ReferralRelations.referrerId] != row[ReferralRelations.refereeId]
         }
         val total = filtered.size.toLong()
+        
+        // Calculate monthly count
+        val monthStart = java.time.LocalDate.now().withDayOfMonth(1).atStartOfDay()
+        val monthlyCount = filtered.count { row ->
+            row[ReferralRelations.registeredAt] >= monthStart
+        }
+        
         val paginatedRows = filtered.drop((page - 1) * pageSize).take(pageSize)
 
         // Batch load referee info to avoid N+1
@@ -88,18 +95,33 @@ class ReferralService(
 
         val records = paginatedRows.map { row ->
             val referee = usersMap[row[ReferralRelations.refereeId]]
+            val rawName = referee?.get(Users.nickname) ?: "用户${row[ReferralRelations.refereeId]}"
+            // Desensitize name: show first char + ** for privacy
+            val desensitizedName = if (rawName.length > 1) "${rawName[0]}**" else rawName
+            
+            // Calculate rewards based on status
+            val rewardPoints = when (row[ReferralRelations.rewardStatus]) {
+                "full" -> 120 // 20 (registration) + 100 (first consumption)
+                "partial" -> 20 // Only registration reward
+                else -> 0
+            }
+            val rewardBonus = if (row[ReferralRelations.rewardStatus] == "full") 50.0 else 0.0
+            
             ReferralRecordDto(
                 id = row[ReferralRelations.id],
-                refereeName = referee?.get(Users.nickname) ?: "用户${row[ReferralRelations.refereeId]}",
+                refereeName = desensitizedName,
                 registeredAt = row[ReferralRelations.registeredAt].format(dateTimeFormatter),
                 firstConsumedAt = row[ReferralRelations.firstConsumedAt]?.format(dateTimeFormatter),
-                rewardStatus = row[ReferralRelations.rewardStatus]
+                rewardStatus = row[ReferralRelations.rewardStatus],
+                rewardPoints = rewardPoints,
+                rewardBonus = rewardBonus
             )
         }
 
         ReferralRecordsResponse(
             list = records,
             total = total,
+            monthlyCount = monthlyCount,
             page = page,
             pageSize = pageSize
         )
@@ -181,7 +203,7 @@ class ReferralService(
             it[Users.sourceType] = "referral"
         }
 
-        awardRegistrationReward(referrerId, refereeId)
+        // P1-8: 注册奖励延迟到首消后发放，此处不再立即发放
         ReferralResult.Success
     }
 
@@ -250,12 +272,15 @@ data class ReferralRecordDto(
     val refereeName: String,
     val registeredAt: String,
     val firstConsumedAt: String?,
-    val rewardStatus: String
+    val rewardStatus: String,
+    val rewardPoints: Int = 0,
+    val rewardBonus: Double = 0.0
 )
 
 data class ReferralRecordsResponse(
     val list: List<ReferralRecordDto>,
     val total: Long,
+    val monthlyCount: Int,
     val page: Int,
     val pageSize: Int
 )

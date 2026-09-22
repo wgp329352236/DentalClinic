@@ -194,6 +194,19 @@ const [Form, formApi] = useVbenForm({
       },
     },
     {
+      component: 'InputNumber',
+      fieldName: 'usePoints',
+      label: '积分抵扣',
+      defaultValue: 0,
+      help: '本次消耗的积分数量（100积分=1元，单笔最高抵扣应付金额的20%）',
+      componentProps: {
+        min: 0,
+        step: 1,
+        placeholder: '0 表示不使用积分抵扣',
+        style: 'width: 100%',
+      },
+    },
+    {
       component: 'Textarea',
       fieldName: 'description',
       label: '消费项目',
@@ -221,6 +234,7 @@ const [Modal, modalApi] = useVbenModal({
         appointmentId: values.appointmentId || null,
         userCouponId: values.userCouponId || null,
         useBalance: values.useBalance ?? true,
+        usePoints: values.usePoints || 0,
         description: values.description || null,
       });
       message.success('录入成功');

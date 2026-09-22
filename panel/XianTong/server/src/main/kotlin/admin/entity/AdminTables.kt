@@ -271,6 +271,8 @@ object Clinics : Table("clinic") {
     val businessDays = varchar("business_days", 50).default("1,2,3,4,5,6,7") // 营业星期 1-7
     val description = text("description").nullable() // 门店简介
     val coverImage = varchar("cover_image", 500).nullable() // 封面图URL
+    val latitude = double("latitude").nullable() // P2-19: 纬度
+    val longitude = double("longitude").nullable() // P2-19: 经度
     val status = integer("status").default(1) // 1=营业中 0=停业
     val sortOrder = integer("sort_order").default(0)
     val createdAt = datetime("created_at").defaultExpression(CurrentTimestamp)
@@ -364,6 +366,7 @@ object Users : Table("user") {
     val openid = varchar("openid", 100)       // 微信openid
     val unionid = varchar("unionid", 100).nullable() // 微信unionid
     val phone = varchar("phone", 20).nullable() // 手机号
+    val phoneHash = varchar("phone_hash", 64).nullable() // 手机号 SHA-256 哈希（盲索引，需求 P0-4）
     val nickname = varchar("nickname", 100).nullable() // 昵称
     val realName = varchar("real_name", 50).nullable() // 真实姓名
     val gender = integer("gender").nullable() // 1=男 2=女
@@ -372,6 +375,7 @@ object Users : Table("user") {
     val primaryClinicId = long("primary_clinic_id").nullable() // 首选就诊门店
     val sourceType = varchar("source_type", 20).default("self") // self/referral/store_entry
     val referredBy = long("referred_by").nullable() // 推荐人ID
+    val remark = text("remark").nullable() // P2-18: 客户备注
     val status = integer("status").default(1) // 1=正常 0=禁用
     val lastLoginAt = datetime("last_login_at").nullable()
     val createdAt = datetime("created_at").defaultExpression(CurrentTimestamp)
@@ -590,8 +594,13 @@ object ConsumptionRecords : Table("consumption_record") {
     val userCouponId = long("user_coupon_id").nullable() // 本次核销的用户优惠券ID
     val balanceUsed = decimal("balance_used", 12, 2).default(0.0.toBigDecimal()) // 使用余额
     val wechatPaid = decimal("wechat_paid", 12, 2).default(0.0.toBigDecimal()) // 微信支付部分
+    val paymentStatus = varchar("payment_status", 20).default("success") // success/pending/failed（需求 P0-3）
+    val outTradeNo = varchar("out_trade_no", 64).nullable() // 微信支付商户单号
+    val prepayId = varchar("prepay_id", 64).nullable() // 微信支付预支付ID
     val payAmount = decimal("pay_amount", 12, 2).default(0.0.toBigDecimal()) // 实付金额
     val pointsEarned = integer("points_earned").default(0) // 获得积分
+    val pointsUsed = integer("points_used").default(0) // 本次抵扣消耗的积分（需求 3.4.2）
+    val pointsDeduct = decimal("points_deduct", 12, 2).default(0.0.toBigDecimal()) // 积分抵扣的金额（元）
     val status = varchar("status", 20).default("success") // success/refunded
     val operatorName = varchar("operator_name", 50).nullable() // 录入操作员（管理端账号）
     val description = text("description").nullable() // 消费说明

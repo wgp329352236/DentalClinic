@@ -18,6 +18,8 @@ import com.dentalclinic.admin.util.ValidationException
 import com.dentalclinic.common.BaseService
 import com.dentalclinic.common.ReferralRewardOutcome
 import com.dentalclinic.common.ReferralRewardService
+import com.dentalclinic.common.scheduler.ScheduledNotifier
+import com.dentalclinic.common.config.PointsDeductConfig
 import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -113,7 +115,13 @@ class ConsumptionAdminService(
             resolveCoupon(it, request.userId, discountedAmount, appointment)
         }
         val couponDeduct = coupon?.deduct ?: BigDecimal.ZERO
-        val payAmount = discountedAmount.subtract(couponDeduct).money()
+        val payableBeforePoints = discountedAmount.subtract(couponDeduct).money()
+
+        // 2.5 积分抵扣诊疗费（需求 3.4.2：100 积分抵 1 元，单笔最高抵扣应付金额的一定比例）
+        val pointsDeduction = resolvePointsDeduction(request.userId, request.usePoints, payableBeforePoints)
+        val pointsUsed = pointsDeduction.pointsUsed
+        val pointsDeduct = pointsDeduction.deductAmount
+        val payAmount = payableBeforePoints.subtract(pointsDeduct).money()
 
         // 3. 余额扣减（需求 3.3.1：优先使用余额，不足部分由微信支付补齐）
         val payment = deductBalance(request.userId, payAmount, request.useBalance)
@@ -133,8 +141,11 @@ class ConsumptionAdminService(
             it[ConsumptionRecords.userCouponId] = coupon?.userCouponId
             it[ConsumptionRecords.balanceUsed] = payment.balanceUsed
             it[ConsumptionRecords.wechatPaid] = payment.wechatPaid
+            it[ConsumptionRecords.paymentStatus] = if (payment.wechatPaid > BigDecimal.ZERO) "pending" else "success"
             it[ConsumptionRecords.payAmount] = payAmount
             it[ConsumptionRecords.pointsEarned] = pointsAward.points
+            it[ConsumptionRecords.pointsUsed] = pointsUsed
+            it[ConsumptionRecords.pointsDeduct] = pointsDeduct
             it[ConsumptionRecords.status] = "success"
             it[ConsumptionRecords.operatorName] = operator
             it[ConsumptionRecords.description] = request.description
@@ -160,6 +171,17 @@ class ConsumptionAdminService(
                 reason = request.description?.take(200) ?: "消费扣款",
                 operatorName = operator,
                 relatedId = recordId
+            )
+        }
+
+        // 积分抵扣：实际扣减本次消耗的积分（负数走同一套积分逻辑，原子计入积分流水与汇总余额）
+        if (pointsUsed > 0) {
+            pointsService.addPoints(
+                userId = request.userId,
+                amount = -pointsUsed,
+                sourceType = "points_deduct",
+                description = "积分抵扣诊疗费（抵 ${pointsDeduct.money()} 元）",
+                sourceId = recordId
             )
         }
 
@@ -195,19 +217,29 @@ class ConsumptionAdminService(
             }
         }
 
-        // 9. 消费通知（需求 3.6.1：每次消费后 → 站内消息，内容为消费金额、余额、积分变动）
-        sendNotification(
+        // 9. 消费通知（需求 3.6.1 + P1-7：接入微信订阅消息，降级站内信）
+        val noticeContent = buildConsumptionNotice(
+            originalAmount = originalAmount,
+            discountAmount = discountAmount,
+            couponName = coupon?.name,
+            couponDeduct = couponDeduct,
+            pointsUsed = pointsUsed,
+            pointsDeduct = pointsDeduct,
+            payment = payment,
+            payAmount = payAmount,
+            pointsEarned = pointsAward.points
+        )
+        ScheduledNotifier.notify(
             userId = request.userId,
+            templateKey = "consumption_success",
             title = "消费成功",
-            content = buildConsumptionNotice(
-                originalAmount = originalAmount,
-                discountAmount = discountAmount,
-                couponName = coupon?.name,
-                couponDeduct = couponDeduct,
-                payment = payment,
-                payAmount = payAmount,
-                pointsEarned = pointsAward.points
+            content = noticeContent,
+            subscribeData = mapOf(
+                "thing1" to "诊疗消费",
+                "amount2" to "${payAmount}元",
+                "date3" to LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
             ),
+            page = "/pages/consumption/detail?id=$recordId",
             msgType = "consumption",
             relatedId = recordId
         )
@@ -219,6 +251,8 @@ class ConsumptionAdminService(
             amount = discountedAmount.toDouble(),
             couponName = coupon?.name,
             couponDeduct = couponDeduct.toDouble(),
+            pointsUsed = pointsUsed,
+            pointsDeduct = pointsDeduct.toDouble(),
             payAmount = payAmount.toDouble(),
             balanceUsed = payment.balanceUsed.toDouble(),
             wechatPaid = payment.wechatPaid.toDouble(),
@@ -300,6 +334,8 @@ class ConsumptionAdminService(
                 discountAmount = row[ConsumptionRecords.discountAmount].toDouble(),
                 amount = row[ConsumptionRecords.amount].toDouble(),
                 couponDeduct = row[ConsumptionRecords.couponDeduct].toDouble(),
+                pointsUsed = row[ConsumptionRecords.pointsUsed],
+                pointsDeduct = row[ConsumptionRecords.pointsDeduct].toDouble(),
                 payAmount = row[ConsumptionRecords.payAmount].toDouble(),
                 balanceUsed = row[ConsumptionRecords.balanceUsed].toDouble(),
                 wechatPaid = row[ConsumptionRecords.wechatPaid].toDouble(),
@@ -565,6 +601,53 @@ class ConsumptionAdminService(
             ?.get(UserPointsSummary.totalBalance) ?: 0
 
     /**
+     * 计算本笔消费的积分抵扣（需求 3.4.2：100 积分抵 1 元，单笔最高抵扣应付金额的一定比例）。
+     *
+     * 抵扣基数为「会员折扣 + 优惠券之后、余额支付之前」的应付金额 [payable]，
+     * 与「单笔最高抵扣消费金额的 20%」口径一致。比率与上限均由
+     * [PointsDeductConfig] 驱动，管理端可热改。
+     *
+     * 纯校验+换算，不改库：实际扣分在消费记录落库后由结算主流程执行。
+     */
+    private suspend fun resolvePointsDeduction(
+        userId: Long,
+        usePoints: Int,
+        payable: BigDecimal
+    ): PointsDeduction {
+        if (usePoints <= 0 || payable <= BigDecimal.ZERO) {
+            return PointsDeduction(0, BigDecimal.ZERO)
+        }
+        if (!PointsDeductConfig.enabled()) {
+            throw ValidationException("积分抵扣功能当前已关闭，请联系管理员或取消积分抵扣")
+        }
+
+        val perYuan = PointsDeductConfig.pointsPerYuan()
+        val maxRatioPercent = PointsDeductConfig.maxRatioPercent()
+
+        val balance = readPointsBalance(userId)
+        if (balance <= 0) {
+            throw ValidationException("该客户当前无可用积分，无法使用积分抵扣")
+        }
+
+        // 比例上限换算为积分数：payable × maxRatio% × perYuan，向下取整避免超比例
+        val maxPointsByRatio = payable
+            .multiply(BigDecimal(maxRatioPercent))
+            .multiply(BigDecimal(perYuan))
+            .divide(BigDecimal(100), 0, RoundingMode.DOWN)
+            .toInt()
+
+        val pointsUsed = minOf(usePoints, balance, maxPointsByRatio)
+        if (pointsUsed <= 0) {
+            throw ValidationException("本次可抵扣额度为 0，无法使用积分抵扣（单笔最高抵扣应付金额的 $maxRatioPercent%）")
+        }
+
+        val deductAmount = BigDecimal(pointsUsed)
+            .divide(BigDecimal(perYuan), 2, RoundingMode.DOWN)
+
+        return PointsDeduction(pointsUsed = pointsUsed, deductAmount = deductAmount)
+    }
+
+    /**
      * 累加消费并按门槛自动升级会员等级（需求 3.3.2）。
      *
      * 累计口径用折后消费金额 [ConsumptionRecords.amount]，与数据看板营收口径一致。
@@ -662,6 +745,8 @@ class ConsumptionAdminService(
         discountAmount: BigDecimal,
         couponName: String?,
         couponDeduct: BigDecimal,
+        pointsUsed: Int,
+        pointsDeduct: BigDecimal,
         payment: PaymentSplit,
         payAmount: BigDecimal,
         pointsEarned: Int
@@ -672,6 +757,9 @@ class ConsumptionAdminService(
         }
         if (couponDeduct > BigDecimal.ZERO) {
             append("，优惠券「$couponName」抵扣 -${couponDeduct.money()} 元")
+        }
+        if (pointsDeduct > BigDecimal.ZERO) {
+            append("，积分抵扣 -${pointsDeduct.money()} 元（消耗 $pointsUsed 分）")
         }
         append("。")
         if (payment.balanceUsed > BigDecimal.ZERO) append("余额支付 ${payment.balanceUsed.money()} 元，")
@@ -762,6 +850,12 @@ private data class PointsAward(
     val validityMonths: Int
 )
 
+/** 积分抵扣诊疗费计算结果（需求 3.4.2） */
+private data class PointsDeduction(
+    val pointsUsed: Int,
+    val deductAmount: BigDecimal
+)
+
 /** 累计消费与等级变动结果 */
 private data class LevelChangeResult(
     val accumulatedConsumption: Double,
@@ -784,6 +878,8 @@ data class CreateConsumptionRequest(
     val userCouponId: Long? = null,
     /** 是否优先使用钱包余额支付；false 表示全额记为微信支付 */
     val useBalance: Boolean = true,
+    /** 本次要消耗的积分数量（需求 3.4.2 积分抵扣诊疗费）；0 或不传表示不使用积分抵扣 */
+    val usePoints: Int = 0,
     val description: String? = null
 )
 
@@ -806,6 +902,8 @@ data class ConsumptionSettlementDto(
     val amount: Double,
     val couponName: String?,
     val couponDeduct: Double,
+    val pointsUsed: Int,
+    val pointsDeduct: Double,
     val payAmount: Double,
     val balanceUsed: Double,
     val wechatPaid: Double,
@@ -833,6 +931,8 @@ data class ConsumptionAdminDto(
     val discountAmount: Double,
     val amount: Double,
     val couponDeduct: Double,
+    val pointsUsed: Int,
+    val pointsDeduct: Double,
     val payAmount: Double,
     val balanceUsed: Double,
     val wechatPaid: Double,

@@ -34,6 +34,7 @@ object DataSeedService {
             seedPointsGoods()
             seedAppointmentConfigs()
             seedReferralActivityConfigs()
+            seedPointsDeductConfigs()
             seedMessageTemplates()
             seedDefaultAdmin()
             seedSuperAdminRole()
@@ -384,6 +385,66 @@ object DataSeedService {
     }
 
     /**
+     * 播种积分抵扣诊疗费配置（需求 3.4.2）。
+     *
+     * 把「是否启用 / 多少积分抵 1 元 / 单笔最高抵扣比例」落到 admin_system_config，
+     * 管理端「系统设置 → 系统配置」可直接改。默认按需求值：100 积分抵 1 元、单笔最高抵 20%。
+     * 幂等：按 configKey 判重，已存在则跳过（不覆盖管理端调过的值）。
+     */
+    private suspend fun seedPointsDeductConfigs() {
+        data class Cfg(val key: String, val value: String, val desc: String)
+        val seeds = listOf(
+            Cfg(
+                key = "points.deduct_enabled",
+                value = "1",
+                desc = "是否启用积分抵扣诊疗费（1=启用，0=关闭）"
+            ),
+            Cfg(
+                key = "points.deduct_points_per_yuan",
+                value = "100",
+                desc = "积分抵扣比率：多少积分抵 1 元（默认 100）"
+            ),
+            Cfg(
+                key = "points.deduct_max_ratio_percent",
+                value = "20",
+                desc = "单笔积分最高抵扣应付金额的比例（%，默认 20）"
+            ),
+            // P2-17: 推荐奖励可配置
+            Cfg(
+                key = "referral.first_consumption_bonus_yuan",
+                value = "50",
+                desc = "推荐首消奖励赠送余额（元，默认 50）"
+            ),
+            Cfg(
+                key = "referral.tier_threshold_count",
+                value = "5",
+                desc = "推荐阶梯奖励人数阈值（默认 5 人）"
+            ),
+            Cfg(
+                key = "referral.tier_reward_points",
+                value = "200",
+                desc = "推荐阶梯奖励积分数（默认 200 分）"
+            )
+        )
+        for (seed in seeds) {
+            val exists = AdminSystemConfigs.selectAll()
+                .where { AdminSystemConfigs.configKey eq seed.key }
+                .count() > 0
+            if (exists) continue
+            AdminSystemConfigs.insert {
+                it[configKey] = seed.key
+                it[configValue] = seed.value
+                it[configType] = "int"
+                it[category] = "points"
+                it[description] = seed.desc
+                it[minValue] = 0
+                it[maxValue] = null
+            }
+            logger.info("[DataSeed]: Created points deduct config: ${seed.key} = ${seed.value}")
+        }
+    }
+
+    /**
      * 播种微信订阅消息模板（需求 3.6：预约提醒 / 3.4.1：积分到期提醒）。
      *
      * template_id 先以空串占位：真实的微信模板 ID 需要在小程序后台申请模板后，
@@ -420,6 +481,21 @@ object DataSeedService {
                 templateKey = "points_expire_remind",
                 title = "积分到期提醒",
                 content = "您有积分即将到期，到期后将自动清零，可前往积分商城兑换好礼。"
+            ),
+            MessageTemplateSeed(
+                templateKey = "consumption_success",
+                title = "消费成功通知",
+                content = "您的消费已结算完成，可前往消费记录查看详情。"
+            ),
+            MessageTemplateSeed(
+                templateKey = "level_change",
+                title = "会员等级变动通知",
+                content = "您的会员等级已更新，点击查看详情。"
+            ),
+            MessageTemplateSeed(
+                templateKey = "referral_reward",
+                title = "推荐奖励到账通知",
+                content = "您有一笔推荐奖励已到账，点击查看详情。"
             )
         )
 
