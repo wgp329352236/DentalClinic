@@ -68,8 +68,23 @@ export interface Banner {
   id: number
   title: string
   imageUrl: string
+  /** 关联活动 ID：一张轮播图对应一个活动，点击进入活动详情页 */
+  activityId: number
+  /** 历史字段，仅 activityId 缺失时兜底 */
   linkType: ContentLinkType
   linkTarget?: string
+}
+
+/** 活动详情（首页轮播图落地页） */
+export interface ActivityDetail {
+  id: number
+  title: string
+  coverImage?: string
+  summary?: string
+  /** 纯文本详情，按换行分段渲染 */
+  content?: string
+  startAt?: string
+  endAt?: string
 }
 
 export interface Notice {
@@ -88,6 +103,8 @@ export interface Clinic {
   businessHours: string
   distance?: number
   image: string
+  /** 后端门店表字段名，首页/预约页会兼容读取 */
+  coverImage?: string
 }
 
 export interface Department {

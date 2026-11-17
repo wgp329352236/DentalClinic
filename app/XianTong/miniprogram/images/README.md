@@ -30,8 +30,10 @@
 | doctor1.jpg | 医生头像1 | 200x200 px |
 | doctor2.jpg | 医生头像2 | 200x200 px |
 | doctor3.jpg | 医生头像3 | 200x200 px |
-| clinic1.jpg | 门诊图片1 | 400x300 px |
-| clinic2.jpg | 门诊图片2 | 400x300 px |
+| clinic1.jpg | 门诊图片1（总店） | 400x300 px |
+| clinic2.jpg | 门诊图片2（分店A） | 400x300 px |
+| clinic3.jpg | 门诊图片3（分店B） | 400x300 px |
+| clinic4.jpg | 门诊图片4（儿童齿科） | 400x300 px |
 | share-cover.jpg | 分享封面 | 500x400 px |
 
 ## 临时解决方案

@@ -18,9 +18,17 @@
   <!-- 步骤1：选择门诊 -->
   <view wx:if="{{step === 1}}" class="card">
     <view class="list-item" wx:for="{{clinics}}" wx:key="id" data-id="{{item.id}}" bindtap="onSelectClinic">
-      <view class="list-item-title">{{item.name}}</view>
-      <view class="list-item-desc">{{item.address}}</view>
-      <view class="list-item-extra" wx:if="{{item.distance}}">{{item.distance}}km</view>
+      <view class="clinic-option">
+        <view class="clinic-image-wrap">
+          <image wx:if="{{item.image}}" class="clinic-image" src="{{item.image}}" mode="aspectFill"></image>
+          <view wx:else class="clinic-image-placeholder">门店</view>
+        </view>
+        <view class="clinic-option-info">
+          <view class="list-item-title">{{item.name}}</view>
+          <view class="list-item-desc">{{item.address}}</view>
+          <view class="list-item-extra" wx:if="{{item.distance}}">{{item.distance}}km</view>
+        </view>
+      </view>
     </view>
   </view>
 

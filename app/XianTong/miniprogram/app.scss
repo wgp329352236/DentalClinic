@@ -15,7 +15,11 @@ page {
 .card {
   background: #fff;
   border-radius: 16rpx;
-  padding: 24rpx;
+  /* 所有卡片文字的上下内边距统一为 24rpx */
+  padding-top: 20rpx;
+  padding-right: 24rpx;
+  padding-bottom: 20rpx;
+  padding-left: 24rpx;
   margin-bottom: 20rpx;
   box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.05);
 }

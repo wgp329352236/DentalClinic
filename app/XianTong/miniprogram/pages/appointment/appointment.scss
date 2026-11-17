@@ -64,6 +64,43 @@
   margin-top: 4rpx;
 }
 
+.clinic-option {
+  display: flex;
+  align-items: center;
+}
+
+.clinic-image-wrap {
+  width: 140rpx;
+  height: 100rpx;
+  margin-right: 20rpx;
+  border-radius: 12rpx;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: #e6f7ff;
+}
+
+.clinic-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.clinic-image-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #e6f7ff, #bae7ff);
+  color: #1890ff;
+  font-size: 24rpx;
+}
+
+.clinic-option-info {
+  flex: 1;
+  min-width: 0;
+}
+
 .doctor-item {
   display: flex;
   padding: 24rpx;

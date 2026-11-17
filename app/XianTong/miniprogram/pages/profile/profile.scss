@@ -1,7 +1,8 @@
 /* pages/profile/profile.scss */
 
 .profile-card {
-  /* 无额外样式 */
+  /* 下方间距由 menu-card 的 margin-top 统一提供 */
+  margin-bottom: 0;
 }
 
 .avatar-large {
@@ -55,10 +56,21 @@
   color: #1890ff;
 }
 
+.menu-card {
+  margin-top: 16rpx;
+  margin-bottom: 16rpx;
+  padding-top: 16rpx;
+  padding-bottom: 16rpx;
+}
+
+.menu-card:first-child {
+  margin-top: 0;
+}
+
 .menu-item {
   display: flex;
   align-items: center;
-  padding: 24rpx 0;
+  padding: 16rpx 0;
   border-bottom: 1rpx solid #f0f0f0;
   position: relative;
 }

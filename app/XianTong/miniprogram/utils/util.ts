@@ -26,6 +26,7 @@ const formatNumber = (n: number) => {
  *
  * 已是绝对地址（http/https/协议相对）、base64 或微信本地临时文件（wxfile://、
  * http://tmp/）的原样返回：这些都能被 <image> 直接渲染，再拼主机名反而会拼坏。
+ * 小程序包内资源（/images/...）同样原样返回，拼后端域名会变成 404。
  */
 export function resolveFileUrl(url?: null | string): string {
   if (!url) return ''
@@ -34,6 +35,7 @@ export function resolveFileUrl(url?: null | string): string {
     url.startsWith('data:') ||
     url.startsWith('wxfile://') ||
     url.startsWith('http://tmp/') ||
+    url.startsWith('/images/') ||
     /^https?:\/\//.test(url)
   ) {
     return url

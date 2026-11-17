@@ -21,11 +21,12 @@
   </view>
 
   <!-- 轮播图（管理端「内容管理 → 轮播图管理」下发；无启用项时整块不渲染） -->
-  <view class="card" style="padding: 0; overflow: hidden;" wx:if="{{banners.length > 0}}">
+  <view class="card banner-card" wx:if="{{banners.length > 0}}">
     <swiper class="banner-swiper" indicator-dots autoplay interval="3000" circular>
       <swiper-item wx:for="{{banners}}" wx:key="id">
         <view
           class="banner-item"
+          data-activityid="{{item.activityId}}"
           data-linktype="{{item.linkType}}"
           data-linktarget="{{item.linkTarget}}"
           bindtap="onBannerTap"
@@ -85,6 +86,10 @@
     <view class="section-title">附近门诊</view>
     <view class="clinic-list">
       <view class="clinic-item" wx:for="{{clinics}}" wx:key="id" data-id="{{item.id}}" bindtap="onClinicTap">
+        <view class="clinic-image-wrap">
+          <image wx:if="{{item.image}}" class="clinic-image" src="{{item.image}}" mode="aspectFill"></image>
+          <view wx:else class="clinic-image-placeholder">门店</view>
+        </view>
         <view class="clinic-info">
           <view class="clinic-name font-bold">{{item.name}}</view>
           <view class="clinic-address text-muted font-small">{{item.address}}</view>

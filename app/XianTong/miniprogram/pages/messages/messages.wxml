@@ -1,7 +1,7 @@
 <!--pages/messages/messages.wxml-->
 <view class="container">
-  <!-- 分类标签 -->
-  <scroll-view class="tabs" scroll-x enable-flex>
+  <!-- 分类标签：4 个标签可直接平铺，不用 scroll-view（enable-flex 会把子项拉伸到整页高度） -->
+  <view class="tabs">
     <view
       wx:for="{{tabs}}"
       wx:key="key"
@@ -9,7 +9,7 @@
       data-tab="{{item.key}}"
       bindtap="onTabChange"
     >{{item.label}}</view>
-  </scroll-view>
+  </view>
 
   <view class="flex-between mb-20">
     <text class="text-muted font-small">共 {{total}} 条 · 未读 {{unreadCount}} 条</text>

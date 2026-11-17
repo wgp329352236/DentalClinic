@@ -10,7 +10,7 @@
 // 生效方式：把 utils/request.ts 的 USE_MOCK 置为 true。
 import type {
   UserInfo, MemberLevel, Clinic, Department, Doctor, TimeSlot,
-  MedicalRecord, MedicalRecordDetail, Banner, Notice
+  MedicalRecord, MedicalRecordDetail, Banner, Notice, ActivityDetail
 } from '../types'
 
 // ==================== 通用工具 ====================
@@ -613,6 +613,51 @@ let appointments: MockAppointment[] = [
     endTime: '09:30',
     status: 'no_show',
     createdAt: datetimeAt(-18, '15:00:00')
+  },
+  {
+    id: 12,
+    clinicId: 3,
+    clinicName: '牙科门诊（分店B）',
+    doctorId: 6,
+    doctorName: '赵磊',
+    departmentId: 6,
+    departmentName: '牙周治疗',
+    appointmentDate: dateOffset(-33),
+    startTime: '10:00',
+    endTime: '11:00',
+    status: 'completed',
+    createdAt: datetimeAt(-36, '11:10:00'),
+    arrivedAt: datetimeAt(-33, '09:50:00'),
+    completedAt: datetimeAt(-33, '11:05:00')
+  },
+  {
+    id: 13,
+    clinicId: 4,
+    clinicName: '儿童齿科中心（望京店）',
+    doctorId: 7,
+    doctorName: '孙悦',
+    departmentId: 7,
+    departmentName: '儿童齿科',
+    appointmentDate: dateOffset(0),
+    startTime: '15:00',
+    endTime: '15:30',
+    status: 'confirmed',
+    remark: '孩子首次涂氟，请提前告知注意事项',
+    createdAt: datetimeAt(-2, '18:20:00')
+  },
+  {
+    id: 14,
+    clinicId: 1,
+    clinicName: '牙科门诊（总店）',
+    doctorId: 4,
+    doctorName: '陈晓',
+    departmentId: 2,
+    departmentName: '洗牙',
+    appointmentDate: dateOffset(3),
+    startTime: '16:30',
+    endTime: '17:00',
+    status: 'pending',
+    createdAt: datetimeAt(-1, '21:05:00')
   }
 ]
 
@@ -723,6 +768,29 @@ const medicalRecordDetails: MedicalRecordDetail[] = [
     consumptionDetails: [
       { id: 91, amount: 200, balanceUsed: 200, wechatPaid: 0, pointsEarned: 2, description: '全口涂氟', createdAt: datetimeAt(-70, '14:50:00') }
     ]
+  },
+  {
+    id: 12,
+    appointmentDate: dateOffset(-33),
+    startTime: '10:00',
+    endTime: '11:00',
+    clinicName: '牙科门诊（分店B）',
+    clinicAddress: '北京市西城区金融街7号长安中心1层',
+    doctorName: '赵磊',
+    doctorTitle: '副主任医师',
+    doctorIntroduction: '正畸与牙周联合治疗方向，擅长成人复杂病例的跨学科方案设计',
+    departmentName: '牙周治疗',
+    diagnosis: '全口牙龈红肿，探诊出血（BOP）阳性，下前牙区牙周袋深4-5mm',
+    treatmentPlan: '分两次完成全口龈下刮治，1个月后复查牙周袋深度与出血情况',
+    remark: '刮治后24小时内避免进食过冷过热食物',
+    status: 'completed',
+    arrivedAt: datetimeAt(-33, '09:50:00'),
+    completedAt: datetimeAt(-33, '11:05:00'),
+    consumptionAmount: 800,
+    totalAmount: 800,
+    consumptionDetails: [
+      { id: 121, amount: 800, balanceUsed: 500, wechatPaid: 300, pointsEarned: 8, description: '全口龈下刮治（首次）', createdAt: datetimeAt(-33, '11:05:00') }
+    ]
   }
 ]
 
@@ -741,6 +809,49 @@ const medicalRecords: MedicalRecord[] = medicalRecordDetails.map(item => ({
   consumptionAmount: item.consumptionAmount,
   completedAt: item.completedAt
 }))
+
+// ==================== 消费记录 ====================
+
+interface MockConsumptionRecord {
+  id: number
+  amount: number
+  balanceUsed: number
+  wechatPaid: number
+  pointsEarned: number
+  pointsUsed: number
+  pointsDeduct: number
+  description: string
+  clinicName: string
+  appointmentDate: string
+  doctorName: string
+  departmentName: string
+  createdAt: string
+}
+
+/** 就诊消费明细自动转成消费记录，另补几条无就诊记录的日常消费，保证钱包统计与就诊记录口径一致 */
+const consumptionRecords: MockConsumptionRecord[] = [
+  ...medicalRecordDetails.flatMap(record =>
+    record.consumptionDetails.map(detail => ({
+      id: detail.id,
+      amount: detail.amount,
+      balanceUsed: detail.balanceUsed,
+      wechatPaid: detail.wechatPaid,
+      pointsEarned: detail.pointsEarned,
+      pointsUsed: 0,
+      pointsDeduct: 0,
+      description: detail.description || record.departmentName || '',
+      clinicName: record.clinicName,
+      appointmentDate: record.appointmentDate,
+      doctorName: record.doctorName,
+      departmentName: record.departmentName || '',
+      createdAt: detail.createdAt
+    }))
+  ),
+  { id: 1001, amount: 298, balanceUsed: 298, wechatPaid: 0, pointsEarned: 2, pointsUsed: 0, pointsDeduct: 0, description: '洁牙套餐（含抛光）', clinicName: '牙科门诊（总店）', appointmentDate: dateOffset(-2), doctorName: '陈晓', departmentName: '洗牙', createdAt: datetimeAt(-2, '10:35:00') },
+  { id: 1002, amount: 600, balanceUsed: 400, wechatPaid: 200, pointsEarned: 6, pointsUsed: 0, pointsDeduct: 0, description: '树脂充填（右上第一磨牙）', clinicName: '牙科门诊（分店A）', appointmentDate: dateOffset(-9), doctorName: '刘敏', departmentName: '补牙', createdAt: datetimeAt(-9, '15:20:00') },
+  { id: 1003, amount: 200, balanceUsed: 200, wechatPaid: 0, pointsEarned: 2, pointsUsed: 0, pointsDeduct: 0, description: '儿童全口涂氟', clinicName: '儿童齿科中心（望京店）', appointmentDate: dateOffset(-16), doctorName: '孙悦', departmentName: '儿童齿科', createdAt: datetimeAt(-16, '11:10:00') },
+  { id: 1004, amount: 300, balanceUsed: 300, wechatPaid: 0, pointsEarned: 3, pointsUsed: 0, pointsDeduct: 0, description: '正畸复诊调整', clinicName: '牙科门诊（总店）', appointmentDate: dateOffset(-25), doctorName: '李静', departmentName: '正畸', createdAt: datetimeAt(-25, '16:45:00') }
+]
 
 // ==================== 推荐 ====================
 
@@ -791,6 +902,15 @@ const coupons: MockCoupon[] = [
   { id: 5, couponCode: 'VIP300', templateName: '会员日券', faceValue: 300, minConsumption: 800, couponType: '全项目通用', validFrom: dateOffset(-10), validTo: dateOffset(20), status: 'used' }
 ]
 
+/** 推广领券模板：与后端「优惠券模板 - 推广码」对应，一次发放 2 张 */
+const promoClaimTemplates = [
+  { id: 1, name: '暑期推广券', prefix: 'PROMO1-', faceValue: 100, minConsumption: 300, couponType: '全项目通用', validDays: 30 },
+  { id: 2, name: '正畸推广券', prefix: 'PROMO2-', faceValue: 500, minConsumption: 2000, couponType: '正畸', validDays: 45 }
+]
+
+/** 已领取过的推广模板（模拟服务端幂等：每人每模板限领一次） */
+const claimedPromoTemplates = new Set<number>()
+
 // ==================== 消息 ====================
 
 interface MockMessage {
@@ -820,22 +940,53 @@ const banners: Banner[] = [
     id: 1,
     title: '暑期正畸特惠 · 隐形矫正立减2000元',
     imageUrl: '/images/banner-ortho.jpg',
-    linkType: 'page',
-    linkTarget: '/pages/appointment/appointment'
+    activityId: 1,
+    linkType: 'none',
+    linkTarget: ''
   },
   {
     id: 2,
     title: '会员充值 · 最高赠送25%',
     imageUrl: '/images/banner-recharge.jpg',
-    linkType: 'page',
-    linkTarget: '/pages/recharge/recharge'
+    activityId: 2,
+    linkType: 'none',
+    linkTarget: ''
   },
   {
     id: 3,
     title: '新客专享100元口腔检查券',
     imageUrl: '/images/banner-newcomer.jpg',
+    activityId: 3,
     linkType: 'none',
     linkTarget: ''
+  }
+]
+
+/** 活动详情：与 banners 的 activityId 一一对应 */
+const activities: ActivityDetail[] = [
+  {
+    id: 1,
+    title: '暑期正畸特惠 · 隐形矫正立减2000元',
+    summary: '暑期矫正专场，隐形矫正立减 2000 元，含免费拍片与方案设计',
+    content: '活动时间：7 月 1 日 - 8 月 31 日\n\n适用项目：隐形矫正、金属自锁托槽\n\n到院可享免费口腔检查与拍片，方案设计不收费。\n\n本活动不与门店其他优惠同享。',
+    startAt: datetimeAt(-30, '00:00:00'),
+    endAt: datetimeAt(30, '23:59:59')
+  },
+  {
+    id: 2,
+    title: '会员充值 · 最高赠送25%',
+    summary: '充值 3000 元赠 750 元，余额可用于全项目消费',
+    content: '充值档位：\n1000 元赠 150 元\n3000 元赠 750 元\n5000 元赠 1250 元\n\n赠送金额与本金合并使用，不可提现。',
+    startAt: datetimeAt(-60, '00:00:00'),
+    endAt: datetimeAt(60, '23:59:59')
+  },
+  {
+    id: 3,
+    title: '新客专享100元口腔检查券',
+    summary: '首次到院的新客可领取口腔检查券一张',
+    content: '凭券可享一次全面口腔检查，含内窥镜拍照与医生面诊。\n\n每位新客限领一次，需提前预约。',
+    startAt: datetimeAt(-10, '00:00:00'),
+    endAt: datetimeAt(90, '23:59:59')
   }
 ]
 
@@ -896,10 +1047,20 @@ class MockApiService {
     if (path === '/profile/me' && method === 'PUT') {
       return this.updateProfile(data)
     }
+    if (path === '/profile/export' && method === 'GET') {
+      return this.exportProfile()
+    }
+    if (path === '/profile/me' && method === 'DELETE') {
+      return null
+    }
 
     // ---------- 首页内容 ----------
     if (path === '/content/home' && method === 'GET') {
       return { banners, notices }
+    }
+    if (path.startsWith('/content/activities/') && method === 'GET') {
+      const id = Number(path.split('/').pop())
+      return activities.find((item) => item.id === id) || null
     }
     if (path === '/content/subscribe-templates' && method === 'GET') {
       return subscribeTemplates
@@ -971,9 +1132,20 @@ class MockApiService {
       return this.getRechargeStatus(Number(matched[1]))
     }
 
+    // ---------- 消费记录 ----------
+    if (path === '/consumption/records' && method === 'GET') {
+      return this.getConsumptionRecords(data)
+    }
+    if (path === '/consumption/statistics' && method === 'GET') {
+      return this.getConsumptionStatistics()
+    }
+
     // ---------- 积分 ----------
     if (path === '/points/balance' && method === 'GET') {
       return { totalBalance: pointsBalance.totalBalance, updatedAt: pointsBalance.updatedAt }
+    }
+    if (path === '/points/summary' && method === 'GET') {
+      return this.getPointsSummary()
     }
     if (path === '/points/records' && method === 'GET') {
       return paginate(pointsRecords, data.page, data.pageSize)
@@ -1014,6 +1186,9 @@ class MockApiService {
     }
     if (path === '/coupons/redeem' && method === 'POST') {
       return this.redeemCoupon(data)
+    }
+    if (path === '/coupons/promo-claim' && method === 'POST') {
+      return this.claimPromoCoupons(data)
     }
 
     // ---------- 消息 ----------
@@ -1106,6 +1281,27 @@ class MockApiService {
     if (data.avatar !== undefined) currentUser.avatar = data.avatar
     // 后端只回 code/message，页面需重新 GET /profile/me 获取最新资料
     return null
+  }
+
+  private exportProfile() {
+    const totalSpent = currentUser.totalSpent || 0
+    return {
+      userId: currentUser.id,
+      nickname: currentUser.nickname,
+      realName: currentUser.name,
+      phone: currentUser.phone,
+      gender: currentUser.gender === 'female' ? 2 : 1,
+      age: currentUser.age,
+      avatar: currentUser.avatar,
+      sourceType: currentUser.registerSource || 'self',
+      registeredAt: datetimeAt(-180, '10:00:00'),
+      balance: wallet.balance,
+      bonusBalance: wallet.bonusBalance,
+      levelName: levelOf(totalSpent).name,
+      accumulatedConsumption: totalSpent,
+      totalPoints: pointsBalance.totalBalance,
+      exportedAt: now()
+    }
   }
 
   // ---------------- 门诊 / 医生 / 时段 ----------------
@@ -1296,6 +1492,31 @@ class MockApiService {
     }
   }
 
+  // ---------------- 消费记录 ----------------
+
+  private getConsumptionRecords(data: any) {
+    const startDate = String(data?.startDate || '')
+    const endDate = String(data?.endDate || '')
+    const list = consumptionRecords
+      .filter(item => (!startDate || item.createdAt >= startDate)
+        && (!endDate || item.createdAt <= `${endDate} 23:59:59`))
+      .slice()
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    return paginate(list, data?.page, data?.pageSize)
+  }
+
+  private getConsumptionStatistics() {
+    const monthPrefix = dateOffset(0).substring(0, 7)
+    const monthList = consumptionRecords.filter(item => item.createdAt.startsWith(monthPrefix))
+    const sum = (list: MockConsumptionRecord[]) => list.reduce((total, item) => total + item.amount, 0)
+    return {
+      totalAmount: sum(consumptionRecords),
+      totalRecords: consumptionRecords.length,
+      monthAmount: sum(monthList),
+      monthRecords: monthList.length
+    }
+  }
+
   // ---------------- 积分 ----------------
 
   private checkin() {
@@ -1315,6 +1536,30 @@ class MockApiService {
     profileRewardClaimed = true
     addPoints(20, '完善资料', '完善个人资料奖励')
     return { pointsEarned: 20 }
+  }
+
+  private getPointsSummary() {
+    const monthPrefix = dateOffset(0).substring(0, 7)
+    let monthlyEarned = 0
+    let monthlySpent = 0
+    const expiryMap = new Map<string, number>()
+    pointsRecords.forEach(item => {
+      if (item.createdAt.startsWith(monthPrefix)) {
+        if (item.changeAmount > 0) monthlyEarned += item.changeAmount
+        else monthlySpent += Math.abs(item.changeAmount)
+      }
+      // 有效期分布只统计仍有效的获得积分，按过期月份升序
+      if (item.changeAmount > 0 && item.expiresAt) {
+        const expireMonth = item.expiresAt.substring(0, 7)
+        if (expireMonth >= monthPrefix) {
+          expiryMap.set(expireMonth, (expiryMap.get(expireMonth) || 0) + item.changeAmount)
+        }
+      }
+    })
+    const expiryGroups = Array.from(expiryMap.entries())
+      .map(([expireMonth, points]) => ({ expireMonth, points }))
+      .sort((a, b) => a.expireMonth.localeCompare(b.expireMonth))
+    return { totalBalance: pointsBalance.totalBalance, monthlyEarned, monthlySpent, expiryGroups }
   }
 
   private exchangeGoods(data: any) {
@@ -1360,6 +1605,40 @@ class MockApiService {
     if (coupon.status === 'expired') return { code: 4017, message: '该券已过期' }
     coupon.status = 'used'
     return { success: true, couponId: coupon.id, faceValue: coupon.faceValue }
+  }
+
+  /** 推广领券：一次发 2 张，同一模板重复扫码返回「已领取」 */
+  private claimPromoCoupons(data: any) {
+    const templateId = Number(data?.templateId)
+    const template = promoClaimTemplates.find(item => item.id === templateId)
+    if (!template) return { code: 4045, message: '推广活动不存在或已结束' }
+    if (claimedPromoTemplates.has(templateId)) {
+      return { code: 4018, message: '该活动券已领取，请勿重复扫码' }
+    }
+
+    claimedPromoTemplates.add(templateId)
+    const claimed = [0, 1].map(index => {
+      const coupon: MockCoupon = {
+        id: nextId(coupons),
+        couponCode: `${template.prefix}${Date.now()}${index + 1}`,
+        templateName: template.name,
+        faceValue: template.faceValue,
+        minConsumption: template.minConsumption,
+        couponType: template.couponType,
+        validFrom: dateOffset(0),
+        validTo: dateOffset(template.validDays),
+        status: 'unused'
+      }
+      coupons.unshift(coupon)
+      return {
+        couponCode: coupon.couponCode,
+        couponName: coupon.templateName,
+        faceValue: coupon.faceValue,
+        validTo: coupon.validTo
+      }
+    })
+    addMessage('activity', '推广券到账', `您已领取「${template.name}」2张，请在有效期内使用`)
+    return { coupons: claimed }
   }
 
   // ---------------- 消息 ----------------

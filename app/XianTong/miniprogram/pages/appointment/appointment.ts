@@ -1,6 +1,6 @@
 // pages/appointment/appointment.ts
 import { getClinics, getDepartments, getDoctors, getDoctorSlots, createAppointment } from '../../utils/api'
-import { requestSubscribeMessage } from '../../utils/util'
+import { requestSubscribeMessage, resolveFileUrl } from '../../utils/util'
 import type { Clinic, Department, Doctor, TimeSlot } from '../../types'
 
 Page({
@@ -60,7 +60,12 @@ Page({
     try {
       const result = await getClinics()
       if (result.code === 0 && result.data) {
-        this.setData({ clinics: result.data })
+        const clinics: Clinic[] = result.data.map((item: any) => ({
+          ...item,
+          businessHours: item.businessHours || (item.openTime && item.closeTime ? `${item.openTime}-${item.closeTime}` : ''),
+          image: resolveFileUrl(item.image || item.coverImage || '')
+        }))
+        this.setData({ clinics })
         if (this.data.selectedClinicId) {
           this.loadDoctors()
         }

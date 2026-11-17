@@ -1,4 +1,5 @@
 // API 服务层 - 封装所有后端接口调用
+import type { ActivityDetail } from '../types'
 import { get, post, put, del } from './request'
 
 // ==================== 认证相关 ====================
@@ -140,6 +141,8 @@ export interface Clinic {
   businessHours: string
   distance?: number
   image: string
+  /** 后端门店表字段名，页面会兼容读取 */
+  coverImage?: string
 }
 
 export interface Department {
@@ -753,6 +756,8 @@ export interface Banner {
   id: number
   title: string
   imageUrl: string
+  /** 关联活动 ID：一张轮播图对应一个活动，点击进入活动详情页 */
+  activityId: number
   linkType: ContentLinkType
   linkTarget?: string
 }
@@ -777,6 +782,16 @@ export interface HomeContent {
  */
 export function getHomeContent() {
   return get<HomeContent>('/content/home', undefined, false)
+}
+
+/**
+ * 活动详情（首页轮播图点击落地）
+ *
+ * 公开接口；活动不存在、已停用或不在排期内时后端返回 code=404，
+ * 由调用方按「活动已结束」处理。
+ */
+export function getActivityDetail(id: number) {
+  return get<ActivityDetail>(`/content/activities/${id}`, undefined, false)
 }
 
 /** 订阅消息模板配置（管理端 message_templates 中已填微信 templateId 的启用模板） */

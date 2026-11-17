@@ -328,7 +328,7 @@ Page({
           phone: item.phone,
           businessHours: item.businessHours || (item.openTime && item.closeTime ? `${item.openTime}-${item.closeTime}` : ''),
           distance: item.distance,
-          image: item.image || item.coverImage || ''
+          image: resolveFileUrl(item.image || item.coverImage || '')
         }))
         this.setData({ clinics })
       }
@@ -410,9 +410,15 @@ Page({
     }
   },
 
-  // 轮播图点击
+  // 轮播图点击：一张轮播图对应一个活动，统一进活动详情页
   onBannerTap(e: any) {
-    const { linktype, linktarget } = e.currentTarget.dataset
+    const { activityid, linktype, linktarget } = e.currentTarget.dataset
+    const activityId = Number(activityid)
+    if (activityId) {
+      wx.navigateTo({ url: `/pages/activity/activity?id=${activityId}` })
+      return
+    }
+    // 历史轮播图未绑定活动（管理端尚未补绑）时按旧的跳转配置兜底
     this.navigateByContent(linktype, linktarget)
   },
 
