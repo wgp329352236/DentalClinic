@@ -1,18 +1,18 @@
 package com.dentalclinic.common.security
 
 import com.dentalclinic.common.BaseService
-import kotlinx.coroutines.delay
+import com.dentalclinic.common.sms.SmsConfig
+import com.dentalclinic.common.sms.TencentSmsClient
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
 import java.security.SecureRandom
 import java.time.LocalDateTime
 
 /**
- * 短信验证码服务（P1-10：手机号修改验证码校验框架）。
+ * 短信验证码服务（P1-10：手机号修改验证码校验）。
  *
- * 当前实现为内存存储 + 日志输出，生产环境需替换为：
- * 1. Redis 存储验证码（支持分布式）
- * 2. 真实 SMS 提供商（阿里云短信、腾讯云短信等）
+ * 发送通道由 SmsConfig 决定：腾讯云短信凭证齐全时真实下发，缺失时降级为日志输出（仅限本地联调）。
+ * 验证码仍存内存，多实例部署需替换为 Redis（多实例间不共享，换个实例校验会失败）。
  */
 class SmsVerificationService : BaseService() {
 
@@ -40,15 +40,18 @@ class SmsVerificationService : BaseService() {
         val code = String.format("%06d", random.nextInt(1000000))
         val expiresAt = LocalDateTime.now().plusMinutes(5)
 
-        // 存储验证码
+        // 先发送再落库：发送失败不写验证码，避免用户拿到「已发送」却永远收不到
+        if (SmsConfig.tencent.enabled) {
+            runCatching { TencentSmsClient.sendVerificationCode(phone, code) }
+                .onFailure { e ->
+                    logger.error("[SMS] 验证码发送失败 phone={}：{}", phone, e.message)
+                    return SendResult.Error("验证码发送失败，请稍后重试")
+                }
+        } else {
+            logger.info("[SMS] 未配置腾讯云短信，验证码仅输出日志（mock）phone={} code={}", phone, code)
+        }
+
         codeStore[phone] = CodeEntry(code, expiresAt, LocalDateTime.now())
-
-        // 发送短信（当前为 mock，仅日志输出）
-        // TODO: 接入真实 SMS 提供商
-        logger.info("[SMS] 验证码已发送到 $phone: $code (有效期 5 分钟)")
-
-        // 模拟 SMS 发送延迟
-        delay(100)
 
         return SendResult.Success
     }

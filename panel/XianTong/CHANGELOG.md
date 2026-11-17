@@ -2,6 +2,14 @@
 
 本文件按日期倒序记录 XianTong 项目的代码改动，每条包含：改了什么、为什么改、影响范围。
 
+## 2026-10-29
+
+### 短信验证码接入腾讯云真实发送 + 凭证外置到本地 .env
+
+- **改了什么**：新增 `common/sms/SmsConfig.kt`（腾讯云短信配置解析，环境变量 > yaml > 空，单一事实源）与 `common/sms/TencentSmsClient.kt`（TC3-HMAC-SHA256 签名直调 SendSms，不引入服务商 SDK，与 `WechatPayClient` 自研签名的做法一致）；`SmsVerificationService.sendVerificationCode` 改为「凭证齐全走真实下发、缺失降级为日志 mock」，并把写验证码挪到发送成功之后（失败不落库）；`StartupPreflight` 增加 `checkSms`（prod 缺失阻断启动、非 prod 告警）；`application.yaml` / `application-prod.yaml` 增加 `sms.tencent` 配置段与变量清单；新增 `server/.env.local.example` 模板与 `server/run-local.sh` 启动脚本，`.env.local` 写入 `server/.gitignore`。
+- **原因**：此前短信验证码只把码打到服务端日志（`// TODO: 接入真实 SMS 提供商`），线上用户根本收不到，改手机号流程不可用；微信支付代码本身已完备，只是凭证只能手抄环境变量，容易漏配且密钥易随配置文件入库。统一收敛到 `.env.local` + 环境变量注入后，本地只需填一个文件，生产仍走部署平台环境变量。
+- **影响范围**：验证码仍存进程内存（多实例部署换实例校验会失败，需迁 Redis）；`APP_ENV=prod` 且短信凭证不全时服务启动会 fail-fast；本次未拿到真实凭证，`.env.local` 中各项为空占位，相关能力仍走 mock，填值后需重启生效。
+
 ## 2026-09-22
 
 ### 安全修复：PostgreSQL R2DBC 驱动升级（CVE-2025-59432）

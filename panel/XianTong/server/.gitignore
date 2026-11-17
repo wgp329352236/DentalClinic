@@ -3,3 +3,6 @@
 # 未覆盖 server 子模块的输出目录，导致 class/jar/tmp 全部进入未跟踪列表，
 # 一旦 git add . 就会把编译产物提交入库。按 Gradle 惯例在模块内自行忽略。
 build/
+
+# 本地凭证（微信支付/小程序、腾讯云短信），只保留 .env.local.example 模板入库
+.env.local

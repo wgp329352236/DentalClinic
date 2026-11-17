@@ -1,5 +1,6 @@
 package com.dentalclinic.common.config
 
+import com.dentalclinic.common.sms.SmsConfig
 import com.dentalclinic.common.wx.WechatConfig
 import org.slf4j.LoggerFactory
 
@@ -13,7 +14,7 @@ import org.slf4j.LoggerFactory
  * - 非生产环境：缺失项降级为 WARN 汇总，不影响本地启动（仍可走 mock/开发默认值）。
  *
  * 检查项：管理端 JWT、用户端 JWT、签到码 HMAC 密钥、数据库连接、微信小程序/支付配置、
- * 推荐分享域名。微信相关检查复用 WechatConfig 的 enabled 判定（单一事实源）。
+ * 腾讯云短信配置、推荐分享域名。微信/短信相关检查复用各自 Config 的 enabled 判定（单一事实源）。
  */
 object StartupPreflight {
 
@@ -56,6 +57,7 @@ object StartupPreflight {
 
         checkDatabase(errors, warnings)
         checkWechat(errors, warnings)
+        checkSms(errors, warnings)
         checkReferral(warnings)
 
         warnings.forEach { logger.warn("[Preflight] {}", it) }
@@ -161,6 +163,18 @@ object StartupPreflight {
             if (GlobalConfig.isProd) errors += "$msg（WECHAT_PAY_NOTIFY_URL），微信支付仅接受公网 HTTPS 回调"
             else warnings += msg
         }
+    }
+
+    /**
+     * 短信验证码通道：生产缺失意味着用户收不到验证码、无法改手机号，阻断启动；
+     * 本地缺失只打 WARN（验证码打印到服务端日志）。
+     */
+    private fun checkSms(errors: MutableList<String>, warnings: MutableList<String>) {
+        if (SmsConfig.tencent.enabled) return
+        val msg = "腾讯云短信配置不完整（TENCENT_SMS_SECRET_ID / TENCENT_SMS_SECRET_KEY / " +
+            "TENCENT_SMS_SDK_APP_ID / TENCENT_SMS_SIGN_NAME / TENCENT_SMS_TEMPLATE_ID），验证码只打日志不真实下发"
+        if (GlobalConfig.isProd) errors += "$msg，生产环境必须配置真实短信凭证"
+        else warnings += msg
     }
 
     /** 推荐分享域名缺失只影响分享链接可用性，不阻断启动，所有环境告警 */

@@ -76,3 +76,19 @@ wechat:
     privateKeyPath: ""        # apiclient_key.pem 的绝对路径
     notifyUrl: ""             # 支付结果通知地址，必须公网 HTTPS，如 https://api.example.com/api/v1/recharge/notify
 
+# ─── 腾讯云短信（验证码发送） ───
+# 五项凭证（secretId/secretKey/sdkAppId/signName/templateId）任一留空 → 验证码只打服务端日志、
+# 不真实下发（仅限本地联调），启动日志打 WARN；APP_ENV=prod 时会直接阻断启动。
+# 生产同理建议用环境变量注入（优先级高于此处）：
+#   TENCENT_SMS_SECRET_ID / TENCENT_SMS_SECRET_KEY / TENCENT_SMS_SDK_APP_ID
+#   TENCENT_SMS_SIGN_NAME / TENCENT_SMS_TEMPLATE_ID / TENCENT_SMS_REGION
+# 模板正文需含一个验证码变量（如「您的验证码为{1}，5分钟内有效」），发送时只传验证码本身。
+sms:
+  tencent:
+    secretId: ""
+    secretKey: ""
+    sdkAppId: ""        # 短信应用 SdkAppId，1400 开头
+    signName: ""        # 已审核通过的签名内容，不含【】
+    templateId: ""      # 已审核通过的正文模板 ID
+    region: "ap-guangzhou"
+

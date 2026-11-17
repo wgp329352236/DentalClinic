@@ -14,6 +14,8 @@
 #   WECHAT_MCH_ID / WECHAT_API_V3_KEY / WECHAT_MERCHANT_SERIAL
 #   WECHAT_PRIVATE_KEY_PATH（推荐挂载 apiclient_key.pem 文件）
 #   WECHAT_PAY_NOTIFY_URL（公网 HTTPS）
+#   TENCENT_SMS_SECRET_ID / TENCENT_SMS_SECRET_KEY / TENCENT_SMS_SDK_APP_ID
+#   TENCENT_SMS_SIGN_NAME / TENCENT_SMS_TEMPLATE_ID（短信验证码真实下发）
 #
 # 如需把本文件放到 JAR 外部管理，可用 EngineMain 参数指定：
 #   java -jar server.jar -config=/etc/dentalclinic/application-prod.yaml
@@ -70,3 +72,13 @@ wechat:
     privateKey: ""               # 一般留空，用 privateKeyPath 挂载证书文件
     privateKeyPath: ""           # apiclient_key.pem 在服务器上的绝对路径
     notifyUrl: ""                # 必须公网 HTTPS，如 https://api.example.com/api/v1/recharge/notify
+
+# ─── 腾讯云短信 ─── prod 必填：TENCENT_SMS_*（建议全部走环境变量）
+sms:
+  tencent:
+    secretId: ""
+    secretKey: ""
+    sdkAppId: ""
+    signName: ""
+    templateId: ""
+    region: "ap-guangzhou"
