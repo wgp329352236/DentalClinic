@@ -10,6 +10,12 @@
 - **原因**：此前短信验证码只把码打到服务端日志（`// TODO: 接入真实 SMS 提供商`），线上用户根本收不到，改手机号流程不可用；微信支付代码本身已完备，只是凭证只能手抄环境变量，容易漏配且密钥易随配置文件入库。统一收敛到 `.env.local` + 环境变量注入后，本地只需填一个文件，生产仍走部署平台环境变量。
 - **影响范围**：验证码仍存进程内存（多实例部署换实例校验会失败，需迁 Redis）；`APP_ENV=prod` 且短信凭证不全时服务启动会 fail-fast；本次未拿到真实凭证，`.env.local` 中各项为空占位，相关能力仍走 mock，填值后需重启生效。
 
+### 代码风格：main.kt 改为 import 引入 EngineMain
+
+- **改了什么**：`main.kt` 里的全限定名调用 `io.ktor.server.netty.EngineMain.main(args)` 改为顶部 `import io.ktor.server.netty.EngineMain` 后调用 `EngineMain.main(args)`。
+- **原因**：IDE 自动整理导入，消除行内全限定名，行为不变。
+- **影响范围**：仅入口文件写法，启动行为与模块加载顺序均无变化。
+
 ## 2026-09-22
 
 ### 安全修复：PostgreSQL R2DBC 驱动升级（CVE-2025-59432）
