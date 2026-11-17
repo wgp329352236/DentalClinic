@@ -60,7 +60,7 @@ async function loadActivityOptions() {
   const options = activities.map((item) => {
     const boundByOther = Boolean(item.bannerId) && item.bannerId !== editingId.value;
     const suffix = boundByOther
-      ? '（已绑定其他轮播图）'
+      ? '（已占用）'
       : item.bannerId === editingId.value
         ? '（当前轮播图）'
         : '';
