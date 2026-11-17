@@ -14,11 +14,15 @@ function formatPeriod(startAt?: string, endAt?: string): string {
 Page({
   data: {
     loading: true,
+    /** 重试需要，onLoad 的 options 只在首次进入时可用 */
+    activityId: 0,
     activity: null as ActivityDetail | null,
     cover: '',
     /** 详情纯文本按空行/换行切段，wxml 逐段渲染 */
     paragraphs: [] as string[],
     period: '',
+    /** 断网/超时/服务异常的提示；活动已结束属于正常分支，不算错误 */
+    errorMessage: '',
   },
 
   onLoad(options: Record<string, string | undefined>) {
@@ -28,10 +32,12 @@ Page({
       this.setData({ loading: false })
       return
     }
+    this.setData({ activityId: id })
     this.loadDetail(id)
   },
 
   async loadDetail(id: number) {
+    this.setData({ loading: true, errorMessage: '' })
     try {
       const result = await getActivityDetail(id)
       if (result.code !== 0 || !result.data) {
@@ -52,9 +58,20 @@ Page({
       })
       wx.setNavigationBarTitle({ title: activity.title })
     } catch (error) {
+      // 请求层已把业务码挂在 error.code 上：404/400 说明活动真的不存在或已结束，
+      // 其余（断网、超时、500）是加载失败，不能也提示「已结束」，否则会误导用户
+      const code = (error as { code?: number }).code
+      if (code === 404 || code === 400) {
+        this.setData({ loading: false, activity: null })
+        return
+      }
       console.warn('[Activity] 加载活动详情失败:', error)
-      this.setData({ loading: false })
+      this.setData({ loading: false, errorMessage: '活动加载失败' })
     }
+  },
+
+  onRetryTap() {
+    if (this.data.activityId) this.loadDetail(this.data.activityId)
   },
 
   /** 封面地址失效时退回标题占位，避免整块空白 */

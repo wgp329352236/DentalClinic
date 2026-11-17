@@ -81,7 +81,8 @@ export function request<T = any>(options: RequestOptions): Promise<ApiResponse<T
         // 业务层失败（code !== 0）统一 reject，调用方用 try-catch 即可捕获，
         // 与 mock 模式错误语义保持一致
         if (data.code !== 0) {
-          reject(new Error(data.message || '请求失败'))
+          // 带上业务码，调用方才能区分「活动已结束(404)」这类正常分支与网络异常
+          reject(Object.assign(new Error(data.message || '请求失败'), { code: data.code }))
           return
         }
 

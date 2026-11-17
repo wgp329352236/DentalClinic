@@ -82,6 +82,17 @@
   font-size: 26rpx;
 }
 
+/* 加载失败重试：与「已结束」空态区分，给用户一个可恢复动作 */
+.retry-btn {
+  width: 240rpx;
+  margin: 32rpx auto 0;
+  color: #1890ff;
+  font-size: 28rpx;
+  background: #fff;
+  border: 1rpx solid #1890ff;
+  border-radius: 44rpx;
+}
+
 .footer {
   position: fixed;
   left: 0;

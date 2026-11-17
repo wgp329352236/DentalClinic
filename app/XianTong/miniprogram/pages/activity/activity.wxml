@@ -24,6 +24,12 @@
     </view>
   </block>
 
+  <view wx:elif="{{errorMessage}}" class="state">
+    <view class="state-title">{{errorMessage}}</view>
+    <view class="state-tip">请检查网络后重试</view>
+    <button class="retry-btn" bindtap="onRetryTap">重新加载</button>
+  </view>
+
   <view wx:else class="state">
     <view class="state-title">活动不存在或已结束</view>
     <view class="state-tip">可以返回首页看看其他活动</view>

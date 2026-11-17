@@ -415,10 +415,14 @@ Page({
     const { activityid, linktype, linktarget } = e.currentTarget.dataset
     const activityId = Number(activityid)
     if (activityId) {
-      wx.navigateTo({ url: `/pages/activity/activity?id=${activityId}` })
+      wx.navigateTo({
+        url: `/pages/activity/activity?id=${activityId}`,
+        fail: () => wx.showToast({ title: '活动页打开失败', icon: 'none' })
+      })
       return
     }
-    // 历史轮播图未绑定活动（管理端尚未补绑）时按旧的跳转配置兜底
+    // 正常不会走到这里：后端 /content/home 已过滤掉未绑定活动的轮播图。
+    // 保留旧跳转仅用于兜住缓存里的历史数据，避免点击完全无反应。
     this.navigateByContent(linktype, linktarget)
   },
 
