@@ -9,12 +9,6 @@ import { deleteBanner, getBanners } from '#/api/content';
 
 import BannerFormModal from './form-modal.vue';
 
-const linkTypeMap: Record<string, string> = {
-  none: '不跳转',
-  page: '小程序页面',
-  webview: '外部网页',
-};
-
 const [FormModal, formModalApi] = useVbenModal({
   connectedComponent: BannerFormModal,
   destroyOnClose: true,
@@ -32,10 +26,10 @@ const [Grid, gridApi] = useVbenVxeGrid({
       },
       { field: 'title', title: '标题', minWidth: 150 },
       {
-        field: 'linkType',
-        title: '跳转',
-        width: 110,
-        slots: { default: 'link' },
+        field: 'activityTitle',
+        title: '关联活动',
+        minWidth: 160,
+        slots: { default: 'activity' },
       },
       { field: 'sortOrder', title: '排序', width: 80 },
       {
@@ -106,10 +100,10 @@ async function onDelete(row: any) {
       <template #image="{ row }">
         <Image :src="row.imageUrl" :height="40" :width="100" />
       </template>
-      <template #link="{ row }">
-        <span :title="row.linkTarget ?? ''">
-          {{ linkTypeMap[row.linkType] ?? row.linkType }}
-        </span>
+      <template #activity="{ row }">
+        <!-- 历史轮播图可能还没绑定活动，旧数据在 C 端已不展示，这里明确提示需要重新绑定 -->
+        <span v-if="row.activityTitle">{{ row.activityTitle }}</span>
+        <Tag v-else color="orange">未绑定活动</Tag>
       </template>
       <template #schedule="{ row }">
         <!-- 起止都为空即长期有效，显示占位符比留白更明确 -->

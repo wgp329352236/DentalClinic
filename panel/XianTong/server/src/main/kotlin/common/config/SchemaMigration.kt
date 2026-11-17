@@ -37,6 +37,7 @@ object SchemaMigration {
                 migrateAppointmentReminderFlags()
                 migratePointsRecordExpiryColumns()
                 migrateReferralRelationIndex()
+                migrateMpBannerActivity()
             }
         } catch (e: Exception) {
             logger.error("[SchemaMigration] 表结构迁移失败，请检查数据库权限", e)
@@ -242,6 +243,20 @@ object SchemaMigration {
         logger.info("[SchemaMigration] referral_relation 唯一索引已替换为部分唯一索引 ref_rel_uk_referee_real。")
     }
 
+    /**
+     * mp_banner 补 activity_id 列并建唯一索引（一个轮播图对应一个活动）。
+     *
+     * 历史轮播图 activity_id 为 NULL：PostgreSQL 唯一索引允许多个 NULL，迁移不会失败；
+     * 但 C 端只展示已绑定有效活动的轮播图，历史数据需在管理端重新绑定活动后才会恢复展示。
+     */
+    private suspend fun R2dbcTransaction.migrateMpBannerActivity() {
+        val added = addColumnIfMissing("mp_banner", "activity_id", "BIGINT NULL")
+        if (!indexExists("mp_banner", "mp_banner_uk_activity")) {
+            exec("CREATE UNIQUE INDEX IF NOT EXISTS mp_banner_uk_activity ON mp_banner (activity_id)")
+        }
+        if (added) logger.info("[SchemaMigration] mp_banner 补齐 activity_id 列与活动唯一索引。")
+    }
+
     /** 索引是否已存在。 */
     private suspend fun R2dbcTransaction.indexExists(table: String, indexName: String): Boolean =
         exec(
@@ -267,7 +282,8 @@ object SchemaMigration {
 
         if (existing.isNotEmpty()) return false
 
-        exec("ALTER TABLE $table ADD COLUMN IF NOT EXISTS $column $definition")
+        // 标识符必须加引号：`user` 是 PostgreSQL 保留字，ALTER TABLE user ... 会直接语法错误
+        exec("ALTER TABLE \"$table\" ADD COLUMN IF NOT EXISTS \"$column\" $definition")
         logger.info("[SchemaMigration] ALTER TABLE $table ADD COLUMN $column $definition")
         return true
     }

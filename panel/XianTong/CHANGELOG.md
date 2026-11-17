@@ -4,6 +4,25 @@
 
 ## 2026-10-29
 
+### 小程序页面样式打磨 + 演示数据与静态图片补全
+
+- **改了什么**：首页、预约、消息、个人中心四个页面调整卡片内边距与列表样式（`app.scss` 的 `.card` 上下内边距统一、首页新增门店图片位与轮播卡片样式、消息/个人中心配色与间距微调）；`mockData.ts` 补充门店/医生/商品/活动等演示数据；`resolveFileUrl` 支持小程序包内 `/images/...` 原样返回，避免拼后端域名变 404；新增 `images/` 下 18 张本地演示图片与说明。
+- **原因**：离线演示时卡片排版偏挤、门店无图，演示数据不足以覆盖预约状态、积分商品、活动等页面；包内图片被误拼上接口域名后加载失败。
+- **影响范围**：纯展示层与 mock 数据，`USE_MOCK` 保持 `false`（走真实接口），不影响线上链路；新增图片为演示资源，正式上线可替换为后台上传的图片地址。
+
+### 存量轮播图自动补建活动 + 本地演示数据 + 迁移语法修复
+
+- **改了什么**：`DataSeedService` 增加 `seedBannerActivities()`（对所有 `activity_id` 为空的历史轮播图，按标题/图片补建一条「待完善」活动并回填绑定，幂等）与 `seedDemoContent()`（仅非生产且活动/轮播图都为空时，写入 3 组演示活动 + 已绑定轮播图，图片走小程序包内 `/images/banner-*.jpg`）；修复 `SchemaMigration.addColumnIfMissing` 拼接标识符未加引号导致 `ALTER TABLE user ...` 语法报错、进而中断其后所有迁移的问题（这也是 `mp_banner.activity_id` 之前加不上的原因）。
+- **原因**：新模型下未绑定活动的轮播图会在 C 端整体消失，直接上线等于首页轮播清空；本地库 `mp_banner` 为空，无法验证「轮播图 → 活动详情」链路，需要一份可删的演示数据。
+- **影响范围**：生产环境升级时会自动生成与原轮播图同名的活动（`created_by=system-backfill`），运营需补详情；演示数据只在开发环境且表为空时写入。实测：本地库已生成 3 活动 + 3 轮播图，`/api/v1/content/home` 返回带 `activityId` 的轮播，`/api/v1/content/activities/{id}` 正常、不存在时返回 404。
+
+### 首页轮播图改为「一张轮播图对应一个活动」
+
+- **改了什么**：新增 `mp_activity` 表与「内容管理 → 活动管理」页面（名称、封面、简介、详情、起止时间、排序、上下线，`AdminContentService` 增加活动 CRUD 与 `ContentAdminRoutes /activities`）；`mp_banner` 增加 `activity_id` 列与唯一索引（`SchemaMigration.migrateMpBannerActivity`，存量行 NULL 可共存）；轮播图新建/编辑必须选择活动，后端校验活动存在且未被其他轮播图占用，`BannerItemDto` 回带 `activityId/activityTitle`；管理端轮播图表单移除「跳转类型/跳转目标」，改为活动下拉（已占用活动置灰）；C 端 `/api/v1/content/home` 只返回「轮播图与活动都启用且在排期内」的项，新增公开接口 `/api/v1/content/activities/{id}`；小程序新增 `pages/activity/activity` 活动详情页（封面、简介、时间、分段详情、立即预约），首页轮播点击改为跳活动详情，仅历史无活动数据才回落旧跳转。
+- **原因**：原轮播图只是「图片 + 自由跳转」，运营无法复用活动信息，也无法保证图文一致；需求要求一张轮播图对应一个活动，因此把活动提升为独立可维护实体，轮播图退化为活动的展示位，点击固定进入活动详情。
+- **影响范围**：存量未绑定活动的轮播图由启动时的自动补建兜底（见上一条），补建出的活动需运营补充详情；`SaveBannerRequest` 去掉 `linkType/linkTarget`，旧前端提交这两个字段会被忽略（后端固定写 none）；活动停用或过了结束时间会连带隐藏其轮播图；一个活动最多挂一张轮播图（数据库唯一索引兜底）。
+- **验证**：后端 `:server:compileKotlin` 通过；管理端 `vue-tsc --noEmit` 通过；小程序 `tsc --noEmit` 通过；已在本地库启动后端实测建表/迁移/接口（见上一条），管理端页面与小程序界面未做人工点测。
+
 ### 短信验证码接入腾讯云真实发送 + 凭证外置到本地 .env
 
 - **改了什么**：新增 `common/sms/SmsConfig.kt`（腾讯云短信配置解析，环境变量 > yaml > 空，单一事实源）与 `common/sms/TencentSmsClient.kt`（TC3-HMAC-SHA256 签名直调 SendSms，不引入服务商 SDK，与 `WechatPayClient` 自研签名的做法一致）；`SmsVerificationService.sendVerificationCode` 改为「凭证齐全走真实下发、缺失降级为日志 mock」，并把写验证码挪到发送成功之后（失败不落库）；`StartupPreflight` 增加 `checkSms`（prod 缺失阻断启动、非 prod 告警）；`application.yaml` / `application-prod.yaml` 增加 `sms.tencent` 配置段与变量清单；新增 `server/.env.local.example` 模板与 `server/run-local.sh` 启动脚本，`.env.local` 写入 `server/.gitignore`。

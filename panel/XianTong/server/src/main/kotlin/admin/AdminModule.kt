@@ -85,7 +85,8 @@ fun Application.adminModule() {
                 // Notifications
                 Notifications,
                 MessageTemplates,
-                // Miniprogram content (banner / notice)
+                // Miniprogram content (activity / banner / notice)
+                MpActivities,
                 MpBanners,
                 MpNotices,
                 // Points mall

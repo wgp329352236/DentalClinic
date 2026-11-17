@@ -916,15 +916,46 @@ object ContentLinkType {
 }
 
 /**
+ * 小程序营销活动表。
+ *
+ * 一个活动对应一张首页轮播图（mp_banner.activity_id 唯一），活动详情由
+ * 小程序 pages/activity/activity 展示。封面/简介用于列表与分享卡片，
+ * content 存纯文本详情（按换行分段渲染，不引入富文本，避免小程序端解析成本）。
+ */
+object MpActivities : Table("mp_activity") {
+    val id = long("id").autoIncrement()
+    val title = varchar("title", 100)                 // 活动名称
+    val coverImage = varchar("cover_image", 500).nullable() // 活动封面
+    val summary = varchar("summary", 500).nullable()  // 一句话简介（列表/分享文案）
+    val content = text("content").nullable()          // 活动详情，纯文本，换行分段
+    val sortOrder = integer("sort_order").default(0)
+    val status = integer("status").default(1)         // 1=启用 0=停用
+    val startAt = datetime("start_at").nullable()     // 活动起始，null=不限
+    val endAt = datetime("end_at").nullable()         // 活动截止，null=不限
+    val createdBy = varchar("created_by", 50).nullable()
+    val createdAt = datetime("created_at").defaultExpression(CurrentTimestamp)
+    val updatedAt = datetime("updated_at").defaultExpression(CurrentTimestamp)
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        index("mp_activity_idx_status_sort", false, status, sortOrder)
+    }
+}
+
+/**
  * 小程序首页轮播图表。
  *
  * 不复用 admin_system_config：后者的 config_value 是 varchar(500)，装不下多条
  * 「图片 + 标题 + 跳转 + 排期」；且系统配置页是单行 key-value 编辑，改 JSON 数组不可维护。
+ *
+ * activity_id 唯一：一个轮播图只对应一个活动，一个活动最多挂一张轮播图。
+ * link_type/link_target 保留给历史数据兜底，新建轮播图一律走活动详情页。
  */
 object MpBanners : Table("mp_banner") {
     val id = long("id").autoIncrement()
     val title = varchar("title", 100)                 // 标题（也用作图片加载失败时的兜底文案）
     val imageUrl = varchar("image_url", 500)          // 图片地址
+    val activityId = long("activity_id").nullable()   // 关联活动，唯一
     val linkType = varchar("link_type", 20).default(ContentLinkType.NONE)
     val linkTarget = varchar("link_target", 500).nullable()
     val sortOrder = integer("sort_order").default(0)  // 升序，越小越靠前
@@ -938,6 +969,7 @@ object MpBanners : Table("mp_banner") {
 
     init {
         index("mp_banner_idx_status_sort", false, status, sortOrder)
+        uniqueIndex("mp_banner_uk_activity", activityId)
     }
 }
 

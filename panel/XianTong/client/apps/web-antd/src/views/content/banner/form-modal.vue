@@ -9,7 +9,7 @@ import { IconifyIcon } from '@vben/icons';
 import { Image, Input, message, Upload } from 'ant-design-vue';
 
 import { useVbenForm } from '#/adapter/form';
-import { createBanner, updateBanner } from '#/api/content';
+import { createBanner, getActivities, updateBanner } from '#/api/content';
 import { uploadImage } from '#/api/upload';
 
 const emit = defineEmits<{ success: [] }>();
@@ -51,6 +51,30 @@ const customRequest: UploadProps['customRequest'] = async (options) => {
   }
 };
 
+/**
+ * 加载可选活动并标注占用情况。
+ * 已绑定其他轮播图的活动直接禁用，避免填完提交才被后端拒绝。
+ */
+async function loadActivityOptions() {
+  const activities = await getActivities();
+  const options = activities.map((item) => {
+    const boundByOther = Boolean(item.bannerId) && item.bannerId !== editingId.value;
+    const suffix = boundByOther
+      ? '（已绑定其他轮播图）'
+      : item.bannerId === editingId.value
+        ? '（当前轮播图）'
+        : '';
+    return {
+      disabled: boundByOther,
+      label: `${item.title}${suffix}`,
+      value: item.id,
+    };
+  });
+  formApi.updateSchema([
+    { componentProps: { options }, fieldName: 'activityId' },
+  ]);
+}
+
 const [Form, formApi] = useVbenForm({
   showDefaultActions: false,
   schema: [
@@ -63,29 +87,16 @@ const [Form, formApi] = useVbenForm({
     },
     {
       component: 'Select',
-      fieldName: 'linkType',
-      label: '跳转类型',
-      defaultValue: 'none',
+      fieldName: 'activityId',
+      label: '关联活动',
+      rules: 'required',
+      help: '一张轮播图对应一个活动，点击轮播图进入活动详情页；活动在「内容管理 → 活动管理」维护',
       componentProps: {
+        showSearch: true,
+        optionFilterProp: 'label',
+        placeholder: '请选择活动',
         style: 'width: 100%',
-        options: [
-          { label: '不跳转', value: 'none' },
-          { label: '小程序页面', value: 'page' },
-          { label: '外部网页', value: 'webview' },
-        ],
-      },
-    },
-    {
-      component: 'Input',
-      fieldName: 'linkTarget',
-      label: '跳转目标',
-      help: '小程序页面填 pages 路径（如 pages/appointment/appointment）；外部网页必须是 https 地址，且域名需在公众平台配置',
-      componentProps: { placeholder: '跳转目标' },
-      dependencies: {
-        // 不跳转时这个字段没有意义，渲染出来只会诱导用户填无效值
-        if: (values) => values.linkType !== 'none',
-        rules: (values) => (values.linkType === 'none' ? null : 'required'),
-        triggerFields: ['linkType'],
+        options: [],
       },
     },
     {
@@ -142,8 +153,15 @@ const [Modal, modalApi] = useVbenModal({
           endAt: data.row.endAt?.slice(0, 10),
         });
       } else {
+        editingId.value = 0;
         imageUrl.value = '';
         formApi.resetForm();
+      }
+
+      try {
+        await loadActivityOptions();
+      } catch {
+        message.error('加载活动列表失败，请关闭后重试');
       }
     }
   },

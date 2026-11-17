@@ -1,5 +1,6 @@
 package com.dentalclinic.user.service
 
+import com.dentalclinic.admin.entity.MpActivities
 import com.dentalclinic.admin.entity.MpBanners
 import com.dentalclinic.admin.entity.MpNotices
 import com.dentalclinic.admin.entity.MessageTemplates
@@ -28,24 +29,46 @@ class ContentService : BaseService() {
 
         // 排期过滤三条件：启用中、已到生效起始、未过生效截止。
         // startAt/endAt 为 null 表示该侧不限，用 isNull() 短路，避免 null 参与比较得到 UNKNOWN 而整条被滤掉。
-        val banners = MpBanners.selectAll()
+        // 轮播图与活动一一对应：活动停用/未开始/已结束时轮播图一并隐藏，避免用户点进去看到过期活动。
+        val bannerRows = MpBanners.selectAll()
             .where {
                 (MpBanners.status eq 1) and
                     (MpBanners.startAt.isNull() or (MpBanners.startAt lessEq now)) and
-                    (MpBanners.endAt.isNull() or (MpBanners.endAt greaterEq now))
+                    (MpBanners.endAt.isNull() or (MpBanners.endAt greaterEq now)) and
+                    MpBanners.activityId.isNotNull()
             }
             .orderBy(MpBanners.sortOrder to SortOrder.ASC, MpBanners.id to SortOrder.DESC)
-            .limit(MAX_BANNERS)
             .toList()
-            .map { row ->
+
+        val activityIds = bannerRows.mapNotNull { it[MpBanners.activityId] }
+        val availableActivities = if (activityIds.isEmpty()) {
+            emptyMap()
+        } else {
+            MpActivities.selectAll()
+                .where {
+                    (MpActivities.id inList activityIds) and
+                        (MpActivities.status eq 1) and
+                        (MpActivities.startAt.isNull() or (MpActivities.startAt lessEq now)) and
+                        (MpActivities.endAt.isNull() or (MpActivities.endAt greaterEq now))
+                }
+                .toList()
+                .associateBy { it[MpActivities.id] }
+        }
+
+        val banners = bannerRows
+            .mapNotNull { row ->
+                val activityId = row[MpBanners.activityId] ?: return@mapNotNull null
+                if (!availableActivities.containsKey(activityId)) return@mapNotNull null
                 BannerDto(
                     id = row[MpBanners.id],
                     title = row[MpBanners.title],
                     imageUrl = row[MpBanners.imageUrl],
                     linkType = row[MpBanners.linkType],
-                    linkTarget = row[MpBanners.linkTarget]
+                    linkTarget = row[MpBanners.linkTarget],
+                    activityId = activityId
                 )
             }
+            .take(MAX_BANNERS)
 
         val notices = MpNotices.selectAll()
             .where {
@@ -66,6 +89,36 @@ class ContentService : BaseService() {
             }
 
         HomeContentDto(banners = banners, notices = notices)
+    }
+
+    /**
+     * 活动详情（轮播图点击落地页）。
+     *
+     * 返回 null 表示活动不存在、已停用或不在排期内——路由层据此回业务错误码，
+     * 不抛异常：这类「活动过期」是用户可见的正常分支，不该记 ERROR 堆栈。
+     */
+    suspend fun getActivityDetail(id: Long): ActivityDetailDto? = dbQuery {
+        val now = LocalDateTime.now()
+        MpActivities.selectAll()
+            .where {
+                (MpActivities.id eq id) and
+                    (MpActivities.status eq 1) and
+                    (MpActivities.startAt.isNull() or (MpActivities.startAt lessEq now)) and
+                    (MpActivities.endAt.isNull() or (MpActivities.endAt greaterEq now))
+            }
+            .toList()
+            .firstOrNull()
+            ?.let { row ->
+                ActivityDetailDto(
+                    id = row[MpActivities.id],
+                    title = row[MpActivities.title],
+                    coverImage = row[MpActivities.coverImage],
+                    summary = row[MpActivities.summary],
+                    content = row[MpActivities.content],
+                    startAt = row[MpActivities.startAt]?.format(DISPLAY_FORMATTER),
+                    endAt = row[MpActivities.endAt]?.format(DISPLAY_FORMATTER)
+                )
+            }
     }
 
     /**
@@ -95,6 +148,8 @@ class ContentService : BaseService() {
 
         /** 公告条数上限：首页公告栏是纵向滚动播报，条数过多会拉长单条停留间隔 */
         private const val MAX_NOTICES = 5
+
+        private val DISPLAY_FORMATTER = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
     }
 }
 
@@ -103,9 +158,23 @@ data class BannerDto(
     val id: Long,
     val title: String,
     val imageUrl: String,
-    /** none/page/webview，取值见 ContentLinkType */
+    /** none/page/webview，取值见 ContentLinkType；新数据固定 none，点击走 activityId */
     val linkType: String,
-    val linkTarget: String?
+    val linkTarget: String?,
+    /** 关联活动 ID，点击轮播图进入活动详情页 */
+    val activityId: Long
+)
+
+@Serializable
+data class ActivityDetailDto(
+    val id: Long,
+    val title: String,
+    val coverImage: String?,
+    val summary: String?,
+    /** 纯文本详情，按换行分段 */
+    val content: String?,
+    val startAt: String?,
+    val endAt: String?
 )
 
 @Serializable

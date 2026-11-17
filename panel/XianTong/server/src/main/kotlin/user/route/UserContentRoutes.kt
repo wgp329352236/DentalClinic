@@ -38,6 +38,34 @@ fun Application.userContentRoutes(contentService: ContentService) {
             }
 
             /**
+             * 活动详情（首页轮播图点击落地）。
+             * GET /api/v1/content/activities/{id}
+             *
+             * 活动不存在、已停用或不在排期内统一回 404：前端只需提示「活动已结束」，
+             * 不需要区分三种原因，也不暴露活动是否存在的更多信息。
+             */
+            get("/activities/{id}") {
+                val id = call.parameters["id"]?.toLongOrNull()
+                if (id == null) {
+                    call.respond(ApiResponse<Unit>(code = 400, message = "无效的活动ID"))
+                    return@get
+                }
+                try {
+                    val activity = contentService.getActivityDetail(id)
+                    if (activity == null) {
+                        call.respond(ApiResponse<Unit>(code = 404, message = "活动不存在或已结束"))
+                    } else {
+                        call.respond(ApiResponse(code = 0, message = "success", data = activity))
+                    }
+                } catch (e: Exception) {
+                    val (code, message) = translateApiError(
+                        logger, "[Content]: 活动详情", "加载失败，请稍后重试", e
+                    )
+                    call.respond(ApiResponse<Unit>(code = code, message = message))
+                }
+            }
+
+            /**
              * 微信订阅消息模板配置（公开）。
              * GET /api/v1/content/subscribe-templates
              *

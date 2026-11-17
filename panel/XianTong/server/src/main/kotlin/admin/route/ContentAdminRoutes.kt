@@ -4,6 +4,7 @@ import com.dentalclinic.admin.auth.adminPrincipal
 import com.dentalclinic.admin.auth.authenticated
 import com.dentalclinic.admin.auth.requirePermission
 import com.dentalclinic.admin.service.AdminContentService
+import com.dentalclinic.admin.service.SaveActivityRequest
 import com.dentalclinic.admin.service.SaveBannerRequest
 import com.dentalclinic.admin.service.SaveNoticeRequest
 import com.dentalclinic.admin.util.ValidationException
@@ -18,6 +19,46 @@ import io.ktor.server.routing.*
  * 与 couponRoutes 的分工保持一致。
  */
 fun Route.contentAdminRoutes(contentService: AdminContentService) {
+
+    // ==================== 活动 ====================
+    route("/activities") {
+        authenticated {
+            // GET /api/admin/activities?status=1
+            requirePermission("content:view") {
+                get {
+                    val status = call.request.queryParameters["status"]?.toIntOrNull()
+                    call.ok(contentService.listActivities(status))
+                }
+            }
+
+            requirePermission("content:manage") {
+                post {
+                    val request = call.receive<SaveActivityRequest>()
+                    val operator = call.adminPrincipal().username
+                    val id = contentService.createActivity(request, operator)
+                    call.ok(mapOf("id" to id), "创建成功")
+                }
+            }
+
+            requirePermission("content:manage") {
+                put("/{id}") {
+                    val id = call.parameters["id"]?.toLongOrNull()
+                        ?: throw ValidationException("无效的活动ID")
+                    contentService.updateActivity(id, call.receive<SaveActivityRequest>())
+                    call.ok<Unit>(message = "更新成功")
+                }
+            }
+
+            requirePermission("content:manage") {
+                delete("/{id}") {
+                    val id = call.parameters["id"]?.toLongOrNull()
+                        ?: throw ValidationException("无效的活动ID")
+                    contentService.deleteActivity(id)
+                    call.ok<Unit>(message = "删除成功")
+                }
+            }
+        }
+    }
 
     // ==================== 轮播图 ====================
     route("/banners") {

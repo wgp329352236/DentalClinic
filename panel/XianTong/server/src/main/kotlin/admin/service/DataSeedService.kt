@@ -2,6 +2,7 @@ package com.dentalclinic.admin.service
 
 import com.dentalclinic.admin.entity.*
 import com.dentalclinic.common.config.DBConfig
+import com.dentalclinic.common.config.GlobalConfig
 import kotlinx.coroutines.flow.toList
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
@@ -11,6 +12,7 @@ import org.jetbrains.exposed.v1.r2dbc.selectAll
 import org.jetbrains.exposed.v1.r2dbc.update
 import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
 import org.slf4j.LoggerFactory
+import java.time.LocalDateTime
 
 // Helper function for R2DBC (no firstOrNull)
 private fun <T> List<T>.firstOrNone(): T? = if (isEmpty()) null else this[0]
@@ -36,6 +38,8 @@ object DataSeedService {
             seedReferralActivityConfigs()
             seedPointsDeductConfigs()
             seedMessageTemplates()
+            seedBannerActivities()
+            seedDemoContent()
             seedDefaultAdmin()
             seedSuperAdminRole()
             seedBusinessPermissions()
@@ -534,6 +538,97 @@ object DataSeedService {
         }
     }
 
+    /**
+     * 存量轮播图补建活动（升级兼容）。
+     *
+     * 新模型要求一张轮播图对应一个活动。历史轮播图没有 activity_id，若不处理，
+     * 升级后首页轮播会整体消失。这里按轮播图自身的标题/图片补建「待完善」活动并回填绑定，
+     * 运营随后可在「内容管理 → 活动管理」补充详情。幂等：只处理 activity_id 为空的行。
+     */
+    private suspend fun seedBannerActivities() {
+        val orphans = MpBanners.selectAll()
+            .where { MpBanners.activityId.isNull() }
+            .orderBy(MpBanners.id)
+            .toList()
+        if (orphans.isEmpty()) return
+
+        orphans.forEach { row ->
+            val activityId = MpActivities.insert {
+                it[MpActivities.title] = row[MpBanners.title]
+                it[MpActivities.coverImage] = row[MpBanners.imageUrl]
+                it[MpActivities.summary] = "由历史轮播图自动补建，请在活动管理中补充活动详情"
+                it[MpActivities.status] = 1
+                it[MpActivities.sortOrder] = row[MpBanners.sortOrder]
+                it[MpActivities.createdBy] = "system-backfill"
+            } get MpActivities.id
+
+            MpBanners.update({ MpBanners.id eq row[MpBanners.id] }) {
+                it[MpBanners.activityId] = activityId
+            }
+        }
+        logger.info("[DataSeed]: 为 ${orphans.size} 张历史轮播图补建了活动并完成绑定。")
+    }
+
+    /**
+     * 本地演示内容（仅非生产、且活动与轮播图都为空时）：
+     * 3 个活动 + 3 张已绑定活动的轮播图，用于走通「首页轮播 → 活动详情 → 立即预约」。
+     * 图片直接用小程包内的 /images/banner-*.jpg，不依赖后台上传文件。
+     */
+    private suspend fun seedDemoContent() {
+        if (GlobalConfig.isProd) return
+        if (MpActivities.selectAll().count() > 0 || MpBanners.selectAll().count() > 0) return
+
+        val start = LocalDateTime.now().minusDays(30)
+        val end = LocalDateTime.now().plusDays(60)
+        val seeds = listOf(
+            Triple(
+                "暑期正畸特惠 · 隐形矫正立减2000元",
+                "/images/banner-ortho.jpg",
+                "暑期矫正专场，隐形矫正立减 2000 元，含免费拍片与方案设计"
+            ),
+            Triple(
+                "会员充值 · 最高赠送25%",
+                "/images/banner-recharge.jpg",
+                "充值最高赠送 25%，余额可用于全门店项目消费"
+            ),
+            Triple(
+                "新客专享100元口腔检查券",
+                "/images/banner-newcomer.jpg",
+                "首次到院的新客可领取口腔检查券一张，需提前预约"
+            )
+        )
+
+        seeds.forEachIndexed { index, (title, image, summary) ->
+            val sortOrder = index + 1
+            val activityId = MpActivities.insert {
+                it[MpActivities.title] = title
+                it[MpActivities.coverImage] = image
+                it[MpActivities.summary] = summary
+                it[MpActivities.content] =
+                    "活动时间：${start.toLocalDate()} 至 ${end.toLocalDate()}\n\n" +
+                        "演示数据：请在「内容管理 → 活动管理」中替换为真实活动规则。\n\n" +
+                        "本活动需提前预约，具体以门店实际安排为准。"
+                it[MpActivities.sortOrder] = sortOrder
+                it[MpActivities.status] = 1
+                it[MpActivities.startAt] = start
+                it[MpActivities.endAt] = end
+                it[MpActivities.createdBy] = "system-demo"
+            } get MpActivities.id
+
+            MpBanners.insert {
+                it[MpBanners.title] = title
+                it[MpBanners.imageUrl] = image
+                it[MpBanners.activityId] = activityId
+                it[MpBanners.sortOrder] = sortOrder
+                it[MpBanners.status] = 1
+                it[MpBanners.startAt] = start
+                it[MpBanners.endAt] = end
+                it[MpBanners.createdBy] = "system-demo"
+            }
+        }
+        logger.info("[DataSeed]: 已写入 ${seeds.size} 组演示活动与首页轮播图（仅开发环境）。")
+    }
+
     private suspend fun seedDefaultAdmin() {
         val count = AdminUsers.selectAll().count()
         if (count > 0) return
@@ -837,8 +932,9 @@ object DataSeedService {
             icon = "lucide:image",
             sortOrder = 75
         )
-        ensureMenu(contentDirId, "轮播图管理", "menu", "/content/banner", "/content/banner/index", "content:view", "lucide:images", 1)
-        ensureMenu(contentDirId, "公告管理", "menu", "/content/notice", "/content/notice/index", "content:view", "lucide:megaphone", 2)
+        ensureMenu(contentDirId, "活动管理", "menu", "/content/activity", "/content/activity/index", "content:view", "lucide:calendar-heart", 1)
+        ensureMenu(contentDirId, "轮播图管理", "menu", "/content/banner", "/content/banner/index", "content:view", "lucide:images", 2)
+        ensureMenu(contentDirId, "公告管理", "menu", "/content/notice", "/content/notice/index", "content:view", "lucide:megaphone", 3)
 
         // 通知管理（复用 config 权限；后端端点在 ConfigRoutes 的 /notifications*）
         val notificationDirId = ensureMenu(
@@ -927,7 +1023,7 @@ object DataSeedService {
             "/customer-ops/consumption", "/customer-ops/recharge-tier", "/customer-ops/member-level", "/customer-ops/recharge-records",
             "/coupon", "/coupon/index", "/coupon/record",
             "/referral", "/referral/index", "/referral/reward",
-            "/content", "/content/banner", "/content/notice",
+            "/content", "/content/activity", "/content/banner", "/content/notice",
             "/notification", "/notification/rules", "/notification/history", "/notification/template",
             "/system", "/system/user", "/system/role", "/system/menu", "/system/config", "/system/audit"
         )
