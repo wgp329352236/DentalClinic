@@ -2,7 +2,7 @@
 import { ref } from 'vue';
 
 import { Page, useVbenModal } from '@vben/common-ui';
-import { Plus } from '@vben/icons';
+import { EmptyIcon, Plus } from '@vben/icons';
 
 import { Button, message, Modal, Tag } from 'ant-design-vue';
 
@@ -138,6 +138,17 @@ async function onDelete(row: any) {
         <Button type="link" size="small" danger @click="onDelete(row)">
           删除
         </Button>
+      </template>
+      <!-- 后端按医生查询排班，未选医生时不发请求，需明确提示而非只显示「暂无数据」 -->
+      <template #empty>
+        <EmptyIcon class="mx-auto" />
+        <div class="mt-2">
+          {{
+            selectedDoctorId
+              ? '该医生暂无排班，可点击右上角「新建排班」添加'
+              : '请先在上方选择医生，再查看或新建排班'
+          }}
+        </div>
       </template>
     </Grid>
   </Page>

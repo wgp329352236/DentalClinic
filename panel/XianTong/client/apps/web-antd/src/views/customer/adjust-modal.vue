@@ -3,7 +3,7 @@ import { ref } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
 
-import { message, Modal } from 'ant-design-vue';
+import { message, Modal as AntModal } from 'ant-design-vue';
 
 import { useVbenForm } from '#/adapter/form';
 import { adjustLevel, adjustPoints, adjustWallet } from '#/api/customer';
@@ -128,7 +128,7 @@ const [Modal, modalApi] = useVbenModal({
       confirmContent = `即将为客户调整积分 ${values.pointsAmount >= 0 ? '+' : ''}${values.pointsAmount} 分，原因：${values.reason}。此操作将记入审计日志，是否继续？`;
     }
 
-    Modal.confirm({
+    AntModal.confirm({
       title: confirmTitle,
       content: confirmContent,
       okText: '确认执行',
