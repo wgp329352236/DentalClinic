@@ -20,6 +20,11 @@ class UserAuthService : BaseService() {
 
     private val logger = LoggerFactory.getLogger("UserAuthService")
 
+    companion object {
+        /** 未配置微信凭证时使用的固定演示 openid，与 server/demo-data.sql 中的演示账号一致 */
+        private const val MOCK_OPENID = "mock_openid_demo"
+    }
+
     /**
      * 微信资料（小程序 wx.getUserProfile 兜底返回，字段都允许为空）。
      */
@@ -119,7 +124,10 @@ class UserAuthService : BaseService() {
      */
     private suspend fun resolveSession(code: String): SessionInfo {
         if (!WechatConfig.miniApp.enabled) {
-            return SessionInfo(openid = "mock_openid_$code", unionid = null)
+            // 固定 openid：wx.login 每次的 code 都不同，若拼进 openid 会导致每次登录都新建用户，
+            // 演示数据（demo-data.sql）便无法挂到登录后的账号上。本地多人共用同一后端会共享该账号。
+            logger.warn("[Auth]: 微信登录未配置，使用固定演示 openid=$MOCK_OPENID（忽略 code=$code）")
+            return SessionInfo(openid = MOCK_OPENID, unionid = null)
         }
         val session = try {
             WechatMiniClient.jscode2session(code)
