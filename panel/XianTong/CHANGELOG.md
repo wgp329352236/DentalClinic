@@ -4,6 +4,12 @@
 
 ## 2026-11-18
 
+### 小程序新增母亲节活动演示封面
+
+- **改了什么**：新增 `app/XianTong/miniprogram/images/mothers-day.jpg`（750×422，69KB），作为母亲节活动的演示封面，供 `demo-data.sql` 与包内资源路径 `/images/mothers-day.jpg` 引用。
+- **原因**：演示活动封面若指向后台上传文件（`/api/v1/files/...`），换了数据库或环境就 404；与其余演示轮播图一致改用包内图片，任何环境 `git clone` 后即可显示。
+- **影响范围**：仅新增一张演示图片，压缩后 69KB，不影响小程序包体积上限。
+
 ### 修复管理端图片上传成功却返回 400
 
 - **改了什么**：`admin/route/AdminFileRoutes.kt` 新增 `@Serializable` 的 `UploadedFileDto`（url/fileName/size），上传成功响应由 `call.ok(mapOf(...))` 改为返回该 DTO。
