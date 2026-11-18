@@ -12,8 +12,8 @@
 --      重复执行不会产生重复行，也不会覆盖你在页面上改过的数据。
 --   2. 演示用户 openid 固定为 mock_openid_demo，与 UserAuthService 未配置微信
 --      凭证时的登录 openid 一致，所以小程序登录后看到的就是这个账号。
---   3. 轮播图/活动/会员等级/充值档位/积分规则/消息模板由 DataSeedService 启动时
---      自动播种，本脚本不重复写入。
+--   3. 会员等级/充值档位/积分规则/消息模板由 DataSeedService 启动时自动播种，
+--      本脚本只额外补一条母亲节活动及其轮播图（按活动标题、activity_id 去重）。
 --   4. 日期全部相对 CURRENT_DATE/NOW() 生成，隔天重跑也不会出现「所有预约都过期」。
 -- ============================================================
 
@@ -368,13 +368,38 @@ BEGIN
       AND NOT EXISTS (SELECT 1 FROM referral_reward rw WHERE rw.relation_id = rel.id);
 END $$;
 
--- ---------- 9. 结果核对 ----------
+-- ---------- 9. 母亲节活动与首页轮播 ----------
+-- 活动按标题去重，轮播图按 activity_id 唯一索引去重。
+-- 封面用小程序包内图片 /images/mothers-day.jpg，避免依赖本地上传文件；
+-- 时间相对当前日期生成，隔很久重跑也仍在前台可见。
+INSERT INTO mp_activity (title, cover_image, summary, content, sort_order, status, start_at, end_at, created_by)
+SELECT '母亲节献礼 · 母女同享口腔护理礼遇',
+       '/images/mothers-day.jpg',
+       '这个母亲节，带上妈妈一起做口腔检查。母女同行第二人半价，另赠康乃馨与口腔护理礼包。',
+       E'【母女同行礼】\n女儿与母亲同日到店，第二人基础口腔检查半价。\n\n【洁牙双人套餐】\n双人超声波洁牙 + 抛光 + 口腔检查，原价 596 元，母亲节价 399 元。\n\n【到店即赠】\n参与活动的客户可领取康乃馨一支与口腔护理礼包一份（数量有限，先到先得）。\n\n【参与方式】\n点击下方「立即预约」，选择门店与时间，到店出示本活动页面即可。\n\n温馨提示：优惠不可与店内其他活动同享，具体以门店解释为准。',
+       0, 1,
+       CURRENT_DATE - INTERVAL '7 days',
+       CURRENT_DATE + INTERVAL '1 year',
+       'demo-data'
+WHERE NOT EXISTS (
+    SELECT 1 FROM mp_activity WHERE title = '母亲节献礼 · 母女同享口腔护理礼遇'
+);
+
+INSERT INTO mp_banner (title, image_url, activity_id, link_type, sort_order, status, created_by)
+SELECT a.title, a.cover_image, a.id, 'none', 0, 1, 'demo-data'
+FROM mp_activity a
+WHERE a.title = '母亲节献礼 · 母女同享口腔护理礼遇'
+  AND NOT EXISTS (SELECT 1 FROM mp_banner b WHERE b.activity_id = a.id);
+
+-- ---------- 10. 结果核对 ----------
 SELECT '门店' AS item, COUNT(*) FROM clinic
 UNION ALL SELECT '科室', COUNT(*) FROM department
 UNION ALL SELECT '医生', COUNT(*) FROM doctor
 UNION ALL SELECT '排班', COUNT(*) FROM doctor_schedule
 UNION ALL SELECT '积分商品', COUNT(*) FROM points_goods
 UNION ALL SELECT '公告', COUNT(*) FROM mp_notice
+UNION ALL SELECT '活动', COUNT(*) FROM mp_activity
+UNION ALL SELECT '轮播图', COUNT(*) FROM mp_banner
 UNION ALL SELECT '演示用户', COUNT(*) FROM "user" WHERE openid = 'mock_openid_demo'
 UNION ALL SELECT '预约', COUNT(*) FROM appointment WHERE user_id = (SELECT id FROM "user" WHERE openid = 'mock_openid_demo')
 UNION ALL SELECT '积分为', COUNT(*) FROM points_record WHERE user_id = (SELECT id FROM "user" WHERE openid = 'mock_openid_demo')
