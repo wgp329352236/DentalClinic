@@ -4,6 +4,18 @@
 
 ## 2026-11-18
 
+### 修复管理端图片上传成功却返回 400
+
+- **改了什么**：`admin/route/AdminFileRoutes.kt` 新增 `@Serializable` 的 `UploadedFileDto`（url/fileName/size），上传成功响应由 `call.ok(mapOf(...))` 改为返回该 DTO。
+- **原因**：`mapOf("url" to String, "size" to Long)` 被推断为 `Map<String, Any>`，kotlinx.serialization 找不到 `Any` 的序列化器，响应阶段抛 `Serializer for class 'ApiResponse' is not found`，接口返回 400；文件与 `uploaded_file` 记录其实已写入，前端却提示上传失败。所有走该接口的轮播图、门店封面、医生头像上传都受影响。
+- **影响范围**：仅响应体类型，字段与 HTTP 200 不变；实测上传 jpg 返回 `{"code":0,"url":"/api/v1/files/...","fileName":"...","size":297171}`，图片可公开访问。
+
+### server 模块忽略运行时上传目录
+
+- **改了什么**：`panel/XianTong/server/.gitignore` 增加 `uploads/`。
+- **原因**：图片上传落在 `server/uploads/`，属于运行时数据，不应随代码入库；此前未忽略，每次本地上传都会出现在未跟踪列表，容易误提交。
+- **影响范围**：仅本地版本控制，部署环境与接口行为不受影响。
+
 ### 小程序底部 tabBar 增加图标
 
 - **改了什么**：`app/XianTong/miniprogram/app.json` 的 `tabBar.list` 四项补充 `iconPath` / `selectedIconPath`；新增 8 张 81×81 透明 PNG（首页、预约、钱包、我的，未选中为灰色 `#999999`、选中为蓝色 `#1890ff`）。

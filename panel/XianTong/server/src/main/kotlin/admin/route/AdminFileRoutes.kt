@@ -14,9 +14,24 @@ import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
 
 private val logger = LoggerFactory.getLogger("AdminFileRoutes")
+
+/**
+ * 上传结果响应体。
+ *
+ * 不能用 `mapOf("url" to ..., "size" to ...)`：map 里 String 与 Long 混合会被推断成
+ * `Map<String, Any>`，kotlinx.serialization 找不到 `Any` 的序列化器，响应阶段直接 400，
+ * 前端会把已成功的上传判为失败。
+ */
+@Serializable
+data class UploadedFileDto(
+    val url: String,
+    val fileName: String,
+    val size: Long
+)
 
 /**
  * 管理端文件上传路由。
@@ -65,10 +80,10 @@ fun Route.adminFileRoutes(fileUploadService: FileUploadService) {
             
                     when (result) {
                         is FileUploadResult.Success -> call.ok(
-                            mapOf(
-                                "url" to result.url,
-                                "fileName" to result.fileName,
-                                "size" to result.size
+                            UploadedFileDto(
+                                url = result.url,
+                                fileName = result.fileName,
+                                size = result.size
                             ),
                             "上传成功"
                         )

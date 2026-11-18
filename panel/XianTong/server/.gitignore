@@ -6,3 +6,6 @@ build/
 
 # 本地凭证（微信支付/小程序、腾讯云短信），只保留 .env.local.example 模板入库
 .env.local
+
+# 运行时上传的图片等文件，属于本地数据，不入库
+uploads/
