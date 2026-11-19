@@ -1,0 +1,84 @@
+# ═══════════════════════════════════════════════════════════════════════
+# 生产环境配置骨架（APP_ENV=prod 时加载）
+#
+# 安全约定：
+#   1. 本文件随仓库提交，但所有密钥/凭证必须保持空值，真实值只通过环境变量注入；
+#   2. 启动预检（StartupPreflight）会在服务启动前校验，以下「prod 必填」项任一缺失
+#      都会直接 fail-fast 阻止启动；
+#   3. 生成随机密钥：openssl rand -hex 32（每个密钥独立生成，不要复用）。
+#
+# 必填环境变量清单（密钥类，禁止写入本文件）：
+#   DB_URL / DB_USERNAME / DB_PASSWORD
+#   ADMIN_JWT_SECRET / USER_JWT_SECRET / CHECKIN_SIGNING_SECRET
+#   WECHAT_APP_ID / WECHAT_APP_SECRET
+#   WECHAT_MCH_ID / WECHAT_API_V3_KEY / WECHAT_MERCHANT_SERIAL
+#   WECHAT_PRIVATE_KEY_PATH（推荐挂载 apiclient_key.pem 文件）
+#   WECHAT_PAY_NOTIFY_URL（公网 HTTPS）
+#   TENCENT_SMS_SECRET_ID / TENCENT_SMS_SECRET_KEY / TENCENT_SMS_SDK_APP_ID
+#   TENCENT_SMS_SIGN_NAME / TENCENT_SMS_TEMPLATE_ID（短信验证码真实下发）
+#
+# 如需把本文件放到 JAR 外部管理，可用 EngineMain 参数指定：
+#   java -jar server.jar -config=/etc/dentalclinic/application-prod.yaml
+# ═══════════════════════════════════════════════════════════════════════
+
+ktor:
+  deployment:
+    port: 8080
+  application:
+    modules:
+      - com.dentalclinic.PreflightKt.configurePreflight
+      - com.dentalclinic.SerializationKt.configureSerialization
+      - com.dentalclinic.SecurityKt.configureSecurity
+      - com.dentalclinic.KoinKt.configureKoin
+      - com.dentalclinic.RoutingKt.configureRouting
+      - com.dentalclinic.admin.AdminModuleKt.adminModule
+      - com.dentalclinic.user.UserModuleKt.userModule
+
+# ─── 数据库（PostgreSQL）─── prod 必填，建议全部走 DB_URL/DB_USERNAME/DB_PASSWORD
+database:
+  url: ""            # 形如 r2dbc:postgresql://db-host:5432/dental_clinic
+  username: ""
+  password: ""
+
+# ─── 推荐分享域名 ─── 非阻断项，但缺失时邀请链接为死链，上线前必须配置
+# 也可用环境变量 REFERRAL_SHARE_BASE_URL 注入
+referral:
+  shareBaseUrl: ""
+
+# ─── 门店签到码 HMAC 密钥 ─── prod 必填：CHECKIN_SIGNING_SECRET
+# 轮换密钥后全部门店需重新打印签到码
+checkin:
+  signingSecret: ""
+
+# ─── JWT 签名密钥 ─── prod 必填：ADMIN_JWT_SECRET / USER_JWT_SECRET（各自独立）
+admin:
+  jwt:
+    secret: ""
+    # issuer: "ktor-bi-admin"   # 可选，默认 ktor-bi-admin
+
+user:
+  jwt:
+    secret: ""
+
+# ─── 微信小程序 / 微信支付 V3 ─── prod 必填，建议全部走环境变量
+wechat:
+  miniApp:
+    appId: ""
+    appSecret: ""
+  pay:
+    mchId: ""
+    apiV3Key: ""                 # APIv3 密钥，固定 32 字节
+    merchantSerialNumber: ""     # 商户证书序列号
+    privateKey: ""               # 一般留空，用 privateKeyPath 挂载证书文件
+    privateKeyPath: ""           # apiclient_key.pem 在服务器上的绝对路径
+    notifyUrl: ""                # 必须公网 HTTPS，如 https://api.example.com/api/v1/recharge/notify
+
+# ─── 腾讯云短信 ─── prod 必填：TENCENT_SMS_*（建议全部走环境变量）
+sms:
+  tencent:
+    secretId: ""
+    secretKey: ""
+    sdkAppId: ""
+    signName: ""
+    templateId: ""
+    region: "ap-guangzhou"

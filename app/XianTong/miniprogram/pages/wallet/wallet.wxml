@@ -1,0 +1,62 @@
+<!--pages/wallet/wallet.wxml-->
+<view class="container">
+  <!-- 钱包卡片 -->
+  <view class="card wallet-card">
+    <view class="wallet-balance">
+      <view class="balance-label">账户余额</view>
+      <view class="balance-amount" wx:if="{{wallet}}">¥{{wallet.balance}}</view>
+      <view class="balance-amount" wx:else>--</view>
+    </view>
+    <view class="wallet-detail">
+      <view class="detail-item">
+        <view class="detail-value" wx:if="{{wallet}}">¥{{wallet.giftedBalance}}</view>
+        <view class="detail-value" wx:else>--</view>
+        <view class="detail-label">赠送金额</view>
+      </view>
+      <view class="detail-item">
+        <view class="detail-value" wx:if="{{wallet}}">¥{{wallet.monthlySpent}}</view>
+        <view class="detail-value" wx:else>--</view>
+        <view class="detail-label">本月消费</view>
+      </view>
+      <view class="detail-item">
+        <view class="detail-value" wx:if="{{wallet}}">¥{{wallet.totalSpent}}</view>
+        <view class="detail-value" wx:else>--</view>
+        <view class="detail-label">累计消费</view>
+      </view>
+    </view>
+    <button class="btn-primary mt-20" bindtap="goToRecharge">立即充值</button>
+  </view>
+
+  <!-- 标签切换 -->
+  <view class="tabs">
+    <view class="tab {{activeTab === 'recharge' ? 'active' : ''}}" data-tab="recharge" bindtap="onTabChange">充值记录</view>
+    <view class="tab-divider"></view>
+    <view class="tab {{activeTab === 'consumption' ? 'active' : ''}}" data-tab="consumption" bindtap="onTabChange">消费记录</view>
+  </view>
+
+  <!-- 充值记录 -->
+  <view wx:if="{{activeTab === 'recharge'}}">
+    <view class="card record-item" wx:for="{{rechargeRecords}}" wx:key="id">
+      <view class="flex-between mb-10">
+        <view class="font-bold">+¥{{item.amount + item.giftedAmount}}</view>
+        <view class="badge badge-success">{{item.status === 'success' ? '成功' : item.status}}</view>
+      </view>
+      <view class="text-muted font-small">充值¥{{item.amount}} 送¥{{item.giftedAmount}}</view>
+      <view class="text-muted font-small mt-10">{{item.createdAt}}</view>
+    </view>
+    <view wx:if="{{rechargeRecords.length === 0}}" class="empty-state">暂无充值记录</view>
+  </view>
+
+  <!-- 消费记录 -->
+  <view wx:if="{{activeTab === 'consumption'}}">
+    <view class="card record-item" wx:for="{{consumptionRecords}}" wx:key="id">
+      <view class="flex-between mb-10">
+        <view class="font-bold text-danger">-¥{{item.amount}}</view>
+        <view>{{item.clinicName}}</view>
+      </view>
+      <view class="text-muted font-small">{{item.description}}</view>
+      <view class="text-muted font-small mt-10">{{item.createdAt}}</view>
+    </view>
+    <view wx:if="{{consumptionRecords.length === 0}}" class="empty-state">暂无消费记录</view>
+  </view>
+</view>

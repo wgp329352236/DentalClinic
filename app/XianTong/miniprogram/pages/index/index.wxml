@@ -1,0 +1,113 @@
+<!--index.wxml-->
+<view class="container">
+  <!-- 用户信息卡片 -->
+  <view class="card user-card" wx:if="{{userInfo}}">
+    <view class="flex-between">
+      <view class="flex">
+        <image class="avatar" src="{{userInfo.avatar}}" mode="aspectFill"></image>
+        <view class="ml-10">
+          <view class="font-bold font-large">{{userInfo.name}}</view>
+          <view class="text-muted mt-10">
+            <text class="badge badge-primary">{{userInfo.memberLevel.name}}</text>
+          </view>
+        </view>
+      </view>
+      <view class="text-right">
+        <view class="text-muted font-small">账户余额</view>
+        <!-- 直接展示钱包余额；此前用「折扣率是否为 1」反推出 0.00/待充值，是假数据 -->
+        <view class="font-bold text-primary">¥{{userInfo.balance}}</view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 轮播图（管理端「内容管理 → 轮播图管理」下发；无启用项时整块不渲染） -->
+  <view class="card banner-card" wx:if="{{banners.length > 0}}">
+    <swiper class="banner-swiper" indicator-dots autoplay interval="3000" circular>
+      <swiper-item wx:for="{{banners}}" wx:key="id">
+        <view
+          class="banner-item"
+          data-activityid="{{item.activityId}}"
+          data-linktype="{{item.linkType}}"
+          data-linktarget="{{item.linkTarget}}"
+          bindtap="onBannerTap"
+        >
+          <!-- 图片加载失败（地址失效/域名未配）时退回标题占位，避免整屏空白 -->
+          <image
+            wx:if="{{item.image}}"
+            class="banner-image"
+            src="{{item.image}}"
+            mode="aspectFill"
+            binderror="onBannerImageError"
+            data-index="{{index}}"
+          ></image>
+          <view class="banner-placeholder">
+            <text>{{item.title}}</text>
+          </view>
+        </view>
+      </swiper-item>
+    </swiper>
+  </view>
+
+  <!-- 公告（管理端「内容管理 → 公告管理」下发；纵向自动轮播） -->
+  <view class="card notice-bar" wx:if="{{notices.length > 0}}">
+    <view class="notice-icon">📢</view>
+    <swiper
+      class="notice-swiper"
+      vertical
+      autoplay
+      circular
+      interval="4000"
+      duration="400"
+    >
+      <swiper-item wx:for="{{notices}}" wx:key="id">
+        <view
+          class="notice-item"
+          data-linktype="{{item.linkType}}"
+          data-linktarget="{{item.linkTarget}}"
+          bindtap="onNoticeTap"
+        >{{item.content}}</view>
+      </swiper-item>
+    </swiper>
+  </view>
+
+  <!-- 快捷操作 -->
+  <view class="card">
+    <view class="section-title">快捷服务</view>
+    <view class="quick-actions">
+      <view class="quick-action-item" wx:for="{{quickActions}}" wx:key="id" data-path="{{item.path}}" bindtap="onQuickAction">
+        <view class="quick-action-icon">{{item.icon}}</view>
+        <view class="quick-action-name">{{item.name}}</view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 门店列表 -->
+  <view class="card">
+    <view class="section-title">附近门诊</view>
+    <view class="clinic-list">
+      <view class="clinic-item" wx:for="{{clinics}}" wx:key="id" data-id="{{item.id}}" bindtap="onClinicTap">
+        <view class="clinic-image-wrap">
+          <image wx:if="{{item.image}}" class="clinic-image" src="{{item.image}}" mode="aspectFill"></image>
+          <view wx:else class="clinic-image-placeholder">门店</view>
+        </view>
+        <view class="clinic-info">
+          <view class="clinic-name font-bold">{{item.name}}</view>
+          <view class="clinic-address text-muted font-small">{{item.address}}</view>
+          <view class="clinic-hours text-muted font-small">营业时间：{{item.businessHours}}</view>
+        </view>
+        <view class="clinic-distance text-primary" wx:if="{{item.distance}}">
+          {{item.distance}}km
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 未登录提示 -->
+  <view class="empty-state" wx:if="{{!userInfo && !loading}}">
+    <view class="font-large mb-20">欢迎使用牙科门诊</view>
+    <view class="text-muted mb-20">请先登录后享受完整服务</view>
+    <button class="btn-primary" loading="{{loading}}" disabled="{{loading}}" open-type="getPhoneNumber" bindgetphonenumber="onGetPhoneNumber">{{loading ? '登录中...' : '微信一键登录'}}</button>
+    <!-- 登录失败原因：页面直接输出，方便截图排查 -->
+    <view class="login-error" wx:if="{{loginError}}">{{loginError}}</view>
+  </view>
+</view>

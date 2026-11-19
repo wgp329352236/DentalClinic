@@ -1,0 +1,71 @@
+<!--pages/points/points.wxml-->
+<view class="container">
+  <!-- 积分卡片 -->
+  <view class="card points-card">
+    <view class="points-balance">
+      <view class="balance-label">当前积分</view>
+      <view class="balance-amount" wx:if="{{pointsInfo}}">{{pointsInfo.balance}}</view>
+      <view class="balance-amount" wx:else>--</view>
+    </view>
+    <view class="points-detail">
+      <view class="detail-item">
+        <view class="detail-value" wx:if="{{pointsInfo}}">+{{pointsInfo.monthlyEarned}}</view>
+        <view class="detail-value" wx:else>--</view>
+        <view class="detail-label">本月获得</view>
+      </view>
+      <view class="detail-item">
+        <view class="detail-value" wx:if="{{pointsInfo}}">-{{pointsInfo.monthlySpent}}</view>
+        <view class="detail-value" wx:else>--</view>
+        <view class="detail-label">本月消耗</view>
+      </view>
+    </view>
+    <button
+      class="btn-primary mt-20 {{checkedIn ? 'checked-in' : ''}}"
+      bindtap="handleCheckin"
+      disabled="{{loading || checkedIn}}"
+    >
+      {{checkedIn ? '今日已签到' : (loading ? '签到中...' : '每日签到 +2积分')}}
+    </button>
+  </view>
+
+  <!-- 积分说明 -->
+  <view class="card">
+    <view class="section-title">积分规则</view>
+    <view class="rules-list text-muted font-small">
+      <view>• 消费积分：每消费1元积1分</view>
+      <view>• 充值积分：每充值1元积0.5分</view>
+      <view>• 签到积分：每日签到2分</view>
+      <view>• 完善信息：一次性50分</view>
+      <view>• 推荐注册：每成功推荐1人50分</view>
+      <view class="divider"></view>
+      <view>• 积分抵扣：100积分 = 1元（最高抵扣20%）</view>
+      <view>• 积分有效期：获取后12个月</view>
+    </view>
+  </view>
+
+  <!-- 积分有效期分布 -->
+  <view class="card" wx:if="{{expiryGroups.length > 0}}">
+    <view class="section-title">积分有效期</view>
+    <view class="expiry-item" wx:for="{{expiryGroups}}" wx:key="expireMonth">
+      <view class="text-muted font-small">{{item.expireMonth}} 到期</view>
+      <view class="font-bold text-danger">{{item.points}} 积分</view>
+    </view>
+    <view class="text-muted font-small">积分自获取后 12 个月有效，到期自动清零；到期前 30 天会有提醒</view>
+  </view>
+
+  <!-- 积分明细 -->
+  <view class="card">
+    <view class="section-title">积分明细</view>
+    <view class="record-item" wx:for="{{pointsRecords}}" wx:key="id">
+      <view class="flex-between mb-10">
+        <view class="font-bold {{item.type === 'earn' ? 'text-success' : 'text-danger'}}">
+          {{item.type === 'earn' ? '+' : ''}}{{item.points}}
+        </view>
+        <view class="text-muted font-small">{{item.source}}</view>
+      </view>
+      <view class="text-muted font-small" wx:if="{{item.relatedInfo}}">{{item.relatedInfo}}</view>
+      <view class="text-muted font-small">{{item.createdAt}}</view>
+    </view>
+    <view wx:if="{{pointsRecords.length === 0}}" class="empty-state">暂无积分记录</view>
+  </view>
+</view>

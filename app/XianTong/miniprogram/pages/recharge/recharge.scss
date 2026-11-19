@@ -1,0 +1,55 @@
+/* pages/recharge/recharge.scss */
+
+.section-title {
+  font-size: 30rpx;
+  font-weight: bold;
+  margin-bottom: 20rpx;
+}
+
+.plan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20rpx;
+}
+
+.plan-item {
+  padding: 30rpx;
+  background: #f5f5f5;
+  border-radius: 16rpx;
+  text-align: center;
+  border: 3rpx solid transparent;
+}
+
+.plan-item.selected {
+  background: #e6f7ff;
+  border-color: #1890ff;
+}
+
+.plan-amount {
+  font-size: 40rpx;
+  font-weight: bold;
+  color: #1890ff;
+  margin-bottom: 8rpx;
+}
+
+.plan-gift {
+  font-size: 28rpx;
+  color: #ff4d4f;
+  margin-bottom: 8rpx;
+}
+
+.plan-ratio {
+  font-size: 24rpx;
+  color: #52c41a;
+}
+
+.custom-input {
+  padding: 20rpx;
+  border: 2rpx solid #d9d9d9;
+  border-radius: 8rpx;
+  font-size: 28rpx;
+}
+
+.recharge-note {
+  line-height: 1.8;
+}

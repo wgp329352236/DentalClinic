@@ -1,0 +1,42 @@
+<!--pages/medical-records/medical-records.wxml-->
+<view class="container">
+  <!-- 搜索：后端支持按诊断/科室等关键字过滤 -->
+  <view class="search-bar">
+    <input
+      class="search-input"
+      value="{{keyword}}"
+      placeholder="搜索诊断、科室或医生"
+      confirm-type="search"
+      bindinput="onKeywordInput"
+      bindconfirm="onSearch"
+    />
+    <view class="search-btn" bindtap="onSearch">搜索</view>
+  </view>
+
+  <view wx:if="{{loading && records.length === 0}}" class="loading">加载中...</view>
+
+  <view wx:else>
+    <view class="card record-item" wx:for="{{records}}" wx:key="id" data-id="{{item.id}}" bindtap="onRecordTap">
+      <view class="flex-between mb-10">
+        <view class="font-bold">{{item.appointmentDate}}</view>
+        <view class="text-primary font-bold">¥{{item.consumptionAmount}}</view>
+      </view>
+      <view class="text-muted font-small mb-10">
+        {{item.clinicName}}{{item.departmentName ? ' · ' + item.departmentName : ''}}
+      </view>
+      <view class="text-muted font-small mb-10">
+        {{item.doctorName}}{{item.doctorTitle ? '（' + item.doctorTitle + '）' : ''}}
+      </view>
+      <view class="diagnosis" wx:if="{{item.diagnosis}}">诊断：{{item.diagnosis}}</view>
+    </view>
+
+    <view wx:if="{{records.length === 0}}" class="empty-state">
+      <view>暂无就诊记录</view>
+      <view class="text-muted font-small mt-10">完成就诊后记录会自动出现在这里</view>
+    </view>
+
+    <view wx:if="{{records.length > 0}}" class="load-more text-muted font-small">
+      {{hasMore ? (loading ? '加载中...' : '上拉加载更多') : '已加载全部 ' + total + ' 条'}}
+    </view>
+  </view>
+</view>

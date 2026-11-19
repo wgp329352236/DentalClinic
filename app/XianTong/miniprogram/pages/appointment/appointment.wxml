@@ -1,0 +1,105 @@
+<!--pages/appointment/appointment.wxml-->
+<view class="container">
+  <!-- 步骤指示器 -->
+  <view class="steps">
+    <view class="step {{step >= 1 ? 'active' : ''}}">1</view>
+    <view class="step-line"></view>
+    <view class="step {{step >= 2 ? 'active' : ''}}">2</view>
+    <view class="step-line"></view>
+    <view class="step {{step >= 3 ? 'active' : ''}}">3</view>
+    <view class="step-line"></view>
+    <view class="step {{step >= 4 ? 'active' : ''}}">4</view>
+    <view class="step-line"></view>
+    <view class="step {{step >= 5 ? 'active' : ''}}">5</view>
+  </view>
+
+  <view class="step-title">{{getStepTitle()}}</view>
+
+  <!-- 步骤1：选择门诊 -->
+  <view wx:if="{{step === 1}}" class="card">
+    <view class="list-item" wx:for="{{clinics}}" wx:key="id" data-id="{{item.id}}" bindtap="onSelectClinic">
+      <view class="clinic-option">
+        <view class="clinic-image-wrap">
+          <image wx:if="{{item.image}}" class="clinic-image" src="{{item.image}}" mode="aspectFill"></image>
+          <view wx:else class="clinic-image-placeholder">门店</view>
+        </view>
+        <view class="clinic-option-info">
+          <view class="list-item-title">{{item.name}}</view>
+          <view class="list-item-desc">{{item.address}}</view>
+          <view class="list-item-extra" wx:if="{{item.distance}}">{{item.distance}}km</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 步骤2：选择科室 -->
+  <view wx:if="{{step === 2}}" class="card">
+    <view class="list-item" wx:for="{{departments}}" wx:key="id" data-id="{{item.id}}" bindtap="onSelectDepartment">
+      <view class="list-item-title">{{item.name}}</view>
+      <view class="list-item-desc">{{item.description}}</view>
+    </view>
+  </view>
+
+  <!-- 步骤3：选择医生 -->
+  <view wx:if="{{step === 3}}" class="card">
+    <view class="doctor-item" wx:for="{{doctors}}" wx:key="id" data-id="{{item.id}}" bindtap="onSelectDoctor">
+      <image class="doctor-avatar" src="{{item.avatar}}" mode="aspectFill"></image>
+      <view class="doctor-info">
+        <view class="doctor-name">{{item.name}} <text class="doctor-title">{{item.title}}</text></view>
+        <view class="doctor-specialty text-muted font-small">{{item.specialties}}</view>
+        <view class="doctor-intro text-muted font-small">{{item.introduction}}</view>
+      </view>
+    </view>
+    <view wx:if="{{doctors.length === 0}}" class="empty-state">暂无医生</view>
+  </view>
+
+  <!-- 步骤4：选择时段 -->
+  <view wx:if="{{step === 4}}" class="card">
+    <view wx:if="{{loading}}" class="loading">加载中...</view>
+    <view wx:else>
+      <view class="time-slot-group" wx:for="{{timeSlots}}" wx:key="index">
+        <view class="time-slot-date">{{item.date}}</view>
+        <view class="time-slot-list">
+          <view
+            class="time-slot {{item.available ? '' : 'disabled'}}"
+            data-index="{{index}}"
+            bindtap="onSelectSlot"
+          >
+            {{item.startTime}}-{{item.endTime}}
+            <view class="time-slot-status" wx:if="{{item.available}}">可预约</view>
+            <view class="time-slot-full" wx:else>已满</view>
+          </view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 步骤5：确认预约 -->
+  <view wx:if="{{step === 5}}" class="card">
+    <view class="confirm-item">
+      <text class="confirm-label">门诊：</text>
+      <text>{{selectedClinicName}}</text>
+    </view>
+    <view class="confirm-item">
+      <text class="confirm-label">科室：</text>
+      <text>{{selectedDepartmentName}}</text>
+    </view>
+    <view class="confirm-item">
+      <text class="confirm-label">医生：</text>
+      <text>{{selectedDoctorName}}</text>
+    </view>
+    <view class="confirm-item">
+      <text class="confirm-label">时间：</text>
+      <text>{{selectedSlot.date}} {{selectedSlot.timeRange}}</text>
+    </view>
+    <view class="divider"></view>
+    <button class="btn-primary" bindtap="submitAppointment" disabled="{{loading}}">
+      {{loading ? '提交中...' : '确认预约'}}
+    </button>
+  </view>
+
+  <!-- 返回按钮 -->
+  <view wx:if="{{step > 1 && step < 5}}" class="back-btn" bindtap="goBack">
+    上一步
+  </view>
+</view>

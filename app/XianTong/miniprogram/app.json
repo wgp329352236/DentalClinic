@@ -1,0 +1,60 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/activity/activity",
+    "pages/appointment/appointment",
+    "pages/appointments/appointments",
+    "pages/recharge/recharge",
+    "pages/wallet/wallet",
+    "pages/points/points",
+    "pages/referral/referral",
+    "pages/profile/profile",
+    "pages/profile-edit/profile-edit",
+    "pages/coupon/coupon",
+    "pages/mall/mall",
+    "pages/medical-records/medical-records",
+    "pages/medical-record-detail/medical-record-detail",
+    "pages/messages/messages"
+  ],
+  "window": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "牙科门诊",
+    "navigationBarBackgroundColor": "#ffffff",
+    "backgroundColor": "#f5f5f5"
+  },
+  "tabBar": {
+    "color": "#999999",
+    "selectedColor": "#1890ff",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/index/index",
+        "text": "首页",
+        "iconPath": "images/tab-home.png",
+        "selectedIconPath": "images/tab-home-active.png"
+      },
+      {
+        "pagePath": "pages/appointment/appointment",
+        "text": "预约",
+        "iconPath": "images/tab-appointment.png",
+        "selectedIconPath": "images/tab-appointment-active.png"
+      },
+      {
+        "pagePath": "pages/wallet/wallet",
+        "text": "钱包",
+        "iconPath": "images/tab-wallet.png",
+        "selectedIconPath": "images/tab-wallet-active.png"
+      },
+      {
+        "pagePath": "pages/profile/profile",
+        "text": "我的",
+        "iconPath": "images/tab-profile.png",
+        "selectedIconPath": "images/tab-profile-active.png"
+      }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

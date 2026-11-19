@@ -1,0 +1,45 @@
+<!--pages/recharge/recharge.wxml-->
+<view class="container">
+  <view class="card">
+    <view class="section-title">选择充值档位</view>
+    <view class="plan-grid">
+      <view
+        class="plan-item {{selectedPlan === item ? 'selected' : ''}}"
+        wx:for="{{plans}}"
+        wx:key="amount"
+        data-index="{{index}}"
+        bindtap="onSelectPlan"
+      >
+        <view class="plan-amount">¥{{item.amount}}</view>
+        <view class="plan-gift">送¥{{item.giftedAmount}}</view>
+        <view class="plan-ratio">{{item.giftRatio * 100}}%赠送</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="section-title">自定义金额</view>
+    <input
+      class="custom-input"
+      type="number"
+      placeholder="请输入充值金额（最低100元）"
+      value="{{customAmount}}"
+      bindinput="onCustomAmountInput"
+    />
+  </view>
+
+  <view class="card recharge-info">
+    <view class="recharge-note text-muted font-small">
+      <view><text class="font-bold">充值说明：</text></view>
+      <view>• 充值金额实时到账，可用于支付诊疗费用</view>
+      <view>• 赠送金额与充值金额共享使用</view>
+      <view>• 每笔消费优先使用余额支付</view>
+    </view>
+  </view>
+
+  <view style="padding: 20rpx;">
+    <button class="btn-primary" bindtap="handleRecharge" disabled="{{loading}}">
+      {{loading ? '处理中...' : (selectedPlan ? '充值¥' + selectedPlan.amount + '送¥' + selectedPlan.giftedAmount : (customAmount ? '充值¥' + customAmount : '确认充值'))}}
+    </button>
+  </view>
+</view>

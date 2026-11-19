@@ -1,0 +1,126 @@
+<!--pages/profile/profile.wxml-->
+<view class="container">
+  <!-- 用户信息卡片 -->
+  <view class="card profile-card" wx:if="{{userInfo}}">
+    <view class="flex-between">
+      <view class="flex">
+        <image class="avatar-large" src="{{userInfo.avatar}}" mode="aspectFill"></image>
+        <view class="ml-20">
+          <!-- 用户名：未设置姓名时默认为手机号 -->
+          <view class="font-bold font-large">{{userInfo.name || userInfo.phone || '未设置'}}</view>
+          <!-- 姓名与手机号不同时才单独展示手机号，避免重复 -->
+          <view class="text-muted mt-10" wx:if="{{userInfo.name && userInfo.phone}}">{{userInfo.phone}}</view>
+          <view class="mt-10">
+            <text class="badge badge-primary">{{userInfo.memberLevel.name}}</text>
+          </view>
+        </view>
+      </view>
+      <view class="edit-btn" bindtap="editProfile">编辑</view>
+    </view>
+
+    <!-- 余额：直接取 /profile/me 下发的钱包字段，不再用折扣率反推假数据 -->
+    <view class="balance-row mt-20">
+      <view class="balance-item">
+        <view class="text-muted font-small">账户余额</view>
+        <view class="font-bold text-primary">¥{{userInfo.balance}}</view>
+      </view>
+      <view class="balance-item">
+        <view class="text-muted font-small">赠送余额</view>
+        <view class="font-bold">¥{{userInfo.bonusBalance}}</view>
+      </view>
+      <view class="balance-item">
+        <view class="text-muted font-small">累计消费</view>
+        <view class="font-bold">¥{{userInfo.totalSpent}}</view>
+      </view>
+    </view>
+
+    <!-- 会员等级进度：已是最高等级（nextLevelCost 为 null/0）时整块隐藏 -->
+    <view class="member-progress mt-20" wx:if="{{userInfo.memberLevel.nextLevelCost > 0}}">
+      <view class="text-muted font-small mb-10">距升级还需消费 ¥{{userInfo.memberLevel.nextLevelCost}}</view>
+      <view class="progress-bar">
+        <view class="progress-fill" style="width: {{progressPercent}}%;"></view>
+      </view>
+    </view>
+    <view class="member-progress mt-20" wx:else>
+      <view class="text-muted font-small">已是当前最高等级</view>
+    </view>
+
+    <!-- 等级权益：后端 member_level.benefits 下发，无权益时不渲染空块 -->
+    <view class="benefits mt-20" wx:if="{{userInfo.memberLevel.benefits.length > 0}}">
+      <view class="text-muted font-small mb-10">等级权益</view>
+      <view class="benefit-tags">
+        <text class="benefit-tag" wx:for="{{userInfo.memberLevel.benefits}}" wx:key="*this">{{item}}</text>
+      </view>
+    </view>
+
+    <!-- 折扣文案由 ts 侧算好：wxml 里直接写 discount * 10 会碰到浮点尾差（如 0.57*10=5.699999999999999） -->
+    <view class="member-progress mt-20" wx:if="{{discountText}}">
+      <view class="text-muted font-small">消费折扣 {{discountText}}</view>
+    </view>
+  </view>
+
+  <!-- 功能列表 -->
+  <view class="card menu-card">
+    <view class="menu-item" bindtap="goToVisitRecords">
+      <view class="menu-icon">📋</view>
+      <view class="menu-label">就诊记录</view>
+      <view class="menu-arrow">›</view>
+    </view>
+    <view class="menu-item" bindtap="goToCoupons">
+      <view class="menu-icon">🎫</view>
+      <view class="menu-label">我的优惠券</view>
+      <view class="menu-arrow">›</view>
+    </view>
+    <view class="menu-item" bindtap="goToMall">
+      <view class="menu-icon">🛍️</view>
+      <view class="menu-label">积分商城</view>
+      <view class="menu-arrow">›</view>
+    </view>
+    <view class="menu-item" bindtap="goToMessages">
+      <view class="menu-icon">🔔</view>
+      <view class="menu-label">消息中心</view>
+      <view class="menu-badge" wx:if="{{unreadCount > 0}}">{{unreadCount}}</view>
+      <view class="menu-arrow">›</view>
+    </view>
+  </view>
+
+  <!-- 优惠券预览（仅展示未使用前 3 张，点击查看全部跳转优惠券页） -->
+  <view class="card" wx:if="{{coupons.length > 0}}">
+    <view class="section-title" bindtap="goToCoupons">
+      <text>我的优惠券</text>
+      <text class="section-more">查看全部 ›</text>
+    </view>
+    <view class="coupon-list">
+      <view class="coupon-item" wx:for="{{coupons}}" wx:key="id" wx:if="{{index < 3}}">
+        <view class="coupon-amount">¥{{item.amount}}</view>
+        <view class="coupon-info">
+          <view class="coupon-name font-bold">{{item.name}}</view>
+          <view class="coupon-desc text-muted font-small">满{{item.minAmount}}可用 · {{item.scope}}</view>
+          <view class="coupon-date text-muted font-small">有效期至 {{item.validTo}}</view>
+        </view>
+        <view class="coupon-status badge {{item.status === 'unused' ? 'badge-success' : (item.status === 'used' ? 'badge-default' : 'badge-danger')}}">
+          {{item.status === 'unused' ? '未使用' : (item.status === 'used' ? '已使用' : '已过期')}}
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 账户与隐私（需求 5.2 数据导出/删除） -->
+  <view class="card menu-card">
+    <view class="menu-item" bindtap="handleExport">
+      <view class="menu-icon">📥</view>
+      <view class="menu-label">导出个人数据</view>
+      <view class="menu-arrow">›</view>
+    </view>
+    <view class="menu-item" bindtap="handleDeleteAccount">
+      <view class="menu-icon">🗑️</view>
+      <view class="menu-label menu-danger">注销账户</view>
+      <view class="menu-arrow">›</view>
+    </view>
+  </view>
+
+  <!-- 退出登录 -->
+  <view style="padding: 20rpx;">
+    <button class="btn-outline btn-danger" bindtap="handleLogout">退出登录</button>
+  </view>
+</view>

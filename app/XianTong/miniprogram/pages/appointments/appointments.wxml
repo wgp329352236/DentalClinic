@@ -1,0 +1,41 @@
+<!--pages/appointments/appointments.wxml-->
+<view class="container">
+  <!-- 标签切换 -->
+  <view class="tabs">
+    <view class="tab {{activeTab === 'upcoming' ? 'active' : ''}}" data-tab="upcoming" bindtap="onTabChange">待就诊</view>
+    <view class="tab {{activeTab === 'history' ? 'active' : ''}}" data-tab="history" bindtap="onTabChange">历史记录</view>
+  </view>
+
+  <!-- 预约列表 -->
+  <view wx:if="{{loading}}" class="loading">加载中...</view>
+
+  <view wx:else>
+    <view class="card appointment-item" wx:for="{{appointments}}" wx:key="id">
+      <view class="flex-between mb-10">
+        <view class="font-bold">{{item.clinicName}}</view>
+        <view class="badge {{item.statusClass}}">{{item.statusText}}</view>
+      </view>
+      <view class="text-muted font-small mb-10">
+        {{item.departmentName}} · {{item.doctorName}}
+      </view>
+      <view class="text-muted font-small mb-20">
+        预约时间：{{item.appointmentTime}}
+      </view>
+
+      <!-- 操作按钮 -->
+      <view class="flex-between" wx:if="{{item.status === 'pending' || item.status === 'confirmed'}}">
+        <view class="flex gap-10">
+          <button class="btn-outline btn-sm" data-id="{{item.id}}" bindtap="onRescheduleAppointment">改约</button>
+          <button class="btn-outline btn-sm" data-id="{{item.id}}" bindtap="onCancelAppointment">取消预约</button>
+        </view>
+        <!-- 仅就诊当天展示扫码签到（非当天的未来预约签到会被后端拒绝，按钮直接收起） -->
+        <button wx:if="{{item.canCheckin}}" class="btn-checkin btn-sm" data-id="{{item.id}}" loading="{{checkingIn}}" bindtap="onScanCheckin">扫码签到</button>
+        <view wx:else></view>
+      </view>
+    </view>
+
+    <view wx:if="{{appointments.length === 0}}" class="empty-state">
+      <view>暂无预约记录</view>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,38 @@
+/* pages/medical-records/medical-records.scss */
+
+.search-bar {
+  display: flex;
+  align-items: center;
+  background: #fff;
+  border-radius: 16rpx;
+  padding: 8rpx 8rpx 8rpx 24rpx;
+  margin-bottom: 20rpx;
+}
+
+.search-input {
+  flex: 1;
+  font-size: 28rpx;
+  height: 64rpx;
+}
+
+.search-btn {
+  flex-shrink: 0;
+  padding: 12rpx 28rpx;
+  background: #1890ff;
+  color: #fff;
+  border-radius: 32rpx;
+  font-size: 26rpx;
+}
+
+.diagnosis {
+  font-size: 26rpx;
+  color: #333;
+  background: #fafafa;
+  border-radius: 8rpx;
+  padding: 12rpx 16rpx;
+}
+
+.load-more {
+  text-align: center;
+  padding: 24rpx 0;
+}
