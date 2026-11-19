@@ -6,11 +6,11 @@ import com.dentalclinic.user.auth.userAuthenticated
 import com.dentalclinic.user.auth.userId
 import com.dentalclinic.user.service.ConsumptionRecordService
 import com.dentalclinic.user.service.UserConsumptionPaymentService
+import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import kotlinx.serialization.Serializable
 
 /**
  * User consumption record routes (protected by JWT).
@@ -80,24 +80,53 @@ fun Application.userConsumptionRoutes(
             /**
              * Initiate payment for an unpaid consumption (需求 P0-3).
              * POST /api/v1/consumption/pay/{id}
-             * Body: { "openid": "xxx" }
+             *
+             * 不再接收客户端 openid：服务端根据已认证 userId 读取微信身份，避免替他人下单。
              */
             post("/pay/{id}") {
                 val userId = call.userId()
                 val consumptionId = call.parameters["id"]?.toLongOrNull()
                 if (consumptionId == null) {
-                    call.respond(ApiResponse<Any>(code = 400, message = "无效的消费ID"))
+                    call.respond(HttpStatusCode.BadRequest, ApiResponse<Unit>(code = 400, message = "无效的消费ID"))
                     return@post
                 }
-                
-                val request = call.receive<PaymentRequest>()
-                val payParams = paymentService.initiatePayment(userId, consumptionId, request.openid)
-                call.respond(ApiResponse(code = 0, message = "success", data = payParams))
+
+                try {
+                    val result = paymentService.initiatePayment(userId, consumptionId)
+                    call.respond(ApiResponse(code = 0, message = "success", data = result))
+                } catch (e: com.dentalclinic.admin.util.NotFoundException) {
+                    call.respond(
+                        HttpStatusCode.NotFound,
+                        ApiResponse<Unit>(code = 404, message = e.message ?: "消费记录不存在")
+                    )
+                } catch (e: Exception) {
+                    call.respond(
+                        HttpStatusCode.InternalServerError,
+                        ApiResponse<Unit>(code = 500, message = "发起支付失败，请稍后重试")
+                    )
+                }
+            }
+
+            /**
+             * 查询尾款支付状态。pending 时服务端会主动查单并完成权益结算。
+             * GET /api/v1/consumption/pay/{id}/status
+             */
+            get("/pay/{id}/status") {
+                val userId = call.userId()
+                val consumptionId = call.parameters["id"]?.toLongOrNull()
+                if (consumptionId == null) {
+                    call.respond(HttpStatusCode.BadRequest, ApiResponse<Unit>(code = 400, message = "无效的消费ID"))
+                    return@get
+                }
+
+                val status = paymentService.getPaymentStatus(userId, consumptionId)
+                if (status == null) {
+                    call.respond(HttpStatusCode.NotFound, ApiResponse<Unit>(code = 404, message = "消费记录不存在"))
+                } else {
+                    call.respond(ApiResponse(code = 0, message = "success", data = status))
+                }
             }
             }
         }
     }
 }
-
-@Serializable
-data class PaymentRequest(val openid: String)

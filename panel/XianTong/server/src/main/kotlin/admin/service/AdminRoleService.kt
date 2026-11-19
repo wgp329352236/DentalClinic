@@ -1,5 +1,6 @@
 package com.dentalclinic.admin.service
 
+import com.dentalclinic.admin.auth.ClinicScope
 import com.dentalclinic.admin.dto.response.PermissionGroup
 import com.dentalclinic.admin.dto.response.PermissionItem
 import com.dentalclinic.admin.dto.response.RoleDetail
@@ -46,8 +47,16 @@ class AdminRoleService : BaseService() {
         )
     }
 
-    suspend fun createRole(roleCode: String, roleName: String, description: String?, permissionIds: List<Long>): Long =
+    suspend fun createRole(
+        roleCode: String,
+        roleName: String,
+        description: String?,
+        permissionIds: List<Long>,
+        scope: ClinicScope
+    ): Long =
         dbQuery {
+            requireFullClinicScope(scope, "仅全部门店管理员可以创建角色")
+
             // 唯一性检查
             val exists = AdminRoles.selectAll().where { AdminRoles.roleCode eq roleCode }.count() > 0
             if (exists) throw ConflictException("角色编码已存在: $roleCode")
@@ -68,13 +77,24 @@ class AdminRoleService : BaseService() {
             roleId
         }
 
-    suspend fun updateRole(id: Long, roleName: String?, description: String?, permissionIds: List<Long>?) = dbQuery {
+    suspend fun updateRole(
+        id: Long,
+        roleName: String?,
+        description: String?,
+        permissionIds: List<Long>?,
+        scope: ClinicScope
+    ) = dbQuery {
+        requireFullClinicScope(scope, "仅全部门店管理员可以修改角色权限")
+
         val role = AdminRoles.selectAll().where { AdminRoles.id eq id }.toList().singleOrNull()
             ?: throw NotFoundException("角色不存在")
 
-        AdminRoles.update({ AdminRoles.id eq id }) {
-            if (roleName != null) it[AdminRoles.roleName] = roleName
-            if (description != null) it[AdminRoles.description] = description
+        // 仅更新权限时不带任何字段，需跳过空 UPDATE（Exposed 会直接抛异常）
+        if (roleName != null || description != null) {
+            AdminRoles.update({ AdminRoles.id eq id }) {
+                if (roleName != null) it[AdminRoles.roleName] = roleName
+                if (description != null) it[AdminRoles.description] = description
+            }
         }
 
         // 更新权限分配
@@ -89,7 +109,9 @@ class AdminRoleService : BaseService() {
         }
     }
 
-    suspend fun deleteRole(id: Long) = dbQuery {
+    suspend fun deleteRole(id: Long, scope: ClinicScope) = dbQuery {
+        requireFullClinicScope(scope, "仅全部门店管理员可以删除角色")
+
         val role = AdminRoles.selectAll().where { AdminRoles.id eq id }.toList().singleOrNull()
             ?: throw NotFoundException("角色不存在")
 

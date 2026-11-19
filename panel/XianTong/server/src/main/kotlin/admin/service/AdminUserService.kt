@@ -1,6 +1,7 @@
 package com.dentalclinic.admin.service
 
 import com.dentalclinic.admin.auth.AdminRedisClient
+import com.dentalclinic.admin.auth.ClinicScope
 import com.dentalclinic.admin.auth.PasswordEncoder
 import com.dentalclinic.admin.dto.response.RoleSimple
 import com.dentalclinic.admin.dto.response.UserListItem
@@ -85,8 +86,12 @@ class AdminUserService : BaseService() {
         displayName: String,
         email: String?,
         roleIds: List<Long>,
-        clinicIds: List<Long> = emptyList()
+        clinicIds: List<Long> = emptyList(),
+        scope: ClinicScope
     ): Long = dbQuery {
+        requireFullClinicScope(scope, "仅全部门店管理员可以创建管理员账号")
+        requireClinicsInScope(clinicIds.distinct(), scope)
+
         // 唯一性检查
         val exists = AdminUsers.selectAll().where { AdminUsers.username eq username }.count() > 0
         if (exists) throw ConflictException("用户名已存在: $username")
@@ -122,8 +127,13 @@ class AdminUserService : BaseService() {
         displayName: String?,
         email: String?,
         roleIds: List<Long>?,
-        clinicIds: List<Long>? = null
+        clinicIds: List<Long>? = null,
+        scope: ClinicScope
     ) = dbQuery {
+        // 账号资料/角色/门店授权均属系统全局配置，统一只允许全部门店范围账号修改。
+        requireFullClinicScope(scope, "仅全部门店管理员可以修改管理员账号")
+        if (clinicIds != null) requireClinicsInScope(clinicIds.distinct(), scope)
+
         AdminUsers.selectAll().where { AdminUsers.id eq id }.toList().singleOrNull()
             ?: throw NotFoundException("用户不存在")
 
@@ -155,7 +165,9 @@ class AdminUserService : BaseService() {
         }
     }
 
-    suspend fun updateStatus(id: Long, status: Int) = dbQuery {
+    suspend fun updateStatus(id: Long, status: Int, scope: ClinicScope) = dbQuery {
+        requireFullClinicScope(scope, "仅全部门店管理员可以修改管理员账号状态")
+
         AdminUsers.selectAll().where { AdminUsers.id eq id }.toList().singleOrNull()
             ?: throw NotFoundException("用户不存在")
 
@@ -164,7 +176,9 @@ class AdminUserService : BaseService() {
         }
     }
 
-    suspend fun resetPassword(id: Long, newPassword: String) = dbQuery {
+    suspend fun resetPassword(id: Long, newPassword: String, scope: ClinicScope) = dbQuery {
+        requireFullClinicScope(scope, "仅全部门店管理员可以重置管理员密码")
+
         AdminUsers.selectAll().where { AdminUsers.id eq id }.toList().singleOrNull()
             ?: throw NotFoundException("用户不存在")
 
@@ -176,7 +190,9 @@ class AdminUserService : BaseService() {
         AdminRedisClient.deleteAllRefreshTokensForUser(id)
     }
 
-    suspend fun deleteUser(id: Long) = dbQuery {
+    suspend fun deleteUser(id: Long, scope: ClinicScope) = dbQuery {
+        requireFullClinicScope(scope, "仅全部门店管理员可以删除管理员账号")
+
         AdminUsers.selectAll().where { AdminUsers.id eq id }.toList().singleOrNull()
             ?: throw NotFoundException("用户不存在")
 

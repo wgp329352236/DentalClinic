@@ -1,6 +1,7 @@
 package com.dentalclinic.admin.route
 
 import com.dentalclinic.admin.auth.authenticated
+import com.dentalclinic.admin.auth.clinicScope
 import com.dentalclinic.admin.auth.requirePermission
 import com.dentalclinic.admin.dto.request.CreateUserRequest
 import com.dentalclinic.admin.dto.request.ResetPasswordRequest
@@ -42,7 +43,8 @@ fun Route.userRoutes(userService: AdminUserService) {
                 post {
                     val req = call.receive<CreateUserRequest>()
                     val id = userService.createUser(
-                        req.username, req.password, req.displayName, req.email, req.roleIds, req.clinicIds
+                        req.username, req.password, req.displayName, req.email, req.roleIds, req.clinicIds,
+                        call.clinicScope()
                     )
                     call.ok(mapOf("id" to id), "创建成功")
                 }
@@ -54,7 +56,9 @@ fun Route.userRoutes(userService: AdminUserService) {
                     val id = call.parameters["id"]?.toLongOrNull()
                         ?: throw ValidationException("无效的用户 ID")
                     val req = call.receive<UpdateUserRequest>()
-                    userService.updateUser(id, req.displayName, req.email, req.roleIds, req.clinicIds)
+                    userService.updateUser(
+                        id, req.displayName, req.email, req.roleIds, req.clinicIds, call.clinicScope()
+                    )
                     call.ok<Unit>(message = "更新成功")
                 }
 
@@ -63,7 +67,7 @@ fun Route.userRoutes(userService: AdminUserService) {
                     val id = call.parameters["id"]?.toLongOrNull()
                         ?: throw ValidationException("无效的用户 ID")
                     val req = call.receive<UpdateStatusRequest>()
-                    userService.updateStatus(id, req.status)
+                    userService.updateStatus(id, req.status, call.clinicScope())
                     call.ok<Unit>(message = "状态更新成功")
                 }
 
@@ -72,7 +76,7 @@ fun Route.userRoutes(userService: AdminUserService) {
                     val id = call.parameters["id"]?.toLongOrNull()
                         ?: throw ValidationException("无效的用户 ID")
                     val req = call.receive<ResetPasswordRequest>()
-                    userService.resetPassword(id, req.newPassword)
+                    userService.resetPassword(id, req.newPassword, call.clinicScope())
                     call.ok<Unit>(message = "密码重置成功")
                 }
             }
@@ -82,7 +86,7 @@ fun Route.userRoutes(userService: AdminUserService) {
                 delete("/{id}") {
                     val id = call.parameters["id"]?.toLongOrNull()
                         ?: throw ValidationException("无效的用户 ID")
-                    userService.deleteUser(id)
+                    userService.deleteUser(id, call.clinicScope())
                     call.ok<Unit>(message = "删除成功")
                 }
             }

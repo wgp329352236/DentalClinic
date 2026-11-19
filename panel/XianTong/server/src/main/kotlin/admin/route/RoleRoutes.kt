@@ -1,6 +1,7 @@
 package com.dentalclinic.admin.route
 
 import com.dentalclinic.admin.auth.authenticated
+import com.dentalclinic.admin.auth.clinicScope
 import com.dentalclinic.admin.auth.requirePermission
 import com.dentalclinic.admin.dto.request.CreateRoleRequest
 import com.dentalclinic.admin.dto.request.UpdateRoleRequest
@@ -41,7 +42,9 @@ fun Route.roleRoutes(roleService: AdminRoleService) {
                 // POST /api/admin/roles
                 post {
                     val req = call.receive<CreateRoleRequest>()
-                    val id = roleService.createRole(req.roleCode, req.roleName, req.description, req.permissionIds)
+                    val id = roleService.createRole(
+                        req.roleCode, req.roleName, req.description, req.permissionIds, call.clinicScope()
+                    )
                     call.ok(mapOf("id" to id), "创建成功")
                 }
             }
@@ -52,7 +55,7 @@ fun Route.roleRoutes(roleService: AdminRoleService) {
                     val id = call.parameters["id"]?.toLongOrNull()
                         ?: throw ValidationException("无效的角色 ID")
                     val req = call.receive<UpdateRoleRequest>()
-                    roleService.updateRole(id, req.roleName, req.description, req.permissionIds)
+                    roleService.updateRole(id, req.roleName, req.description, req.permissionIds, call.clinicScope())
                     call.ok<Unit>(message = "更新成功")
                 }
             }
@@ -62,7 +65,7 @@ fun Route.roleRoutes(roleService: AdminRoleService) {
                 delete("/{id}") {
                     val id = call.parameters["id"]?.toLongOrNull()
                         ?: throw ValidationException("无效的角色 ID")
-                    roleService.deleteRole(id)
+                    roleService.deleteRole(id, call.clinicScope())
                     call.ok<Unit>(message = "删除成功")
                 }
             }

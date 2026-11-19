@@ -4,6 +4,16 @@
 
 ## 2026-11-19
 
+### 修复多门店隔离与尾款支付的三处缺陷
+
+- **改了什么**：
+  1. `admin/service/AdminUserService.kt` 的 `updateUser` 入口统一执行 `requireFullClinicScope`，不再只在改角色/门店授权时才校验。
+  2. `user/route/UserConsumptionRoutes.kt` 的错误响应由 `ApiResponse<Any>` 改为 `ApiResponse<Unit>` 并显式设置 HTTP 状态码（无效 ID 400、记录不存在/已支付 404、内部错误 500）。
+  3. `admin/service/AdminRoleService.kt` 的 `updateRole` 在 `roleName`/`description` 均为空时跳过 `AdminRoles.update`。
+- **原因**：专项测试发现——① 受限门店管理员只要持有 `user:update`，仅传 `displayName`/`email` 就能修改超管等任意管理员的账号资料，与「账号/角色系统管理仅全店范围可写」口径不一致；② `ApiResponse<Any>` 无法生成序列化器，重复支付/无效 ID/记录不存在三类分支统一抛 `SerializationException`，被全局处理包装成 HTTP 400「请求体解析失败」，C 端无法按 404 区分已支付；③ 只改权限的 `PUT /roles/{id}` 会执行空 UPDATE，Exposed 抛 `Can't prepare UPDATE statement without fields to update` 返回 500。
+- **影响范围**：受限管理员修改任何管理员账号资料将返回 403（需超管操作）；C 端尾款支付异常分支改回约定的 400/404/500。回归验证：受限账号改他人资料 403，无效 ID/重复支付 404，仅传 `permissionIds` 更新角色 200；`:server:test` 全通过。
+- **新增文档**：`doc/管理端-三项专项测试报告.md`，记录多门店权限隔离、消费尾款支付闭环、手机号加密存储三项专项测试的用例、数据库取证、发现的 3 个问题与修复回归结果。
+
 ### 新增管理端测试文档
 
 - **改了什么**：新增 `doc/管理端-测试文档.md`，覆盖环境启动与健康检查、测试分层命令（后端编译/测试、前端类型/单测/E2E）、8 个分组 30 个页面清单、10 个 Playwright spec 覆盖矩阵、约 80 条手工用例，以及 11 项已知问题与验证边界。
