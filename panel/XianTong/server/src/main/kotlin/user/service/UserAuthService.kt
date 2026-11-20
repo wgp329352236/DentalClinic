@@ -131,8 +131,34 @@ class UserAuthService : BaseService() {
                 openid = session.openid,
                 accessToken = accessToken,
                 refreshToken = refreshToken,
-                isNewUser = isNewUser
+                isNewUser = isNewUser,
+                // 回带解密后的手机号：前端登录成功后同步到全局态，供编辑资料页只读展示，
+                // 避免再发一次 /profile/me 才能拿到手机号
+                phone = phone
             )
+        }
+    }
+
+    /**
+     * 已登录用户通过「重新授权手机号」补绑/换绑手机号。
+     *
+     * 登录时若用户取消了手机号授权（走静默登录），或后续需要更换手机号，
+     * 可在「编辑资料」页点「重新授权」拿到 phoneCode 后调用本方法。
+     * 与登录链路共用 [resolvePhone] 换取手机号；获取失败返回 null，由路由层提示。
+     * 手机号唯一约束冲突由 cuser_uk_phone_hash 盲索引兜底，异常交路由层 translateApiError → 409。
+     *
+     * @return 解密后的手机号；获取失败或用户不存在时返回 null
+     */
+    suspend fun bindPhone(userId: Long, phoneCode: String): String? {
+        val phone = resolvePhone(phoneCode) ?: return null
+        return dbQuery {
+            val updated = Users.update({ Users.id eq userId }) {
+                val encrypted = PhoneCipherService.encrypt(phone)
+                it[Users.phone] = null
+                it[Users.phoneCipher] = encrypted.ciphertext
+                it[Users.phoneHash] = encrypted.blindIndex
+            }
+            if (updated > 0) phone else null
         }
     }
 
@@ -167,7 +193,8 @@ class UserAuthService : BaseService() {
         return try {
             WechatMiniClient.getPhoneNumber(phoneCode)
         } catch (e: Exception) {
-            logger.warn("[Auth]: 获取微信手机号失败，不阻断登录: ${e.message}")
+            // 登录与重新授权共用：失败返回 null，登录静默降级、重新授权由路由层提示用户重试
+            logger.warn("[Auth]: 获取微信手机号失败: ${e.message}")
             null
         }
     }
@@ -203,7 +230,9 @@ data class WechatLoginResponse(
     val openid: String,
     val accessToken: String,
     val refreshToken: String,
-    val isNewUser: Boolean
+    val isNewUser: Boolean,
+    /** 本次登录解密得到的手机号（未授权/换取失败时为 null），回带给前端同步全局态 */
+    val phone: String? = null
 )
 
 /** 账户已注销（status=0）后再次尝试登录时抛出，路由层映射为 403「账号已注销」。 */

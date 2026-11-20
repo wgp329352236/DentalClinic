@@ -4,6 +4,26 @@
 
 ## 2026-11-20
 
+### 小程序授权成功上报手机号昵称（后端：登录响应回带手机号 + 授权绑定手机号接口）
+
+- **改了什么**：
+  1. `server/src/main/kotlin/user/service/UserAuthService.kt`：`WechatLoginResponse` 增加 `phone` 字段，`wechatLogin` 把本次解密得到的手机号回带给前端；新增 `bindPhone(userId, phoneCode)`，复用 `resolvePhone` 换取手机号后加密落库（支持补绑与换绑）；`resolvePhone` 日志改为通用文案（登录与重新授权共用）。
+  2. `server/src/main/kotlin/user/route/UserAuthRoutes.kt`：`WechatLoginResponseDto` 增加 `phone` 字段并在登录响应中回填；新增鉴权路由 `POST /api/v1/auth/bind-phone`（`userAuthenticated` 保护，传 `phoneCode`），换取失败返回 400，号码被占用由 `cuser_uk_phone_hash` 唯一约束兜底翻译成 409；新增 `BindPhoneRequest` DTO。
+- **原因**：登录接口此前不回带手机号，前端 `globalData.wechatPhone` 登录后始终为空，编辑资料页只能再发一次 `/profile/me` 兜底；且登录时取消手机号授权后没有任何入口补绑或换绑手机号。
+- **影响范围**：`POST /auth/wechat-login` 响应体新增可选 `phone` 字段（向后兼容）；新增 `POST /auth/bind-phone` 需登录态。回归：`:server:compileKotlin` 零错误。
+
+### 小程序授权成功上报手机号昵称（前端：头像昵称填写能力 + 重新授权手机号入口）
+
+- **改了什么**：
+  1. `app/XianTong/miniprogram/utils/api.ts`：新增 `bindPhone(phoneCode)` 调 `POST /auth/bind-phone`（需登录态）。
+  2. `app/XianTong/miniprogram/pages/profile-edit/profile-edit.ts`：头像选择改为 `<button open-type="chooseAvatar">` 回调上传（取 `e.detail.avatarUrl`），取代 `wx.getUserProfile`/`wx.chooseMedia` 的匿名兜底；新增 `onReauthorizePhone` 调 `bindPhone`，成功后同步全局态 `wechatPhone` 与本页展示。
+  3. `app/XianTong/miniprogram/pages/profile-edit/profile-edit.wxml`：头像行接入 `chooseAvatar`、昵称输入加 `type="nickname"` 唤起微信昵称填写、手机号行新增「重新授权」按钮；底部提示文案同步更新。
+  4. `app/XianTong/miniprogram/pages/profile-edit/profile-edit.scss`：新增 `.avatar-pick-btn`/`.phone-cell`/`.reauth-phone-btn` 样式，重置 `<button>` 默认外观使其融入表单行。
+  5. `app/XianTong/miniprogram/pages/index/index.ts`：`syncWechatProfile` 跳过匿名占位昵称「微信用户」（新版微信 `getUserProfile` 不再返回真实昵称），避免把占位符写入库；新用户登录成功后引导跳转编辑资料页完善头像昵称。
+  6. `app/XianTong/miniprogram/app.ts`、`typings/index.d.ts`、`pages/profile/profile.ts`、`pages/profile-edit/profile-edit.ts`：新增 `wechatNickname` 全局态及读取优先级（服务端 > 微信登录昵称 > 手机号后 4 位），「我的」页昵称展示优先取服务端 `nickname`。
+- **原因**：新版微信 `wx.getUserProfile` 不再弹窗、返回匿名「微信用户」与默认灰头像，导致上报的昵称/头像无意义；登录取消手机号授权后无法补绑。
+- **影响范围**：C 端登录、编辑资料、我的页；接口字段均为可选新增，向后兼容。回归：小程序 `npm run typecheck` 通过。
+
 ### 修复 C 端门店经纬度与营业日显示异常
 
 - **改了什么**：
