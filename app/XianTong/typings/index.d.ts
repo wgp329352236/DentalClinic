@@ -10,6 +10,8 @@ declare global {
       clinics: any[]
       /** 微信登录时拿到的手机号（open-type="getPhoneNumber" 授权得到），编辑资料页只读使用 */
       wechatPhone: string
+      /** 微信登录时拿到的昵称，用于上报服务端并作为昵称默认值 */
+      wechatNickname: string
       /** 首页点门店后中转给预约页的门诊 id；预约页 onShow 消费后立即置空 */
       pendingClinicId: number | null
       /** 预约记录页点改约后中转给预约页的预约 id；预约页 onShow 消费后立即置空 */
@@ -25,6 +27,8 @@ declare global {
     setToken(token: string): void
     /** 设置微信登录手机号（更新全局态） */
     setWechatPhone(phone: string): void
+    /** 设置微信登录昵称（更新全局态） */
+    setWechatNickname(nickname: string): void
     /** 预约页是 tabBar 页，switchTab 不能带 query，故用全局态中转门诊 id */
     setPendingClinicId(clinicId: number | null): void
     /** 预约页是 tabBar 页，switchTab 不能带 query，故用全局态中转待改约预约 id */

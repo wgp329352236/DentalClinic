@@ -46,6 +46,17 @@ export function refreshToken(refreshToken: string) {
   return post<{ accessToken: string }>('/auth/refresh', { refreshToken }, false)
 }
 
+/**
+ * 已登录用户重新授权手机号并绑定到当前账号。
+ *
+ * 场景：登录时取消了手机号授权（走静默登录），或后续需要更换手机号。
+ * 传 open-type="getPhoneNumber" 回调里的 e.detail.code，后端用 access_token 换取真实手机号后落库。
+ * 需登录态（needAuth 默认 true）。
+ */
+export function bindPhone(phoneCode: string) {
+  return post<{ phone: string }>('/auth/bind-phone', { phoneCode })
+}
+
 // ==================== 用户资料 ====================
 
 export interface UserProfileResponse {

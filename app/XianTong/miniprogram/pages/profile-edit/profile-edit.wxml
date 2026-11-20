@@ -1,20 +1,20 @@
 <!--pages/profile-edit/profile-edit.wxml-->
 <view class="container">
   <view class="card">
-    <!-- 头像 -->
-    <view class="form-row" bindtap="onChooseAvatar">
+    <!-- 头像：微信「头像填写能力」，支持从微信头像/相册选择 -->
+    <view class="form-row">
       <view class="form-label">头像</view>
-      <view class="form-value avatar-cell">
+      <button class="form-value avatar-cell avatar-pick-btn" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar">
         <image wx:if="{{avatar}}" class="avatar-preview" src="{{avatar}}" mode="aspectFill"></image>
         <view wx:else class="avatar-empty">未设置</view>
         <text class="text-muted font-small">{{avatarUploading ? '上传中...' : '点击更换'}}</text>
-      </view>
+      </button>
     </view>
 
-    <!-- 昵称：默认为微信登录手机号后 4 位 -->
+    <!-- 昵称：优先服务端值，其次微信昵称，最后手机号后 4 位；type="nickname" 唤起微信昵称填写 -->
     <view class="form-row">
       <view class="form-label">昵称</view>
-      <input class="form-input" value="{{nickname}}" placeholder="默认为手机号后 4 位" maxlength="30" bindinput="onNicknameInput" />
+      <input class="form-input" type="nickname" value="{{nickname}}" placeholder="点击填写昵称" maxlength="30" bindinput="onNicknameInput" />
     </view>
 
     <!-- 姓名 -->
@@ -23,10 +23,13 @@
       <input class="form-input" value="{{realName}}" placeholder="用于就诊登记" maxlength="20" bindinput="onRealNameInput" />
     </view>
 
-    <!-- 手机号：取自微信登录，只读，不允许手动修改 -->
+    <!-- 手机号：取自微信授权，只读；点「重新授权」可补绑或更换 -->
     <view class="form-row">
       <view class="form-label">手机号</view>
-      <view class="form-value form-phone">{{phone || '微信登录未授权手机号'}}</view>
+      <view class="form-value phone-cell">
+        <text class="form-phone">{{phone || '未授权手机号'}}</text>
+        <button class="reauth-phone-btn" open-type="getPhoneNumber" bindgetphonenumber="onReauthorizePhone" size="mini">重新授权</button>
+      </view>
     </view>
 
     <!-- 性别 -->
@@ -72,7 +75,7 @@
     </view>
   </view>
 
-  <view class="tip text-muted">完善姓名、手机号、性别、年龄和归属门店后，保存时可领取首次完善资料积分。手机号如需更换请重新走微信手机号授权登录。</view>
+  <view class="tip text-muted">完善昵称、头像、姓名、性别、年龄和归属门店后，保存时可领取首次完善资料积分。手机号可点右侧「重新授权」补绑或更换。</view>
 
   <button class="btn-primary" loading="{{submitting}}" disabled="{{submitting}}" bindtap="onSave">
     {{submitting ? '保存中...' : '保存'}}

@@ -19,6 +19,8 @@ interface AppGlobalData {
    * 仅在用户重新走微信手机号授权时更新。未授权手机号时为空串。
    */
   wechatPhone: string
+  /** 微信登录时拿到的昵称，用于上报服务端并作为昵称默认值 */
+  wechatNickname: string
   /**
    * 首页点门店后要带进预约页的门诊 id。
    *
@@ -100,6 +102,7 @@ App<IAppOption>({
     token: '',
     clinics: [],
     wechatPhone: '',
+    wechatNickname: '',
     pendingClinicId: null,
     pendingRescheduleId: null,
     pendingReferralCode: null,
@@ -159,6 +162,11 @@ App<IAppOption>({
   // 设置微信登录手机号（更新全局态）
   setWechatPhone(phone: string) {
     this.globalData.wechatPhone = phone || ''
+  },
+
+  // 设置微信登录昵称（更新全局态）
+  setWechatNickname(nickname: string) {
+    this.globalData.wechatNickname = nickname || ''
   },
 
   // 设置 Token

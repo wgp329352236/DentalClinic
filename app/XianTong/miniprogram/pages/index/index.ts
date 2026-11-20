@@ -1,5 +1,5 @@
 // pages/index/index.ts
-import { wechatLogin, getUserProfile, getClinics, getHomeContent, registerWithReferral } from '../../utils/api'
+import { wechatLogin, getUserProfile, updateUserProfile, getClinics, getHomeContent, registerWithReferral } from '../../utils/api'
 import type { Clinic, UserInfo, Banner, Notice } from '../../types'
 import {
   formatBusinessDays,
@@ -150,8 +150,15 @@ Page({
 
           // 微信登录手机号：授权手机号登录后由后端回带（mock 也回带），
           // 编辑资料页的手机号只读、取自此处
-          if (result.data.phone) {
-            app.setWechatPhone(result.data.phone)
+          const wechatPhone = result.data.phone || ''
+          if (wechatPhone) {
+            app.setWechatPhone(wechatPhone)
+          }
+
+          // 微信昵称：登录时已随用户资料取到，暂存全局供编辑资料页兜底
+          const wechatNickname = (profile?.userInfo?.nickName || '').trim()
+          if (wechatNickname) {
+            app.setWechatNickname(wechatNickname)
           }
 
           // 新用户或本地无用户信息时，拉取用户资料
@@ -171,6 +178,9 @@ Page({
             this.setData({ userInfo: fallback, loading: false })
           }
 
+          // 登录接口未落库昵称时补报一次；手机号已通过 phoneCode 在登录接口上报
+          await this.syncWechatProfile(profile, wechatPhone)
+
           this.setData({ loginError: '' })
           wx.showToast({
             title: '登录成功',
@@ -179,6 +189,12 @@ Page({
 
           // 消费分享链接/扫码进入携带的推荐码；失败静默，不影响登录主流程
           await this.bindPendingReferral()
+
+          // 新用户引导完善头像昵称：微信新版 getUserProfile 仅返回匿名占位，
+          // 真实资料需在编辑资料页用「头像昵称填写能力」（chooseAvatar + type=nickname）完成
+          if (result.data.isNewUser) {
+            wx.navigateTo({ url: '/pages/profile-edit/profile-edit' })
+          }
         } catch (error: any) {
           // 完整输出失败原因（含 errno/errMsg/message），便于排查
           console.error('[Login] 登录接口失败详情:', error)
@@ -247,7 +263,8 @@ Page({
     return {
       id: 0,
       name: profile.userInfo.nickName || '微信用户',
-      phone: '',
+      nickname: profile.userInfo.nickName || '微信用户',
+      phone: getApp<IAppOption>()?.globalData?.wechatPhone || '',
       gender: profile.userInfo.gender === 2 ? 'female' : 'male',
       age: 0,
       avatar: profile.userInfo.avatarUrl || '',
@@ -263,6 +280,38 @@ Page({
       },
       registerSource: 'self',
       totalSpent: 0
+    }
+  },
+
+  /**
+   * 登录成功后把微信昵称补报到服务端。
+   * 服务端已有昵称时视为用户自定义，直接沿用，不反向覆盖。
+   */
+  async syncWechatProfile(profile: WechatProfile | null, wechatPhone: string) {
+    const nickname = (profile?.userInfo?.nickName || '').trim()
+    // 新版微信 getUserProfile 不再弹窗，返回匿名昵称「微信用户」与默认灰头像，
+    // 上报它没有意义（反而会把占位符写进库）；真实昵称改由编辑资料页的填写能力上报
+    if (!nickname || nickname === '微信用户') return
+
+    const app = getApp<IAppOption>()
+    const current = this.data.userInfo
+    if (current?.nickname && current.nickname !== nickname) return
+
+    try {
+      await updateUserProfile({ nickname })
+      const base = current || (profile ? this.buildFallbackUserInfo(profile) : null)
+      if (!base) return
+      const updated: UserInfo = {
+        ...base,
+        nickname,
+        name: nickname,
+        ...(wechatPhone && !base.phone ? { phone: wechatPhone } : {})
+      }
+      app.setUserInfo(updated)
+      this.setData({ userInfo: updated, loading: false })
+    } catch (error) {
+      // 上报失败不阻断登录；下次登录或编辑资料时仍可重试
+      console.warn('[Login] 微信昵称上报失败（不影响登录）:', error)
     }
   },
 
@@ -290,7 +339,7 @@ Page({
         const d = result.data
         const userInfo: UserInfo = {
           id: d.userId,
-          name: d.realName || d.nickname || '',
+          name: d.nickname || d.realName || '',
           nickname: d.nickname || '',
           phone: d.phone || '',
           gender: d.gender === 2 ? 'female' : 'male',

@@ -1,5 +1,6 @@
 // pages/profile-edit/profile-edit.ts
 import {
+  bindPhone,
   claimProfileCompleteReward,
   getClinics,
   getUserProfile,
@@ -59,8 +60,9 @@ Page({
         const wechatPhone = app?.globalData?.wechatPhone || ''
         const phone = wechatPhone || d.phone || ''
 
-        // 昵称默认为手机号后 4 位（仅当资料里没有昵称时兜底）
-        const nickname = d.nickname || this.defaultNickname(phone)
+        // 昵称优先服务端值，其次微信登录昵称，最后才用手机号后 4 位兜底
+        const wechatNickname = app?.globalData?.wechatNickname || ''
+        const nickname = d.nickname || wechatNickname || this.defaultNickname(phone)
 
         this.setData({
           nickname,
@@ -112,21 +114,19 @@ Page({
     return ''
   },
 
-  // 选择并上传头像
-  async onChooseAvatar() {
+  /**
+   * 微信「头像填写能力」：<button open-type="chooseAvatar"> 的回调，
+   * e.detail.avatarUrl 为临时文件路径（支持从微信头像选择），上传到服务端后存相对地址。
+   * 这是新版基础库获取头像的推荐方式；旧版 wx.getUserProfile 已不再返回真实头像。
+   */
+  async onChooseAvatar(e: any) {
     if (this.data.avatarUploading) return
-    try {
-      const res = await wx.chooseMedia({
-        count: 1,
-        mediaType: ['image'],
-        sizeType: ['compressed'],
-        sourceType: ['album', 'camera']
-      })
-      const filePath = res.tempFiles[0]?.tempFilePath
-      if (!filePath) return
+    const tempPath = e?.detail?.avatarUrl
+    if (!tempPath) return
 
+    try {
       this.setData({ avatarUploading: true })
-      const upload = await uploadFile<UploadedFile>('/files/upload', filePath)
+      const upload = await uploadFile<UploadedFile>('/files/upload', tempPath)
       if (upload.code === 0 && upload.data?.url) {
         this.originalAvatar = upload.data.url
         this.setData({ avatar: resolveFileUrl(upload.data.url) })
@@ -140,6 +140,30 @@ Page({
       wx.showToast({ title: error?.message || '上传失败', icon: 'none' })
     } finally {
       this.setData({ avatarUploading: false })
+    }
+  },
+
+  /**
+   * 重新授权手机号：open-type="getPhoneNumber" 回调，把 code 交后端换取并落库。
+   * 成功后同步全局态 wechatPhone 与本页展示；失败/取消给出轻提示，不影响其他资料编辑。
+   */
+  async onReauthorizePhone(e: any) {
+    if (e?.detail?.errMsg !== 'getPhoneNumber:ok' || !e?.detail?.code) {
+      console.warn('[ProfileEdit] 手机号授权未完成:', e?.detail?.errMsg)
+      return
+    }
+    try {
+      const result = await bindPhone(e.detail.code)
+      const phone = result.data?.phone || ''
+      if (phone) {
+        const app = getApp<IAppOption>()
+        app?.setWechatPhone(phone)
+        this.setData({ phone })
+        wx.showToast({ title: '手机号已更新', icon: 'success' })
+      }
+    } catch (error: any) {
+      console.error('[ProfileEdit] 重新授权手机号失败:', error)
+      wx.showToast({ title: error?.message || '授权失败，请重试', icon: 'none' })
     }
   },
 

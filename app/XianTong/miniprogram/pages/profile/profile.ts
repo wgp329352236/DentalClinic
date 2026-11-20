@@ -67,7 +67,7 @@ Page({
         const d = result.data
         const userInfo: UserInfo = {
           id: d.userId,
-          name: d.realName || d.nickname || '',
+          name: d.nickname || d.realName || '',
           nickname: d.nickname || '',
           phone: d.phone || '',
           gender: d.gender === 2 ? 'female' : 'male',
