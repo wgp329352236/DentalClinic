@@ -4,6 +4,12 @@
 
 ## 2026-11-20
 
+### 小程序资料保存后回读校验（新增）
+
+- **改了什么**：`app/XianTong/miniprogram/pages/profile-edit/profile-edit.ts` 新增 `verifyProfileSaved(submitted)`，在 `updateUserProfile` 成功后重新调 `GET /profile/me`，逐项比对本次提交的 `nickname` 与 `avatar` 是否已落库；一致打 `console.log`、不一致打 `console.error` 并输出「提交值 vs 服务端值」差异；回读异常只 `warn`，不反推保存失败。仅 `envVersion !== 'release'`（开发版/体验版/真机调试）执行，线上跳过。
+- **原因**：头像昵称授权改成 `chooseAvatar` + `type="nickname"` 后，需要一条可观测的闭环证据确认「授权 → 上传 → 上报 → 落库」，否则只能靠肉眼判断页面是否回显。
+- **影响范围**：仅编辑资料页保存流程；线上无行为变化。回归：小程序 `npm run typecheck` 通过。
+
 ### 小程序授权成功上报手机号昵称（后端：登录响应回带手机号 + 授权绑定手机号接口）
 
 - **改了什么**：

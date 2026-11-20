@@ -195,6 +195,35 @@ Page({
     })
   },
 
+  /**
+   * 保存后回读校验（仅开发版/体验版执行）：
+   * 重新拉取服务端资料，比对本次提交的头像与昵称是否真正落库。
+   * 用于验证「授权 → 上报 → 落库」闭环，不一致只打日志告警，不影响已成功的保存结果。
+   */
+  async verifyProfileSaved(submitted: UpdateProfileParams) {
+    try {
+      const { data } = await getUserProfile()
+      const mismatches: string[] = []
+      if (submitted.nickname && data.nickname !== submitted.nickname) {
+        mismatches.push(`昵称 提交=${submitted.nickname} 服务端=${data.nickname ?? 'null'}`)
+      }
+      if (submitted.avatar && data.avatar !== submitted.avatar) {
+        mismatches.push(`头像 提交=${submitted.avatar} 服务端=${data.avatar ?? 'null'}`)
+      }
+      if (mismatches.length > 0) {
+        console.error('[ProfileEdit] 资料回读不一致：' + mismatches.join('；'))
+      } else {
+        console.log('[ProfileEdit] 资料回读一致：', {
+          nickname: data.nickname,
+          avatar: data.avatar
+        })
+      }
+    } catch (error) {
+      // 回读失败只说明校验没做成，不能反推保存失败
+      console.warn('[ProfileEdit] 资料回读校验失败：', error)
+    }
+  },
+
   // 提交保存
   async onSave() {
     if (this.data.submitting) return
@@ -219,6 +248,11 @@ Page({
 
       // request.ts 已把 code !== 0 统一 reject，这里只需处理成功路径
       await updateUserProfile(payload)
+
+      // 非线上版做一次回读校验：确认授权得到的头像/昵称已真正落库（线上版跳过，避免多余请求）
+      if (wx.getAccountInfoSync().miniProgram.envVersion !== 'release') {
+        await this.verifyProfileSaved(payload)
+      }
 
       // 资料保存已成功；积分领取失败（条件不全/网络异常）不能回滚或阻断保存结果。
       let pointsEarned = 0
