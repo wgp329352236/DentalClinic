@@ -1,10 +1,12 @@
 package com.dentalclinic.admin.service
 
+import com.dentalclinic.admin.auth.ClinicScope
 import com.dentalclinic.admin.entity.ReferralRelations
 import com.dentalclinic.admin.entity.ReferralRewards
 import com.dentalclinic.admin.entity.UserWallets
 import com.dentalclinic.admin.entity.Users
 import com.dentalclinic.common.BaseService
+import com.dentalclinic.common.security.PhoneCipherService
 import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.SortOrder
@@ -34,13 +36,26 @@ class AdminReferralService : BaseService() {
         referrerId: Long?,
         rewardStatus: String?,
         page: Int,
-        pageSize: Int
+        pageSize: Int,
+        scope: ClinicScope
     ): ReferralRelationsResponse = dbQuery {
+        if (scope.isEmpty) {
+            return@dbQuery ReferralRelationsResponse(emptyList(), 0, page, pageSize)
+        }
         var query = ReferralRelations.selectAll()
             .where { ReferralRelations.referrerId neq ReferralRelations.refereeId }
 
         if (referrerId != null) {
+            requireUserInScope(referrerId, scope)
             query = query.andWhere { ReferralRelations.referrerId eq referrerId }
+        }
+        if (!scope.all) {
+            val scopedUserIds = restrictedScopedUserIds(scope)
+            if (scopedUserIds.isEmpty()) {
+                return@dbQuery ReferralRelationsResponse(emptyList(), 0, page, pageSize)
+            }
+            query = query.andWhere { ReferralRelations.referrerId inList scopedUserIds }
+                .andWhere { ReferralRelations.refereeId inList scopedUserIds }
         }
         if (!rewardStatus.isNullOrBlank()) {
             query = query.andWhere { ReferralRelations.rewardStatus eq rewardStatus }
@@ -85,12 +100,25 @@ class AdminReferralService : BaseService() {
         stage: String?,
         status: String?,
         page: Int,
-        pageSize: Int
+        pageSize: Int,
+        scope: ClinicScope
     ): ReferralRewardsResponse = dbQuery {
+        if (scope.isEmpty) {
+            return@dbQuery ReferralRewardsResponse(emptyList(), 0, page, pageSize)
+        }
         var query = ReferralRewards.selectAll()
 
         if (referrerId != null) {
+            requireUserInScope(referrerId, scope)
             query = query.andWhere { ReferralRewards.referrerId eq referrerId }
+        }
+        if (!scope.all) {
+            val scopedUserIds = restrictedScopedUserIds(scope)
+            if (scopedUserIds.isEmpty()) {
+                return@dbQuery ReferralRewardsResponse(emptyList(), 0, page, pageSize)
+            }
+            query = query.andWhere { ReferralRewards.referrerId inList scopedUserIds }
+                .andWhere { ReferralRewards.refereeId inList scopedUserIds }
         }
         if (!stage.isNullOrBlank()) {
             query = query.andWhere { ReferralRewards.stage eq stage }
@@ -136,11 +164,27 @@ class AdminReferralService : BaseService() {
     /**
      * 推荐活动汇总统计。
      */
-    suspend fun getReferralStatistics(): ReferralStatisticsDto = dbQuery {
+    suspend fun getReferralStatistics(scope: ClinicScope): ReferralStatisticsDto = dbQuery {
+        if (scope.isEmpty) {
+            return@dbQuery ReferralStatisticsDto(0, 0, 0.0, 0, 0, 0, 0.0)
+        }
         // 有效推荐关系（排除用户自身占位记录）
-        val relationRows = ReferralRelations.selectAll()
+        var relationQuery = ReferralRelations.selectAll()
             .where { ReferralRelations.referrerId neq ReferralRelations.refereeId }
-            .toList()
+        var rewardQuery = ReferralRewards.selectAll()
+        if (!scope.all) {
+            val scopedUserIds = restrictedScopedUserIds(scope)
+            if (scopedUserIds.isEmpty()) {
+                return@dbQuery ReferralStatisticsDto(0, 0, 0.0, 0, 0, 0, 0.0)
+            }
+            relationQuery = relationQuery
+                .andWhere { ReferralRelations.referrerId inList scopedUserIds }
+                .andWhere { ReferralRelations.refereeId inList scopedUserIds }
+            rewardQuery = rewardQuery
+                .andWhere { ReferralRewards.referrerId inList scopedUserIds }
+                .andWhere { ReferralRewards.refereeId inList scopedUserIds }
+        }
+        val relationRows = relationQuery.toList()
         val totalRelations = relationRows.size
         val convertedCount = relationRows.count { it[ReferralRelations.firstConsumedAt] != null }
         val conversionRate = if (totalRelations > 0) {
@@ -149,7 +193,7 @@ class AdminReferralService : BaseService() {
         val activeReferrerCount = relationRows.map { it[ReferralRelations.referrerId] }.distinct().size
 
         // 奖励发放统计
-        val rewardRows = ReferralRewards.selectAll().toList()
+        val rewardRows = rewardQuery.toList()
         val grantedRewards = rewardRows.filter { it[ReferralRewards.status] == "granted" }
         val pendingRewardCount = rewardRows.count { it[ReferralRewards.status] == "pending" }
         val totalRewardValue = String.format(
@@ -173,7 +217,8 @@ class AdminReferralService : BaseService() {
      */
     suspend fun grantReferralReward(
         request: GrantReferralRewardRequest,
-        operator: String
+        operator: String,
+        scope: ClinicScope
     ): GrantReferralRewardResult = dbQuery {
         val relation = ReferralRelations.selectAll()
             .where { ReferralRelations.id eq request.relationId }
@@ -183,6 +228,8 @@ class AdminReferralService : BaseService() {
 
         val referrerId = relation[ReferralRelations.referrerId]
         val refereeId = relation[ReferralRelations.refereeId]
+        requireUserInScope(referrerId, scope)
+        requireUserInScope(refereeId, scope)
         val stage = request.stage.ifBlank { "manual" }
 
         // 防止同一关系、同一阶段重复发放
@@ -278,20 +325,30 @@ class AdminReferralService : BaseService() {
      *
      * @return 用户不存在时返回 null
      */
-    suspend fun getReferralTree(userId: Long, maxDepth: Int = 3): ReferralTreeNode? = dbQuery {
-        val rootRow = Users.selectAll()
-            .where { Users.id eq userId }
-            .toList()
-            .singleOrNull()
-            ?: return@dbQuery null
+    suspend fun getReferralTree(
+        userId: Long,
+        maxDepth: Int = 3,
+        scope: ClinicScope
+    ): ReferralTreeNode? = dbQuery {
+        val rootRow = requireUserInScope(userId, scope)
 
         // 一次性加载全量用户与推荐关系，避免递归里逐层 N+1 查询。
-        // 推荐关系量级在门店范围内可控，全量加载 + 内存建树比深度递归更稳。
-        val allUsers = Users.selectAll().toList()
+        // 受限账号只装载授权门店客户，并过滤跨门店推荐关系，避免通过链路泄露他店客户。
+        val scopedUserIds = if (scope.all) emptyList() else restrictedScopedUserIds(scope)
+        val allUsers = if (scope.all) {
+            Users.selectAll().toList()
+        } else {
+            Users.selectAll().where { Users.id inList scopedUserIds }.toList()
+        }
             .associateBy { it[Users.id] }
-        val relationsByReferrer = ReferralRelations.selectAll()
+        var relationQuery = ReferralRelations.selectAll()
             .where { ReferralRelations.referrerId neq ReferralRelations.refereeId }
-            .toList()
+        if (!scope.all) {
+            relationQuery = relationQuery
+                .andWhere { ReferralRelations.referrerId inList scopedUserIds }
+                .andWhere { ReferralRelations.refereeId inList scopedUserIds }
+        }
+        val relationsByReferrer = relationQuery.toList()
             .groupBy { it[ReferralRelations.referrerId] }
 
         val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
@@ -319,7 +376,7 @@ class AdminReferralService : BaseService() {
             return ReferralTreeNode(
                 userId = uid,
                 name = name,
-                phone = row?.get(Users.phone),
+                phone = PhoneCipherService.readPhone(row?.get(Users.phoneCipher), row?.get(Users.phone)),
                 recommendedAt = null,
                 converted = false,
                 children = children

@@ -1,7 +1,7 @@
 // pages/activity/activity.ts
 import type { ActivityDetail } from '../../types'
 import { getActivityDetail } from '../../utils/api'
-import { resolveFileUrl } from '../../utils/util'
+import { requestSubscribeMessage, resolveFileUrl } from '../../utils/util'
 
 /** 后端返回 "YYYY-MM-DD HH:mm:ss"，详情页只展示日期；单边为空时用「即日 / 长期」兜底 */
 function formatPeriod(startAt?: string, endAt?: string): string {
@@ -80,6 +80,8 @@ Page({
   },
 
   onBookTap() {
+    // 用户在活动页产生明确操作时申请一次活动上线通知授权，不阻塞预约跳转。
+    requestSubscribeMessage(['activity_notice'])
     // 预约页是 tabBar 页，只能 switchTab
     wx.switchTab({ url: '/pages/appointment/appointment' })
   },

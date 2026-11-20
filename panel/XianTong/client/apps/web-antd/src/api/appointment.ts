@@ -24,6 +24,16 @@ export async function cancelAppointment(id: number, reason?: string) {
   return requestClient.put(`/appointments/${id}/cancel`, { reason });
 }
 
+// 同意用户提交的 2 小时内取消申请
+export async function approveCancelRequest(id: number) {
+  return requestClient.put(`/appointments/${id}/cancel-request/approve`);
+}
+
+// 驳回取消申请：预约保持原状态
+export async function rejectCancelRequest(id: number) {
+  return requestClient.put(`/appointments/${id}/cancel-request/reject`);
+}
+
 // 确认预约（仅待确认状态可确认）
 export async function confirmAppointment(id: number) {
   return requestClient.put(`/appointments/${id}/confirm`);

@@ -31,16 +31,22 @@ const statusClassMap: Record<string, string> = {
   no_show: 'badge-danger'
 }
 
+interface AppointmentListItem extends Appointment {
+  statusText: string
+  statusClass: string
+  /** 合并展示用的完整就诊时间 */
+  appointmentTime: string
+  /** pending/confirmed 且就诊日期为今天：展示扫码签到按钮 */
+  canCheckin: boolean
+  /** 已提交、等待门店处理的取消申请 */
+  hasPendingCancelRequest: boolean
+  /** 取消申请结果提示；无申请或已通过时不展示 */
+  cancelRequestText: string
+}
+
 Page({
   data: {
-    appointments: [] as (Appointment & {
-      statusText: string
-      statusClass: string
-      /** 就诊日期 yyyy-MM-dd，用于判断当天才展示「扫码签到」 */
-      appointmentDate: string
-      /** pending/confirmed 且就诊日期为今天：展示扫码签到按钮 */
-      canCheckin: boolean
-    })[],
+    appointments: [] as AppointmentListItem[],
     loading: false,
     /** 扫码 + 签到请求进行中，防止重复调起/重复提交 */
     checkingIn: false,
@@ -61,9 +67,16 @@ Page({
         : (result.data as any)?.list || []
       if (result.code === 0) {
         const today = getToday()
-        const appointments = rawList.map((appt: any) => {
+        const appointments: AppointmentListItem[] = rawList.map((appt: any) => {
           const appointmentDate: string = appt.appointmentDate || ''
           const status: string = appt.status
+          const cancelRequestStatus: Appointment['cancelRequestStatus'] = appt.cancelRequestStatus || null
+          const hasPendingCancelRequest = cancelRequestStatus === 'pending'
+          const cancelRequestText = hasPendingCancelRequest
+            ? '取消申请审核中，门店确认后预约将取消'
+            : cancelRequestStatus === 'rejected'
+              ? '取消申请未通过，预约仍然有效'
+              : ''
           return {
             id: appt.id,
             clinicId: appt.clinicId || 0,
@@ -72,12 +85,23 @@ Page({
             doctorName: appt.doctorName,
             departmentId: appt.departmentId || 0,
             departmentName: appt.departmentName || '',
+            appointmentDate,
+            startTime: appt.startTime || '',
+            endTime: appt.endTime || null,
             appointmentTime: appt.appointmentTime || `${appointmentDate} ${appt.startTime || ''}`.trim(),
             status,
+            remark: appt.remark,
+            cancelRequestStatus,
+            cancelRequestReason: appt.cancelRequestReason,
+            cancelRequestedAt: appt.cancelRequestedAt,
             createdAt: appt.createdAt,
-            appointmentDate,
             // 只有「待确认/已确认 + 就诊当天」可扫码签到；arrived/completed 等状态后端会拒
-            canCheckin: (status === 'pending' || status === 'confirmed') && appointmentDate === today,
+            canCheckin:
+              (status === 'pending' || status === 'confirmed') &&
+              appointmentDate === today &&
+              !hasPendingCancelRequest,
+            hasPendingCancelRequest,
+            cancelRequestText,
             statusText: statusMap[status] || status,
             statusClass: statusClassMap[status] || 'badge-default'
           }
@@ -102,38 +126,51 @@ Page({
     const id = Number(e.currentTarget.dataset.id)
     wx.showModal({
       title: '提示',
-      content: '确定要取消该预约吗？',
+      content: '确定要取消该预约吗？距就诊不足 2 小时时，将提交门店确认。',
       success: async (res) => {
         if (res.confirm) {
           try {
             const result = await cancelAppointment(id)
-            if (result.code === 0) {
-              wx.showToast({ title: '已取消', icon: 'success' })
-              this.loadAppointments()
+            const message = result.message || '操作成功'
+            const waitingForReview = message.includes('取消申请已提交')
+            if (waitingForReview) {
+              wx.showModal({
+                title: '取消申请已提交',
+                content: message,
+                showCancel: false
+              })
             } else {
-              wx.showToast({ title: result.message || '取消失败', icon: 'none' })
+              wx.showToast({ title: message, icon: 'success' })
             }
-          } catch (error) {
+            this.loadAppointments()
+          } catch (error: any) {
             console.error('取消预约失败:', error)
-            wx.showToast({ title: '取消失败', icon: 'none' })
+            wx.showToast({ title: error?.message || '取消失败', icon: 'none' })
           }
         }
       }
     })
   },
 
-  // 改约（跳转到预约页，携带预约ID）
+  // 改约：预约页是 tabBar 页面，switchTab 不支持 query，使用全局态中转预约 ID
   onRescheduleAppointment(e: any) {
     const id = Number(e.currentTarget.dataset.id)
-    wx.navigateTo({
-      url: `/pages/appointment/appointment?rescheduleId=${id}`
+    if (!id) return
+    const app = getApp<IAppOption>()
+    app.setPendingRescheduleId(id)
+    wx.switchTab({
+      url: '/pages/appointment/appointment',
+      fail: () => {
+        app.setPendingRescheduleId(null)
+        wx.showToast({ title: '打开改约页面失败', icon: 'none' })
+      }
     })
   },
 
   // 获取可取消的预约
   getCancellableAppointments() {
     return this.data.appointments.filter(appt =>
-      appt.status === 'pending' || appt.status === 'confirmed'
+      (appt.status === 'pending' || appt.status === 'confirmed') && !appt.hasPendingCancelRequest
     )
   },
 

@@ -27,11 +27,49 @@
     <button class="btn-primary mt-20" bindtap="goToRecharge">立即充值</button>
   </view>
 
+  <!-- 待支付尾款提醒 -->
+  <view wx:if="{{unpaidConsumptions.length > 0}}" class="pending-banner" bindtap="showUnpaidTab">
+    <view>
+      <view class="pending-label">待支付尾款 · {{unpaidConsumptions.length}}笔</view>
+      <view class="pending-amount"><text class="pending-symbol">¥</text>{{unpaidTotal}}</view>
+    </view>
+    <view class="pending-action">去支付 <text class="pending-arrow">›</text></view>
+  </view>
+
   <!-- 标签切换 -->
   <view class="tabs">
+    <view class="tab {{activeTab === 'unpaid' ? 'active' : ''}}" data-tab="unpaid" bindtap="onTabChange">
+      待支付<text wx:if="{{unpaidConsumptions.length > 0}}" class="tab-count">{{unpaidConsumptions.length}}</text>
+    </view>
+    <view class="tab-divider"></view>
     <view class="tab {{activeTab === 'recharge' ? 'active' : ''}}" data-tab="recharge" bindtap="onTabChange">充值记录</view>
     <view class="tab-divider"></view>
     <view class="tab {{activeTab === 'consumption' ? 'active' : ''}}" data-tab="consumption" bindtap="onTabChange">消费记录</view>
+  </view>
+
+  <!-- 待支付尾款 -->
+  <view wx:if="{{activeTab === 'unpaid'}}">
+    <view class="card record-item unpaid-item" wx:for="{{unpaidConsumptions}}" wx:key="id">
+      <view class="flex-between mb-10">
+        <view>
+          <view class="unpaid-price">待付 ¥{{item.wechatPaid}}</view>
+          <view class="text-muted font-small mt-10">消费金额 ¥{{item.amount}}</view>
+        </view>
+        <view class="badge badge-warning">待支付</view>
+      </view>
+      <view class="unpaid-description">{{item.description || '诊疗消费尾款'}}</view>
+      <view class="flex-between unpaid-footer">
+        <view class="text-muted font-small">{{item.createdAt}}</view>
+        <button
+          class="pay-tail-btn"
+          data-id="{{item.id}}"
+          disabled="{{payingId !== 0}}"
+          loading="{{payingId === item.id}}"
+          catchtap="handlePayUnpaid"
+        >{{payingId === item.id ? '支付中' : '去支付'}}</button>
+      </view>
+    </view>
+    <view wx:if="{{unpaidConsumptions.length === 0}}" class="empty-state">暂无待支付尾款</view>
   </view>
 
   <!-- 充值记录 -->
@@ -52,7 +90,10 @@
     <view class="card record-item" wx:for="{{consumptionRecords}}" wx:key="id">
       <view class="flex-between mb-10">
         <view class="font-bold text-danger">-¥{{item.amount}}</view>
-        <view>{{item.clinicName}}</view>
+        <view class="record-clinic">
+          <text wx:if="{{item.paymentStatus === 'pending'}}" class="badge badge-warning mr-10">尾款待支付</text>
+          <text>{{item.clinicName}}</text>
+        </view>
       </view>
       <view class="text-muted font-small">{{item.description}}</view>
       <view class="text-muted font-small mt-10">{{item.createdAt}}</view>

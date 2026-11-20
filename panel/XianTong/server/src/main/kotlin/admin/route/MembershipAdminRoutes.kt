@@ -161,7 +161,7 @@ fun Route.customerTagRoutes(service: CustomerTagAdminService) {
                 get("/users/{userId}") {
                     val userId = call.parameters["userId"]?.toLongOrNull()
                         ?: throw ValidationException("无效的客户ID")
-                    call.ok(service.getUserTags(userId))
+                    call.ok(service.getUserTags(userId, call.clinicScope()))
                 }
             }
             // 全量覆盖客户标签
@@ -170,7 +170,7 @@ fun Route.customerTagRoutes(service: CustomerTagAdminService) {
                     val userId = call.parameters["userId"]?.toLongOrNull()
                         ?: throw ValidationException("无效的客户ID")
                     val req = call.receive<SetUserTagsRequest>()
-                    service.setUserTags(userId, req)
+                    service.setUserTags(userId, req, call.clinicScope())
                     call.ok<Unit>(message = "标签已保存")
                 }
             }

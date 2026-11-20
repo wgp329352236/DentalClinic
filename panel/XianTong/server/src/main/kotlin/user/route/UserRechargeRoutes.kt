@@ -8,6 +8,7 @@ import com.dentalclinic.common.wx.WechatPayException
 import com.dentalclinic.user.auth.UserJwtConfig
 import com.dentalclinic.user.service.RechargeResult
 import com.dentalclinic.user.service.RechargeService
+import com.dentalclinic.user.service.UserConsumptionPaymentService
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
@@ -27,7 +28,10 @@ private val logger = LoggerFactory.getLogger("UserRechargeRoutes")
  * - POST /notify 是微信支付服务器回调，必须公开：真实性由平台证书验签 + AEAD 解密保证，
  *   绝不能要求用户 JWT，否则微信侧永远收得到 401 而无法投递支付结果。
  */
-fun Application.userRechargeRoutes(rechargeService: RechargeService) {
+fun Application.userRechargeRoutes(
+    rechargeService: RechargeService,
+    consumptionPaymentService: UserConsumptionPaymentService
+) {
     routing {
         route("/api/v1/recharge") {
             /**
@@ -124,7 +128,7 @@ fun Application.userRechargeRoutes(rechargeService: RechargeService) {
             }
 
             /**
-             * 微信支付结果异步通知（公开端点）。
+             * 微信支付结果异步通知（公开端点，充值与消费尾款共用）。
              * POST /api/v1/recharge/notify
              *
              * 微信约定：HTTP 200 且 body {"code":"SUCCESS"} 才算投递成功，否则按策略重试多次。
@@ -150,7 +154,12 @@ fun Application.userRechargeRoutes(rechargeService: RechargeService) {
                     return@post
                 }
 
-                val accepted = rechargeService.handlePayNotification(notification)
+                // 充值单以 RC 开头，消费尾款单以 CS 开头；同一个微信 notify_url 统一接收。
+                val accepted = if (UserConsumptionPaymentService.isConsumptionOutTradeNo(notification.outTradeNo)) {
+                    consumptionPaymentService.handlePayNotification(notification)
+                } else {
+                    rechargeService.handlePayNotification(notification)
+                }
                 if (accepted) {
                     call.respondText(NOTIFY_SUCCESS, ContentType.Application.Json)
                 } else {

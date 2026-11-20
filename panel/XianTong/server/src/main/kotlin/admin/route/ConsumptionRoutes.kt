@@ -45,7 +45,7 @@ fun Route.consumptionRoutes(consumptionService: ConsumptionAdminService) {
                         throw ValidationException("积分抵扣数量不能为负数")
                     }
 
-                    val result = consumptionService.createConsumption(request, principal.username)
+                    val result = consumptionService.createConsumption(request, principal.username, call.clinicScope())
                     call.ok(result, "录入成功")
                 }
             }

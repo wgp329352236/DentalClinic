@@ -9,6 +9,7 @@ import com.dentalclinic.common.BaseService
 import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.SortOrder
+import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greaterEq
 import org.jetbrains.exposed.v1.core.lessEq
@@ -108,6 +109,7 @@ class ConsumptionRecordService : BaseService() {
                 pointsEarned = row[ConsumptionRecords.pointsEarned],
                 pointsUsed = row[ConsumptionRecords.pointsUsed],
                 pointsDeduct = row[ConsumptionRecords.pointsDeduct].toDouble(),
+                paymentStatus = row[ConsumptionRecords.paymentStatus],
                 description = row[ConsumptionRecords.description],
                 clinicName = clinicName,
                 appointmentDate = appointmentDate,
@@ -133,8 +135,13 @@ class ConsumptionRecordService : BaseService() {
         val monthStart = now.withDayOfMonth(1).withHour(0).withMinute(0).withSecond(0)
         
         // Total consumption
+        // 统计只计已支付完成的消费；待微信尾款记录不计入累计/月度消费。
         val allRecords = ConsumptionRecords.selectAll()
-            .where { ConsumptionRecords.userId eq userId }
+            .where {
+                (ConsumptionRecords.userId eq userId) and
+                    (ConsumptionRecords.status eq "success") and
+                    (ConsumptionRecords.paymentStatus eq "success")
+            }
             .toList()
         val totalAmount = allRecords.sumOf { it[ConsumptionRecords.amount].toDouble() }
         
@@ -168,6 +175,7 @@ data class ConsumptionRecordDto(
     val pointsEarned: Int,
     val pointsUsed: Int,
     val pointsDeduct: Double,
+    val paymentStatus: String,
     val description: String?,
     val clinicName: String?,
     val appointmentDate: String?,

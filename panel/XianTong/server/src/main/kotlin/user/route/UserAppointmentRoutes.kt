@@ -3,6 +3,7 @@ package com.dentalclinic.user.route
 import com.dentalclinic.admin.dto.response.ApiResponse
 import com.dentalclinic.user.auth.userAuthenticated
 import com.dentalclinic.user.auth.userId
+import com.dentalclinic.user.service.AppointmentCancelResult
 import com.dentalclinic.user.service.AppointmentResult
 import com.dentalclinic.user.service.AppointmentService
 import com.dentalclinic.user.service.CreateAppointmentRequest
@@ -82,7 +83,8 @@ fun Application.userAppointmentRoutes(appointmentService: AppointmentService) {
                     return@get
                 }
 
-                val slots = appointmentService.getAvailableSlots(doctorId, date)
+                val clinicId = call.request.queryParameters["clinicId"]?.toLongOrNull()
+                val slots = appointmentService.getAvailableSlots(doctorId, date, clinicId)
                 call.respond(ApiResponse(code = 0, message = "success", data = slots))
             }
 
@@ -104,7 +106,8 @@ fun Application.userAppointmentRoutes(appointmentService: AppointmentService) {
                             departmentId = request.departmentId,
                             appointmentDate = request.appointmentDate,
                             startTime = request.startTime,
-                            remark = request.remark
+                            remark = request.remark,
+                            couponCode = request.couponCode
                         ))
 
                         when (result) {
@@ -155,10 +158,13 @@ fun Application.userAppointmentRoutes(appointmentService: AppointmentService) {
 
                     val result = appointmentService.cancelAppointment(userId, appointmentId)
                     when (result) {
-                        is AppointmentResult.Success -> {
+                        is AppointmentCancelResult.Cancelled -> {
                             call.respond(ApiResponse<Unit>(code = 0, message = "取消成功"))
                         }
-                        is AppointmentResult.Error -> {
+                        is AppointmentCancelResult.Requested -> {
+                            call.respond(ApiResponse<Unit>(code = 0, message = "取消申请已提交，请等待门店确认"))
+                        }
+                        is AppointmentCancelResult.Error -> {
                             call.respond(ApiResponse<Unit>(code = 400, message = result.message))
                         }
                     }
@@ -220,7 +226,13 @@ fun Application.userAppointmentRoutes(appointmentService: AppointmentService) {
 
                     try {
                         val request = call.receive<RescheduleRequest>()
-                        val result = appointmentService.rescheduleAppointment(userId, appointmentId, request.appointmentDate, request.startTime)
+                        val result = appointmentService.rescheduleAppointment(
+                            userId = userId,
+                            appointmentId = appointmentId,
+                            newDate = request.appointmentDate,
+                            newStartTime = request.startTime,
+                            couponCode = request.couponCode
+                        )
 
                         when (result) {
                             is AppointmentResult.Success -> {
@@ -246,7 +258,14 @@ fun Application.userAppointmentRoutes(appointmentService: AppointmentService) {
 }
 
 @Serializable
-data class RescheduleRequest(val appointmentDate: String, val startTime: String)
+data class RescheduleRequest(
+    val appointmentDate: String,
+    val startTime: String,
+    /**
+     * null：保留原预约优惠券；空字符串：不使用优惠券并释放原券；其他值：更换为该券。
+     */
+    val couponCode: String? = null
+)
 
 /**
  * 扫码签到请求体。
@@ -264,7 +283,8 @@ data class CreateAppointmentRequestDto(
     val departmentId: Long? = null,
     val appointmentDate: String,  // yyyy-MM-dd format
     val startTime: String,
-    val remark: String? = null
+    val remark: String? = null,
+    val couponCode: String? = null
 )
 
 @Serializable

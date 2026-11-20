@@ -14,6 +14,11 @@ export async function getCustomerDetail(id: number) {
   return requestClient.get(`/customers/${id}`);
 }
 
+// 更新客户备注
+export async function updateCustomerRemark(id: number, remark: string) {
+  return requestClient.put(`/customers/${id}/remark`, { remark });
+}
+
 // 调整余额（reason 必填，后端写入资金流水；返回调整后的余额与版本号）
 export async function adjustWallet(id: number, data: any) {
   return requestClient.put(`/customers/${id}/wallet`, data);

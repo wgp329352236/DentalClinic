@@ -6,7 +6,14 @@ import { Page, useVbenModal } from '@vben/common-ui';
 import { Button, message, Modal, Tag } from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { cancelAppointment, confirmAppointment, getAppointments, rejectAppointment } from '#/api/appointment';
+import {
+  approveCancelRequest,
+  cancelAppointment,
+  confirmAppointment,
+  getAppointments,
+  rejectAppointment,
+  rejectCancelRequest,
+} from '#/api/appointment';
 import { getClinics } from '#/api/clinic';
 import { getDoctors } from '#/api/doctor';
 
@@ -19,6 +26,12 @@ const statusMap: Record<string, { color: string; text: string }> = {
   completed: { color: 'green', text: '已完成' },
   cancelled: { color: 'default', text: '已取消' },
   no_show: { color: 'red', text: '爽约' },
+};
+
+const cancelRequestMap: Record<string, { color: string; text: string }> = {
+  pending: { color: 'orange', text: '待审批' },
+  approved: { color: 'green', text: '已同意' },
+  rejected: { color: 'red', text: '已驳回' },
 };
 
 const [DetailModal, detailModalApi] = useVbenModal({
@@ -103,6 +116,12 @@ const [Grid, gridApi] = useVbenVxeGrid({
       { field: 'appointmentDate', title: '预约日期', width: 120 },
       { field: 'startTime', title: '时间', width: 100 },
       {
+        field: 'cancelRequestStatus',
+        title: '取消申请',
+        width: 100,
+        slots: { default: 'cancelRequest' },
+      },
+      {
         field: 'status',
         title: '状态',
         width: 100,
@@ -111,7 +130,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
       {
         field: 'action',
         title: '操作',
-        width: 200,
+        width: 260,
         fixed: 'right',
         slots: { default: 'action' },
       },
@@ -146,6 +165,33 @@ async function onCancel(row: any) {
     async onOk() {
       await cancelAppointment(row.id);
       message.success('预约已取消');
+      gridApi.query();
+    },
+  });
+}
+
+// 同意 2 小时内取消申请：预约主状态改为已取消，并记录审核人/时间
+function onApproveCancelRequest(row: any) {
+  Modal.confirm({
+    title: '同意取消申请',
+    content: `确定同意客户的取消申请（${row.userName || row.userId}）？同意后预约将变为「已取消」。`,
+    okType: 'danger',
+    async onOk() {
+      await approveCancelRequest(row.id);
+      message.success('已同意取消申请');
+      gridApi.query();
+    },
+  });
+}
+
+// 驳回取消申请：预约保持原状态
+function onRejectCancelRequest(row: any) {
+  Modal.confirm({
+    title: '驳回取消申请',
+    content: `确定驳回客户的取消申请（${row.userName || row.userId}）？预约将保持原状态。`,
+    async onOk() {
+      await rejectCancelRequest(row.id);
+      message.success('已驳回取消申请');
       gridApi.query();
     },
   });
@@ -202,21 +248,40 @@ function onReject(row: any) {
           {{ statusMap[row.status]?.text || row.status }}
         </Tag>
       </template>
+      <template #cancelRequest="{ row }">
+        <Tag
+          v-if="row.cancelRequestStatus"
+          :color="cancelRequestMap[row.cancelRequestStatus]?.color || 'default'"
+        >
+          {{ cancelRequestMap[row.cancelRequestStatus]?.text || row.cancelRequestStatus }}
+        </Tag>
+        <span v-else class="opacity-40">-</span>
+      </template>
       <template #action="{ row }">
         <Button type="link" size="small" @click="onDetail(row)">详情</Button>
-        <template v-if="row.status === 'pending'">
-          <Button type="link" size="small" @click="onConfirm(row)">确认</Button>
-          <Button type="link" size="small" danger @click="onReject(row)">拒绝</Button>
+        <template v-if="row.cancelRequestStatus === 'pending'">
+          <Button type="link" size="small" danger @click="onApproveCancelRequest(row)">
+            同意取消
+          </Button>
+          <Button type="link" size="small" @click="onRejectCancelRequest(row)">
+            驳回申请
+          </Button>
         </template>
-        <Button
-          v-if="row.status !== 'cancelled' && row.status !== 'completed'"
-          type="link"
-          size="small"
-          danger
-          @click="onCancel(row)"
-        >
-          取消
-        </Button>
+        <template v-else>
+          <template v-if="row.status === 'pending'">
+            <Button type="link" size="small" @click="onConfirm(row)">确认</Button>
+            <Button type="link" size="small" danger @click="onReject(row)">拒绝</Button>
+          </template>
+          <Button
+            v-if="row.status !== 'cancelled' && row.status !== 'completed'"
+            type="link"
+            size="small"
+            danger
+            @click="onCancel(row)"
+          >
+            取消
+          </Button>
+        </template>
       </template>
     </Grid>
   </Page>

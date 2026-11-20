@@ -47,9 +47,32 @@
       <view class="form-label">年龄</view>
       <input class="form-input" type="number" value="{{age}}" placeholder="选填" maxlength="3" bindinput="onAgeInput" />
     </view>
+
+    <!-- 归属门店：首次可自行选择，设置后锁定 -->
+    <view class="form-row">
+      <view class="form-label">归属门店</view>
+      <view wx:if="{{primaryClinicLocked}}" class="form-value clinic-value locked">
+        <view class="clinic-name">{{primaryClinicName || '已设置'}}</view>
+        <view class="clinic-lock-tip">已确认，如需变更请联系门店</view>
+      </view>
+      <picker
+        wx:else
+        class="form-value clinic-picker"
+        mode="selector"
+        range="{{clinicNames}}"
+        value="{{clinicIndex}}"
+        bindchange="onClinicChange"
+        disabled="{{clinicNames.length === 0}}"
+      >
+        <view class="clinic-value {{primaryClinicId ? '' : 'placeholder'}}">
+          {{primaryClinicId ? primaryClinicName : (clinicNames.length ? '请选择归属门店' : '暂无可选门店')}}
+        </view>
+        <text class="picker-arrow">›</text>
+      </picker>
+    </view>
   </view>
 
-  <view class="tip text-muted">手机号取自微信登录授权，如需更换请重新走微信手机号授权登录。</view>
+  <view class="tip text-muted">完善姓名、手机号、性别、年龄和归属门店后，保存时可领取首次完善资料积分。手机号如需更换请重新走微信手机号授权登录。</view>
 
   <button class="btn-primary" loading="{{submitting}}" disabled="{{submitting}}" bindtap="onSave">
     {{submitting ? '保存中...' : '保存'}}

@@ -3,6 +3,7 @@ package com.dentalclinic.user.service
 import com.dentalclinic.admin.entity.Users
 import com.dentalclinic.admin.entity.UserWallets
 import com.dentalclinic.common.BaseService
+import com.dentalclinic.common.security.PhoneCipherService
 import com.dentalclinic.common.wx.WechatApiException
 import com.dentalclinic.common.wx.WechatConfig
 import com.dentalclinic.common.wx.WechatMiniClient
@@ -70,8 +71,23 @@ class UserAuthService : BaseService() {
                 userId = existingRow[Users.id]
                 Users.update({ Users.id eq userId }) {
                     it[Users.lastLoginAt] = LocalDateTime.now()
-                    // 用户先静默登录、后授权手机号/资料的场景：仅在原值为空时补，不覆盖已改资料
-                    if (phone != null && existingRow[Users.phone] == null) it[Users.phone] = phone
+                    // 用户先静默登录、后授权手机号/资料的场景：仅在原值为空时补，不覆盖已改资料。
+                    val existingPhone = PhoneCipherService.readPhone(
+                        existingRow[Users.phoneCipher],
+                        existingRow[Users.phone]
+                    )
+                    if (phone != null && existingPhone == null) {
+                        val encrypted = PhoneCipherService.encrypt(phone)
+                        it[Users.phone] = null
+                        it[Users.phoneCipher] = encrypted.ciphertext
+                        it[Users.phoneHash] = encrypted.blindIndex
+                    } else if (existingPhone != null && existingRow[Users.phoneCipher].isNullOrBlank()) {
+                        // 历史明文在登录时顺带迁移，避免等待下一次启动迁移窗口。
+                        val encrypted = PhoneCipherService.encrypt(existingPhone)
+                        it[Users.phone] = null
+                        it[Users.phoneCipher] = encrypted.ciphertext
+                        it[Users.phoneHash] = encrypted.blindIndex
+                    }
                     val nickname = profile?.nickname?.takeIf { v -> v.isNotBlank() }
                     if (nickname != null && existingRow[Users.nickname] == null) it[Users.nickname] = nickname
                     val avatar = profile?.avatarUrl?.takeIf { v -> v.isNotBlank() }
@@ -79,13 +95,14 @@ class UserAuthService : BaseService() {
                 }
                 isNewUser = false
             } else {
-                // New user - create with default values
+                // New user - create with default values；手机号只写密文和盲索引。
+                val encryptedPhone = phone?.let(PhoneCipherService::encrypt)
                 val insertResult = Users.insert {
                     it[Users.openid] = session.openid
                     it[Users.unionid] = session.unionid
-                    // 左值必须限定 Users.phone：插入块以表为接收者，裸写 phone 会被
-                    // 解析成本地 String? 变量（局部变量优先于接收者成员），导致类型错误
-                    it[Users.phone] = phone
+                    it[Users.phone] = null
+                    it[Users.phoneCipher] = encryptedPhone?.ciphertext
+                    it[Users.phoneHash] = encryptedPhone?.blindIndex
                     it[Users.nickname] = profile?.nickname?.takeIf { v -> v.isNotBlank() }
                     it[Users.avatar] = profile?.avatarUrl?.takeIf { v -> v.isNotBlank() }
                     it[Users.gender] = profile?.gender?.takeIf { g -> g == 1 || g == 2 }

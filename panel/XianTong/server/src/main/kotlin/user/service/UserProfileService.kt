@@ -1,11 +1,13 @@
 package com.dentalclinic.user.service
 
 import com.dentalclinic.admin.entity.MemberLevels
+import com.dentalclinic.admin.entity.Clinics
 import com.dentalclinic.admin.entity.UserMemberLevels
 import com.dentalclinic.admin.entity.UserPointsSummary
 import com.dentalclinic.admin.entity.UserWallets
 import com.dentalclinic.admin.entity.Users
 import com.dentalclinic.common.BaseService
+import com.dentalclinic.common.security.PhoneCipherService
 import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -74,7 +76,7 @@ class UserProfileService : BaseService() {
         UserProfileDto(
             userId = userRow[Users.id],
             openid = userRow[Users.openid],
-            phone = userRow[Users.phone],
+            phone = PhoneCipherService.readPhone(userRow[Users.phoneCipher], userRow[Users.phone]),
             nickname = userRow[Users.nickname],
             realName = userRow[Users.realName],
             gender = userRow[Users.gender],
@@ -101,10 +103,10 @@ class UserProfileService : BaseService() {
      * 更新当前用户的资料，仅覆盖请求中非 null 的字段。
      *
      * 手机号只做格式校验，不做验证码校验：短信通道与真实微信 code2Session 均未接入，
-     * 重复号码由 cuser_uk_phone 唯一索引兜底，冲突经 translateApiError 翻译成 409 友好文案。
+     * 重复号码由 cuser_uk_phone_hash 盲索引唯一约束兜底，冲突经 translateApiError 翻译成 409 友好文案。
      */
     suspend fun updateProfile(userId: Long, request: UpdateProfileRequest): ProfileUpdateResult {
-        if (!request.phone.isNullOrEmpty() && !request.phone.matches(Regex("^1[3-9]\\d{9}$"))) {
+        if (!request.phone.isNullOrEmpty() && !PhoneCipherService.isValidMainlandMobile(request.phone)) {
             return ProfileUpdateResult.Error("手机号格式不正确")
         }
         if (request.gender != null && request.gender !in listOf(1, 2)) {
@@ -123,18 +125,56 @@ class UserProfileService : BaseService() {
 
         // 唯一约束冲突（如手机号已被占用）不在此处捕获：
         // 交由路由层的 translateApiError 统一翻译，保持 C 端错误映射只有一处
-        val updated = dbQuery {
-            Users.update({ Users.id eq userId }) {
+        return dbQuery {
+            val currentUser = Users.selectAll()
+                .where { Users.id eq userId }
+                .forUpdate()
+                .toList()
+                .singleOrNull()
+                ?: return@dbQuery ProfileUpdateResult.NotFound
+
+            val requestedClinicId = request.primaryClinicId
+            if (requestedClinicId != null) {
+                val currentClinicId = currentUser[Users.primaryClinicId]
+                if (currentClinicId != null && currentClinicId != requestedClinicId) {
+                    return@dbQuery ProfileUpdateResult.Error("归属门店已设置，暂不支持自行修改，请联系门店")
+                }
+                if (currentClinicId == null) {
+                    val clinic = Clinics.selectAll()
+                        .where { Clinics.id eq requestedClinicId }
+                        .toList()
+                        .singleOrNull()
+                        ?: return@dbQuery ProfileUpdateResult.Error("门店不存在")
+                    if (clinic[Clinics.status] != 1) {
+                        return@dbQuery ProfileUpdateResult.Error("门店当前未营业，请选择其他门店")
+                    }
+                }
+            }
+
+            val updated = Users.update({ Users.id eq userId }) {
                 if (request.realName != null) it[Users.realName] = request.realName
-                if (request.phone != null) it[Users.phone] = request.phone
+                if (request.phone != null) {
+                    if (request.phone.isBlank()) {
+                        it[Users.phone] = null
+                        it[Users.phoneCipher] = null
+                        it[Users.phoneHash] = null
+                    } else {
+                        val encrypted = PhoneCipherService.encrypt(request.phone)
+                        it[Users.phone] = null
+                        it[Users.phoneCipher] = encrypted.ciphertext
+                        it[Users.phoneHash] = encrypted.blindIndex
+                    }
+                }
                 if (request.gender != null) it[Users.gender] = request.gender
                 if (request.age != null) it[Users.age] = request.age
                 if (request.avatar != null) it[Users.avatar] = request.avatar
                 if (request.nickname != null) it[Users.nickname] = request.nickname
+                if (requestedClinicId != null && currentUser[Users.primaryClinicId] == null) {
+                    it[Users.primaryClinicId] = requestedClinicId
+                }
             }
+            if (updated > 0) ProfileUpdateResult.Success else ProfileUpdateResult.NotFound
         }
-
-        return if (updated > 0) ProfileUpdateResult.Success else ProfileUpdateResult.NotFound
     }
 
     /**
@@ -179,7 +219,7 @@ class UserProfileService : BaseService() {
             userId = user[Users.id],
             nickname = user[Users.nickname],
             realName = user[Users.realName],
-            phone = user[Users.phone],
+            phone = PhoneCipherService.readPhone(user[Users.phoneCipher], user[Users.phone]),
             gender = user[Users.gender],
             age = user[Users.age],
             avatar = user[Users.avatar],
@@ -204,11 +244,13 @@ class UserProfileService : BaseService() {
      * @return true 表示注销成功；false 表示用户不存在
      */
     suspend fun deleteAccount(userId: Long): Boolean = dbQuery {
-        val anonymizedPhone = "DELETED_$userId"
         val anonymizedName = "已注销用户"
         Users.update({ Users.id eq userId }) {
             it[Users.status] = 0
-            it[Users.phone] = anonymizedPhone
+            // 注销后不保留可恢复手机号；盲索引用不可碰撞占位值，密文和明文均清空。
+            it[Users.phone] = null
+            it[Users.phoneCipher] = null
+            it[Users.phoneHash] = PhoneCipherService.deletedBlindIndex(userId)
             it[Users.realName] = anonymizedName
             it[Users.nickname] = anonymizedName
             it[Users.avatar] = null
@@ -246,7 +288,8 @@ data class UpdateProfileRequest(
     val gender: Int? = null,
     val age: Int? = null,
     val avatar: String? = null,
-    val nickname: String? = null
+    val nickname: String? = null,
+    val primaryClinicId: Long? = null
 )
 
 @Serializable

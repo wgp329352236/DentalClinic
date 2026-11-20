@@ -22,8 +22,12 @@
         预约时间：{{item.appointmentTime}}
       </view>
 
+      <view wx:if="{{item.cancelRequestText}}" class="cancel-request-tip {{item.hasPendingCancelRequest ? 'pending' : 'rejected'}}">
+        {{item.cancelRequestText}}
+      </view>
+
       <!-- 操作按钮 -->
-      <view class="flex-between" wx:if="{{item.status === 'pending' || item.status === 'confirmed'}}">
+      <view class="flex-between" wx:if="{{(item.status === 'pending' || item.status === 'confirmed') && !item.hasPendingCancelRequest}}">
         <view class="flex gap-10">
           <button class="btn-outline btn-sm" data-id="{{item.id}}" bindtap="onRescheduleAppointment">改约</button>
           <button class="btn-outline btn-sm" data-id="{{item.id}}" bindtap="onCancelAppointment">取消预约</button>

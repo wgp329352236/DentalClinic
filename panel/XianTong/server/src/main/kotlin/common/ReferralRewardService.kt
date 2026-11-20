@@ -170,16 +170,28 @@ class ReferralRewardService : BaseService() {
             it[ReferralRewards.grantedAt] = now
         }
 
-        // 记录推荐人首消奖励
+        // 记录推荐人首消奖励：积分与余额分两条流水，便于用户端展示真实奖励明细。
         ReferralRewards.insert {
             it[ReferralRewards.relationId] = relationId
             it[ReferralRewards.referrerId] = referrerId
             it[ReferralRewards.refereeId] = refereeId
-            it[ReferralRewards.rewardType] = "points_balance"
-            it[ReferralRewards.rewardValue] = BigDecimal(points).add(bonus)
+            it[ReferralRewards.rewardType] = "points"
+            it[ReferralRewards.rewardValue] = BigDecimal(points)
             it[ReferralRewards.stage] = "first_consumption"
             it[ReferralRewards.status] = "granted"
             it[ReferralRewards.grantedAt] = now
+        }
+        if (wallet != null) {
+            ReferralRewards.insert {
+                it[ReferralRewards.relationId] = relationId
+                it[ReferralRewards.referrerId] = referrerId
+                it[ReferralRewards.refereeId] = refereeId
+                it[ReferralRewards.rewardType] = "balance"
+                it[ReferralRewards.rewardValue] = bonus
+                it[ReferralRewards.stage] = "first_consumption"
+                it[ReferralRewards.status] = "granted"
+                it[ReferralRewards.grantedAt] = now
+            }
         }
 
         // 标记首消完成，同时作为「后续消费走持续奖励」的判定依据
@@ -206,7 +218,7 @@ class ReferralRewardService : BaseService() {
                 "thing1" to "推荐奖励",
                 "amount2" to "$totalReferrerPoints 积分" + (if (wallet != null) " + ${bonus.setScale(2, RoundingMode.HALF_UP)} 元" else "")
             ),
-            page = "/pages/referral/index",
+            page = "/pages/referral/referral",
             msgType = "activity",
             relatedId = consumptionRecordId
         )

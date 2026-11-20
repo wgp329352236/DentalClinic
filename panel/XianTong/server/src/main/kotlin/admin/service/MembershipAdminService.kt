@@ -25,6 +25,7 @@ import com.dentalclinic.admin.util.ConflictException
 import com.dentalclinic.admin.util.NotFoundException
 import com.dentalclinic.admin.util.ValidationException
 import com.dentalclinic.common.BaseService
+import com.dentalclinic.common.security.PhoneCipherService
 import com.dentalclinic.common.RechargeTierService
 import kotlinx.coroutines.flow.toList
 import org.jetbrains.exposed.v1.core.SortOrder
@@ -271,12 +272,15 @@ class RechargeRecordAdminService : BaseService() {
         // 客户关键字（手机/姓名/昵称）：先定位 userId 集合再下推；无命中直接空页
         if (!keyword.isNullOrBlank()) {
             val pattern = "%${keyword.trim().lowercase()}%"
+            val nameCondition = (Users.nickname.lowerCase() like pattern) or
+                (Users.realName.lowerCase() like pattern)
+            val keywordCondition = if (PhoneCipherService.isValidMainlandMobile(keyword)) {
+                (Users.phoneHash eq PhoneCipherService.blindIndex(keyword)) or nameCondition
+            } else {
+                nameCondition
+            }
             val matchedUserIds = Users.selectAll()
-                .where {
-                    (Users.phone.lowerCase() like pattern) or
-                        (Users.nickname.lowerCase() like pattern) or
-                        (Users.realName.lowerCase() like pattern)
-                }
+                .where { keywordCondition }
                 .toList()
                 .map { it[Users.id] }
             if (matchedUserIds.isEmpty()) {
@@ -324,7 +328,7 @@ class RechargeRecordAdminService : BaseService() {
                 id = row[RechargeRecords.id],
                 userId = row[RechargeRecords.userId],
                 userName = user?.get(Users.realName) ?: user?.get(Users.nickname),
-                userPhone = user?.get(Users.phone),
+                userPhone = PhoneCipherService.readPhone(user?.get(Users.phoneCipher), user?.get(Users.phone)),
                 clinicId = row[RechargeRecords.clinicId],
                 clinicName = clinicsMap[row[RechargeRecords.clinicId]]?.get(Clinics.name) ?: "",
                 amount = row[RechargeRecords.amount].toDouble(),
@@ -401,7 +405,8 @@ class CustomerTagAdminService : BaseService() {
     }
 
     /** 查询某客户当前的标签集合（客户详情/打标弹窗回显用）。 */
-    suspend fun getUserTags(userId: Long): List<CustomerTagDto> = dbQuery {
+    suspend fun getUserTags(userId: Long, scope: ClinicScope): List<CustomerTagDto> = dbQuery {
+        requireUserInScope(userId, scope)
         val tagIds = UserTagRels.selectAll()
             .where { UserTagRels.userId eq userId }
             .toList()
@@ -419,10 +424,8 @@ class CustomerTagAdminService : BaseService() {
      *
      * @throws ValidationException 客户不存在或提交了不存在/已停用的标签
      */
-    suspend fun setUserTags(userId: Long, req: SetUserTagsRequest) = dbQuery {
-        if (Users.selectAll().where { Users.id eq userId }.count() == 0L) {
-            throw ValidationException("客户不存在")
-        }
+    suspend fun setUserTags(userId: Long, req: SetUserTagsRequest, scope: ClinicScope) = dbQuery {
+        requireUserInScope(userId, scope)
         val distinctTagIds = req.tagIds.distinct()
         if (distinctTagIds.isNotEmpty()) {
             val validRows = CustomerTags.selectAll()

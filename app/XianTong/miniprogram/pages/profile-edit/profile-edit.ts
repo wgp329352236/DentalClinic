@@ -1,5 +1,11 @@
 // pages/profile-edit/profile-edit.ts
-import { getUserProfile, updateUserProfile } from '../../utils/api'
+import {
+  claimProfileCompleteReward,
+  getClinics,
+  getUserProfile,
+  updateUserProfile
+} from '../../utils/api'
+import type { Clinic, UpdateProfileParams } from '../../utils/api'
 import { checkLogin } from '../../utils/auth'
 import { uploadFile } from '../../utils/request'
 import { resolveFileUrl } from '../../utils/util'
@@ -15,21 +21,30 @@ Page({
     nickname: '',
     realName: '',
     phone: '',
-    gender: 1, // 1=男 2=女
+    gender: null as number | null, // 1=男 2=女；未选择时不提交，避免误判资料已完善
     age: '' as number | string,
     // 存的是可直接渲染的绝对地址；提交给后端时要还原成后端返回的相对地址
     avatar: '',
     avatarUploading: false,
-    submitting: false
+    submitting: false,
+
+    // 归属门店：首次设置后锁定，后续如需变更联系门店
+    primaryClinicId: null as number | null,
+    primaryClinicName: '',
+    primaryClinicLocked: false,
+    clinics: [] as Clinic[],
+    clinicNames: [] as string[],
+    clinicIndex: 0
   },
 
   // 后端返回的原始头像地址（相对路径），提交时若用户没换图就原样回传，
   // 避免把补全主机名后的绝对地址写进库，导致换域名后图片全失效
   originalAvatar: '',
 
-  onLoad() {
+  async onLoad() {
     if (!checkLogin()) return
-    this.loadProfile()
+    await this.loadProfile()
+    await this.loadClinics()
   },
 
   async loadProfile() {
@@ -51,14 +66,42 @@ Page({
           nickname,
           realName: d.realName || '',
           phone,
-          gender: d.gender || 1,
+          gender: d.gender ?? null,
           age: d.age ?? '',
-          avatar: resolveFileUrl(d.avatar)
+          avatar: resolveFileUrl(d.avatar || ''),
+          primaryClinicId: d.primaryClinicId ?? null,
+          primaryClinicLocked: d.primaryClinicId != null
         })
       }
     } catch (error) {
       console.error('[ProfileEdit] 加载资料失败:', error)
       wx.showToast({ title: '加载失败', icon: 'none' })
+    }
+  },
+
+  async loadClinics() {
+    try {
+      const result = await getClinics()
+      if (result.code !== 0 || !Array.isArray(result.data)) return
+      const clinics = result.data
+      const clinicNames = clinics.map(item => item.name)
+      const primaryClinicId = this.data.primaryClinicId
+      const matchedIndex = primaryClinicId == null
+        ? -1
+        : clinics.findIndex(item => item.id === primaryClinicId)
+      this.setData({
+        clinics,
+        clinicNames,
+        clinicIndex: matchedIndex >= 0 ? matchedIndex : 0,
+        primaryClinicName:
+          matchedIndex >= 0
+            ? clinics[matchedIndex]?.name || ''
+            : primaryClinicId != null
+              ? ''
+              : ''
+      })
+    } catch (error) {
+      console.error('[ProfileEdit] 加载门店失败:', error)
     }
   },
 
@@ -116,6 +159,18 @@ Page({
     this.setData({ gender: Number(e.detail.value) })
   },
 
+  onClinicChange(e: any) {
+    if (this.data.primaryClinicLocked) return
+    const index = Number(e.detail.value)
+    const clinic = this.data.clinics[index]
+    if (!clinic) return
+    this.setData({
+      clinicIndex: index,
+      primaryClinicId: clinic.id,
+      primaryClinicName: clinic.name
+    })
+  },
+
   // 提交保存
   async onSave() {
     if (this.data.submitting) return
@@ -129,16 +184,33 @@ Page({
 
     this.setData({ submitting: true })
     try {
-      // request.ts 已把 code !== 0 统一 reject，这里只需处理成功路径
-      await updateUserProfile({
+      const payload: UpdateProfileParams = {
         nickname: this.data.nickname.trim() || undefined,
         realName: this.data.realName.trim() || undefined,
-        gender: this.data.gender,
         age: age === '' ? undefined : Number(age),
         avatar: this.originalAvatar || undefined
+      }
+      if (this.data.gender !== null) payload.gender = this.data.gender
+      if (this.data.primaryClinicId != null) payload.primaryClinicId = this.data.primaryClinicId
+
+      // request.ts 已把 code !== 0 统一 reject，这里只需处理成功路径
+      await updateUserProfile(payload)
+
+      // 资料保存已成功；积分领取失败（条件不全/网络异常）不能回滚或阻断保存结果。
+      let pointsEarned = 0
+      try {
+        const reward = await claimProfileCompleteReward()
+        pointsEarned = Number(reward.data?.pointsEarned || 0)
+      } catch (rewardError) {
+        console.warn('[ProfileEdit] 完善资料积分领取失败:', rewardError)
+      }
+
+      wx.showToast({
+        title: pointsEarned > 0 ? `资料已保存，积分+${pointsEarned}` : '保存成功',
+        icon: pointsEarned > 0 ? 'none' : 'success',
+        duration: pointsEarned > 0 ? 2200 : 1200
       })
-      wx.showToast({ title: '保存成功', icon: 'success' })
-      setTimeout(() => wx.navigateBack(), 600)
+      setTimeout(() => wx.navigateBack(), pointsEarned > 0 ? 2200 : 1200)
     } catch (error: any) {
       // 唯一约束冲突（409）等已由 request.ts reject 成带后端文案的 Error，直接展示即可
       wx.showToast({ title: error?.message || '保存失败，请稍后重试', icon: 'none' })

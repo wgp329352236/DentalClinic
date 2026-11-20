@@ -110,6 +110,20 @@
   right: 16rpx;
 }
 
+.coupon-use-btn {
+  position: absolute;
+  right: 18rpx;
+  bottom: 16rpx;
+  margin: 0;
+  padding: 0 22rpx;
+  height: 48rpx;
+  line-height: 48rpx;
+  border-radius: 24rpx;
+  color: #fff;
+  font-size: 22rpx;
+  background: #1890ff;
+}
+
 .badge {
   padding: 4rpx 16rpx;
   border-radius: 20rpx;

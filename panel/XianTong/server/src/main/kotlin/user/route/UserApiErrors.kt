@@ -29,6 +29,7 @@ private const val SQLSTATE_UNIQUE_VIOLATION = "23505"
  * 约束名稳定且不随数据变化，比解析列名可靠。
  */
 private val UNIQUE_CONFLICT_MESSAGES = mapOf(
+    "cuser_uk_phone_hash" to "该手机号已被其他账号使用",
     "cuser_uk_phone" to "该手机号已被其他账号使用",
     "cuser_uk_openid" to "该微信账号已绑定其他用户"
 )

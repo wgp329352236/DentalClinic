@@ -2,6 +2,7 @@ package com.dentalclinic.admin.route
 
 import com.dentalclinic.admin.auth.adminPrincipal
 import com.dentalclinic.admin.auth.authenticated
+import com.dentalclinic.admin.auth.clinicScope
 import com.dentalclinic.admin.auth.requirePermission
 import com.dentalclinic.admin.service.AdminCouponService
 import com.dentalclinic.admin.service.ScanRedeemRequest
@@ -159,7 +160,8 @@ fun Route.couponRoutes(couponService: AdminCouponService) {
                     val result = couponService.grantCouponsToUsers(
                         templateId = request.templateId,
                         userIds = request.userIds,
-                        operator = principal.username
+                        operator = principal.username,
+                        scope = call.clinicScope()
                     )
 
                     when (result) {
@@ -205,7 +207,8 @@ fun Route.couponRoutes(couponService: AdminCouponService) {
                         templateId = templateId,
                         status = status,
                         page = page.coerceAtLeast(1),
-                        pageSize = pageSize.coerceIn(1, 100)
+                        pageSize = pageSize.coerceIn(1, 100),
+                        scope = call.clinicScope()
                     )
                     call.ok(response)
                 }
@@ -223,7 +226,8 @@ fun Route.couponRoutes(couponService: AdminCouponService) {
 
                     val result = couponService.scanAndRedeemCoupon(
                         qrData = request.qrData,
-                        operator = principal.username
+                        operator = principal.username,
+                        scope = call.clinicScope()
                     )
 
                     when (result) {

@@ -2,6 +2,7 @@ package com.dentalclinic.admin.route
 
 import com.dentalclinic.admin.auth.adminPrincipal
 import com.dentalclinic.admin.auth.authenticated
+import com.dentalclinic.admin.auth.clinicScope
 import com.dentalclinic.admin.auth.requirePermission
 import com.dentalclinic.admin.service.AdminReferralService
 import com.dentalclinic.admin.service.GrantReferralRewardRequest
@@ -23,7 +24,7 @@ fun Route.referralRoutes(referralService: AdminReferralService) {
                     val userId = call.request.queryParameters["userId"]?.toLongOrNull()
                         ?: throw ValidationException("缺少用户ID")
                     val depth = call.request.queryParameters["depth"]?.toIntOrNull()?.coerceIn(1, 5) ?: 3
-                    val tree = referralService.getReferralTree(userId, depth)
+                    val tree = referralService.getReferralTree(userId, depth, call.clinicScope())
                         ?: throw ValidationException("用户不存在")
                     call.ok(tree)
                 }
@@ -41,7 +42,8 @@ fun Route.referralRoutes(referralService: AdminReferralService) {
                         referrerId = referrerId,
                         rewardStatus = rewardStatus,
                         page = page.coerceAtLeast(1),
-                        pageSize = pageSize.coerceIn(1, 100)
+                        pageSize = pageSize.coerceIn(1, 100),
+                        scope = call.clinicScope()
                     )
                     call.ok(response)
                 }
@@ -61,7 +63,8 @@ fun Route.referralRoutes(referralService: AdminReferralService) {
                         stage = stage,
                         status = status,
                         page = page.coerceAtLeast(1),
-                        pageSize = pageSize.coerceIn(1, 100)
+                        pageSize = pageSize.coerceIn(1, 100),
+                        scope = call.clinicScope()
                     )
                     call.ok(response)
                 }
@@ -70,7 +73,7 @@ fun Route.referralRoutes(referralService: AdminReferralService) {
             // GET /api/admin/referrals/statistics - 推荐活动汇总统计
             requirePermission("referral:view") {
                 get("/statistics") {
-                    val statistics = referralService.getReferralStatistics()
+                    val statistics = referralService.getReferralStatistics(call.clinicScope())
                     call.ok(statistics)
                 }
             }
@@ -91,7 +94,8 @@ fun Route.referralRoutes(referralService: AdminReferralService) {
 
                     val result = referralService.grantReferralReward(
                         request = request,
-                        operator = principal.username
+                        operator = principal.username,
+                        scope = call.clinicScope()
                     )
 
                     when (result) {

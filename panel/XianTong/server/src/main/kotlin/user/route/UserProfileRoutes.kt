@@ -54,7 +54,7 @@ fun Application.userProfileRoutes(profileService: UserProfileService) {
              * Body: { "realName": "张三", "phone": "13800138000", "gender": 1, "age": 25, "avatar": "url" }
              *
              * 手机号只做格式校验、不做验证码校验：短信通道与真实微信 code2Session 尚未接入。
-             * 号码被占用时由 cuser_uk_phone 唯一索引兜底，translateApiError 翻译成 409 友好文案。
+             * 号码被占用时由 cuser_uk_phone_hash 盲索引唯一约束兜底，translateApiError 翻译成 409 友好文案。
              */
             put("/me") {
                 val userId = call.userId()

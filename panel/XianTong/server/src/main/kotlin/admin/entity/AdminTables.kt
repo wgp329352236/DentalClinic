@@ -365,8 +365,9 @@ object Users : Table("user") {
     val id = long("id").autoIncrement()
     val openid = varchar("openid", 100)       // 微信openid
     val unionid = varchar("unionid", 100).nullable() // 微信unionid
-    val phone = varchar("phone", 20).nullable() // 手机号
-    val phoneHash = varchar("phone_hash", 64).nullable() // 手机号 SHA-256 哈希（盲索引，需求 P0-4）
+    val phone = varchar("phone", 20).nullable() // 历史明文列，仅迁移兼容；新写入必须为 NULL
+    val phoneCipher = text("phone_cipher").nullable() // AES-256-GCM 密文（v1 格式）
+    val phoneHash = varchar("phone_hash", 64).nullable() // HMAC-SHA256 盲索引（需求 P0-4）
     val nickname = varchar("nickname", 100).nullable() // 昵称
     val realName = varchar("real_name", 50).nullable() // 真实姓名
     val gender = integer("gender").nullable() // 1=男 2=女
@@ -385,6 +386,7 @@ object Users : Table("user") {
     init {
         uniqueIndex("cuser_uk_openid", openid)
         uniqueIndex("cuser_uk_phone", phone)
+        uniqueIndex("cuser_uk_phone_hash", phoneHash)
         index("cuser_user_idx_referred_by", false, referredBy)
         index("cuser_user_idx_created_at", false, createdAt)
     }
@@ -594,9 +596,11 @@ object ConsumptionRecords : Table("consumption_record") {
     val userCouponId = long("user_coupon_id").nullable() // 本次核销的用户优惠券ID
     val balanceUsed = decimal("balance_used", 12, 2).default(0.0.toBigDecimal()) // 使用余额
     val wechatPaid = decimal("wechat_paid", 12, 2).default(0.0.toBigDecimal()) // 微信支付部分
-    val paymentStatus = varchar("payment_status", 20).default("success") // success/pending/failed（需求 P0-3）
+    val paymentStatus = varchar("payment_status", 20).default("success") // success/pending（需求 P0-3）
     val outTradeNo = varchar("out_trade_no", 64).nullable() // 微信支付商户单号
     val prepayId = varchar("prepay_id", 64).nullable() // 微信支付预支付ID
+    val wechatTransactionId = varchar("wechat_transaction_id", 64).nullable() // 微信支付交易号
+    val paidAt = datetime("paid_at").nullable() // 微信尾款支付完成时间
     val payAmount = decimal("pay_amount", 12, 2).default(0.0.toBigDecimal()) // 实付金额
     val pointsEarned = integer("points_earned").default(0) // 获得积分
     val pointsUsed = integer("points_used").default(0) // 本次抵扣消耗的积分（需求 3.4.2）
@@ -632,6 +636,12 @@ object Appointments : Table("appointment") {
     val cancelReason = text("cancel_reason").nullable()
     val cancelledBy = long("cancelled_by").nullable() // 取消操作人
     val cancelledAt = datetime("cancelled_at").nullable()
+    // 距就诊不足取消时限时，用户提交的门店待审核取消申请（需求 3.2.2）
+    val cancelRequestStatus = varchar("cancel_request_status", 20).nullable() // pending/approved/rejected
+    val cancelRequestReason = text("cancel_request_reason").nullable()
+    val cancelRequestedAt = datetime("cancel_requested_at").nullable()
+    val cancelReviewedBy = long("cancel_reviewed_by").nullable()
+    val cancelReviewedAt = datetime("cancel_reviewed_at").nullable()
     val arrivedAt = datetime("arrived_at").nullable()
     val completedAt = datetime("completed_at").nullable()
     val noShowCount = integer("no_show_count").default(0) // 累计爽约次数

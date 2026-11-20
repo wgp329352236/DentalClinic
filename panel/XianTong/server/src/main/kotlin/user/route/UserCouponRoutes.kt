@@ -69,10 +69,7 @@ fun Application.userCouponRoutes(couponService: CouponService) {
                             call.respond(ApiResponse(
                                 code = 0,
                                 message = "核销成功",
-                                data = mapOf(
-                                    "couponName" to result.couponName,
-                                    "faceValue" to result.faceValue
-                                )
+                                data = CouponRedeemDto(result.couponName, result.faceValue)
                             ))
                         }
                         is CouponRedeemResult.Error -> {
@@ -109,7 +106,7 @@ fun Application.userCouponRoutes(couponService: CouponService) {
                             call.respond(ApiResponse(
                                 code = 0,
                                 message = "领取成功",
-                                data = mapOf("coupons" to result.coupons)
+                                data = PromoClaimDto(result.coupons)
                             ))
                         }
                         is PromoClaimResult.Error -> {
@@ -148,11 +145,11 @@ fun Application.userCouponRoutes(couponService: CouponService) {
                             call.respond(ApiResponse(
                                 code = 0,
                                 message = "领取成功",
-                                data = mapOf(
-                                    "couponCode" to result.couponCode,
-                                    "couponName" to result.couponName,
-                                    "faceValue" to result.faceValue,
-                                    "validTo" to result.validTo
+                                data = CouponClaimDto(
+                                    couponCode = result.couponCode,
+                                    couponName = result.couponName,
+                                    faceValue = result.faceValue,
+                                    validTo = result.validTo
                                 )
                             ))
                         }
@@ -180,4 +177,19 @@ data class RedeemCouponRequest(val couponCode: String, val appointmentId: Long?)
 
 @Serializable
 data class PromoClaimRequest(val templateId: Long? = null)
+
+// 成功响应用具名 DTO：mapOf 会推断为 Map<String, Any>，kotlinx 无法序列化
+@Serializable
+data class CouponRedeemDto(val couponName: String, val faceValue: Double)
+
+@Serializable
+data class CouponClaimDto(
+    val couponCode: String,
+    val couponName: String,
+    val faceValue: Double,
+    val validTo: String
+)
+
+@Serializable
+data class PromoClaimDto(val coupons: List<PromoClaimedCoupon>)
 

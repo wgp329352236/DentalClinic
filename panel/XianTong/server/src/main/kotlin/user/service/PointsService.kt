@@ -3,7 +3,9 @@ package com.dentalclinic.user.service
 import com.dentalclinic.admin.entity.PointsRecords
 import com.dentalclinic.admin.entity.PointsRules
 import com.dentalclinic.admin.entity.UserPointsSummary
+import com.dentalclinic.admin.entity.Users
 import com.dentalclinic.common.BaseService
+import com.dentalclinic.common.security.PhoneCipherService
 import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.SortOrder
@@ -179,6 +181,14 @@ class PointsService : BaseService() {
      * Award points for completing profile.
      */
     suspend fun completeProfileReward(userId: Long): PointsResult = dbQuery {
+        // 锁用户行后再判重：并发双击/重试会串行化，配合部分唯一索引形成双保险。
+        val user = Users.selectAll()
+            .where { Users.id eq userId }
+            .forUpdate()
+            .toList()
+            .singleOrNull()
+            ?: return@dbQuery PointsResult.Error("用户不存在")
+
         val alreadyRewarded = PointsRecords.selectAll()
             .where {
                 (PointsRecords.userId eq userId) and
@@ -187,7 +197,17 @@ class PointsService : BaseService() {
             .count() > 0
 
         if (alreadyRewarded) {
-            return@dbQuery PointsResult.Error("已完成过信息完善奖励")
+            return@dbQuery PointsResult.Success(0)
+        }
+
+        val phone = PhoneCipherService.readPhone(user[Users.phoneCipher], user[Users.phone])
+        if (user[Users.realName].isNullOrBlank() ||
+            phone.isNullOrBlank() ||
+            user[Users.gender] == null ||
+            user[Users.age] == null ||
+            user[Users.primaryClinicId] == null
+        ) {
+            return@dbQuery PointsResult.Error("请先完善姓名、手机号、性别、年龄和归属门店")
         }
 
         val rule = PointsRules.selectAll()

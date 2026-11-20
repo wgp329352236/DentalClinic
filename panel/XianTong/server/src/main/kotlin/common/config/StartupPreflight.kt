@@ -27,6 +27,8 @@ object StartupPreflight {
         "postgres",
         "change-me",
         "changeme",
+        "phone-encryption-dev-key-change-me",
+        "phone-blind-index-dev-key-change-me",
     )
 
     fun run() {
@@ -51,6 +53,20 @@ object StartupPreflight {
             label = "门店签到码 HMAC 密钥",
             envName = "CHECKIN_SIGNING_SECRET",
             yamlPath = "checkin.signingSecret",
+            errors = errors,
+            warnings = warnings,
+        )
+        checkSecret(
+            label = "手机号加密密钥",
+            envName = "PHONE_ENCRYPTION_KEY",
+            yamlPath = "security.phoneEncryptionKey",
+            errors = errors,
+            warnings = warnings,
+        )
+        checkSecret(
+            label = "手机号盲索引密钥",
+            envName = "PHONE_BLIND_INDEX_KEY",
+            yamlPath = "security.phoneBlindIndexKey",
             errors = errors,
             warnings = warnings,
         )

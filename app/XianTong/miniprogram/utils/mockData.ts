@@ -136,9 +136,12 @@ const clinics: MockClinic[] = [
     address: '北京市朝阳区建国路88号',
     phone: '010-12345678',
     businessHours: '09:00-18:00',
+    businessDays: '1,2,3,4,5,6,7',
     openTime: '09:00',
     closeTime: '18:00',
-    distance: 1.2,
+    latitude: 39.9087,
+    longitude: 116.4606,
+    distance: 1200,
     image: '/images/clinic1.jpg',
     coverImage: '/images/clinic1.jpg'
   },
@@ -148,9 +151,12 @@ const clinics: MockClinic[] = [
     address: '北京市海淀区中关村大街100号',
     phone: '010-87654321',
     businessHours: '09:00-18:00',
+    businessDays: '1,2,3,4,5,6',
     openTime: '09:00',
     closeTime: '18:00',
-    distance: 3.5,
+    latitude: 39.9836,
+    longitude: 116.3167,
+    distance: 3500,
     image: '/images/clinic2.jpg',
     coverImage: '/images/clinic2.jpg'
   },
@@ -160,9 +166,12 @@ const clinics: MockClinic[] = [
     address: '北京市西城区金融街7号长安中心1层',
     phone: '010-55667788',
     businessHours: '09:00-19:00',
+    businessDays: '1,2,3,4,5',
     openTime: '09:00',
     closeTime: '19:00',
-    distance: 6.4,
+    latitude: 39.9136,
+    longitude: 116.3669,
+    distance: 6400,
     image: '/images/clinic3.jpg',
     coverImage: '/images/clinic3.jpg'
   },
@@ -172,9 +181,12 @@ const clinics: MockClinic[] = [
     address: '北京市朝阳区望京SOHO T1 座 3 层',
     phone: '010-66778899',
     businessHours: '09:00-17:30',
+    businessDays: '2,3,4,5,6,7',
     openTime: '09:00',
     closeTime: '17:30',
-    distance: 5.1,
+    latitude: 39.9961,
+    longitude: 116.4818,
+    distance: 5100,
     image: '/images/clinic4.jpg',
     coverImage: '/images/clinic4.jpg'
   }
@@ -998,8 +1010,11 @@ const notices: Notice[] = [
 
 /** 订阅消息模板：mock 环境下 wx.requestSubscribeMessage 不会真的弹出，仅用于验证下发链路 */
 const subscribeTemplates = [
+  { templateKey: 'appointment_submitted', templateId: 'MOCK_TEMPLATE_ID_APPOINTMENT_SUBMITTED' },
+  { templateKey: 'appointment_confirmed', templateId: 'MOCK_TEMPLATE_ID_APPOINTMENT_CONFIRMED' },
   { templateKey: 'appointment_remind_evening', templateId: 'MOCK_TEMPLATE_ID_APPOINTMENT_EVENING' },
-  { templateKey: 'appointment_remind_morning', templateId: 'MOCK_TEMPLATE_ID_APPOINTMENT_MORNING' }
+  { templateKey: 'appointment_remind_morning', templateId: 'MOCK_TEMPLATE_ID_APPOINTMENT_MORNING' },
+  { templateKey: 'activity_notice', templateId: 'MOCK_TEMPLATE_ID_ACTIVITY_NOTICE' }
 ]
 
 // ==================== 状态变更辅助 ====================

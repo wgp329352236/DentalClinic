@@ -68,6 +68,13 @@ Page({
     this.loadCoupons()
   },
 
+  useCoupon(e: any) {
+    const couponCode = String(e.currentTarget.dataset.code || '').trim()
+    if (!couponCode) return
+    getApp<IAppOption>().setPendingCouponCode(couponCode)
+    wx.switchTab({ url: '/pages/appointment/appointment' })
+  },
+
   async loadCoupons() {
     this.setData({ loading: true })
     try {
@@ -82,6 +89,7 @@ Page({
               : { text: '已过期', cls: 'badge-danger' }
           return {
             id: c.id,
+            couponCode: c.couponCode,
             name: c.templateName || c.name,
             amount: c.faceValue || c.amount || 0,
             minAmount: c.minConsumption || c.minAmount || 0,

@@ -93,10 +93,16 @@
         <view class="clinic-info">
           <view class="clinic-name font-bold">{{item.name}}</view>
           <view class="clinic-address text-muted font-small">{{item.address}}</view>
+          <view class="clinic-hours text-muted font-small">营业日：{{item.businessDayText}}</view>
           <view class="clinic-hours text-muted font-small">营业时间：{{item.businessHours}}</view>
         </view>
-        <view class="clinic-distance text-primary" wx:if="{{item.distance}}">
-          {{item.distance}}km
+        <view class="clinic-meta">
+          <view class="clinic-distance text-primary" wx:if="{{item.distanceText}}">
+            {{item.distanceText}}
+          </view>
+          <view
+            class="clinic-status {{item.openStatusText === '今日休息' || item.openStatusText === '今日已结束' ? 'is-closed' : ''}}"
+          >{{item.openStatusText}}</view>
         </view>
       </view>
     </view>

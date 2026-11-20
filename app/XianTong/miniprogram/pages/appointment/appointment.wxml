@@ -26,7 +26,14 @@
         <view class="clinic-option-info">
           <view class="list-item-title">{{item.name}}</view>
           <view class="list-item-desc">{{item.address}}</view>
-          <view class="list-item-extra" wx:if="{{item.distance}}">{{item.distance}}km</view>
+          <view class="list-item-desc">营业日：{{item.businessDayText}}</view>
+          <view class="list-item-desc">营业时间：{{item.businessHours}}</view>
+          <view class="clinic-option-meta">
+            <text
+              class="clinic-open-status {{item.openStatusText === '今日休息' || item.openStatusText === '今日已结束' ? 'is-closed' : ''}}"
+            >{{item.openStatusText}}</text>
+            <text class="list-item-extra" wx:if="{{item.distanceText}}">{{item.distanceText}}</text>
+          </view>
         </view>
       </view>
     </view>
@@ -55,6 +62,12 @@
 
   <!-- 步骤4：选择时段 -->
   <view wx:if="{{step === 4}}" class="card">
+    <view wx:if="{{isReschedule}}" class="reschedule-summary">
+      <view class="reschedule-title">正在改约原预约</view>
+      <view class="reschedule-line">{{selectedClinicName}} · {{selectedDepartmentName}} · {{selectedDoctorName}}</view>
+      <view class="reschedule-line">原时间：{{originalAppointmentText}}</view>
+      <view class="reschedule-hint">门店、科室和医生保持不变，请选择新的日期与时段</view>
+    </view>
     <view wx:if="{{loading}}" class="loading">加载中...</view>
     <view wx:else>
       <view class="time-slot-group" wx:for="{{timeSlots}}" wx:key="index">
@@ -74,7 +87,7 @@
     </view>
   </view>
 
-  <!-- 步骤5：确认预约 -->
+  <!-- 步骤5：确认预约/改约 -->
   <view wx:if="{{step === 5}}" class="card">
     <view class="confirm-item">
       <text class="confirm-label">门诊：</text>
@@ -92,14 +105,61 @@
       <text class="confirm-label">时间：</text>
       <text>{{selectedSlot.date}} {{selectedSlot.timeRange}}</text>
     </view>
+    <view wx:if="{{isReschedule}}" class="confirm-item confirm-original">
+      <text class="confirm-label">原预约：</text>
+      <text>{{originalAppointmentText}}</text>
+    </view>
+
+    <view class="coupon-section">
+      <view class="coupon-heading">
+        <text class="coupon-title">优惠券</text>
+        <text wx:if="{{couponsLoading}}" class="coupon-loading">加载中...</text>
+      </view>
+      <view
+        class="coupon-option coupon-none {{selectedCouponCode === '' ? 'selected' : ''}}"
+        bindtap="onSelectNoCoupon"
+      >
+        <view>
+          <view class="coupon-name">不使用优惠券</view>
+          <view class="coupon-desc" wx:if="{{isReschedule && originalCouponCode}}">原预约优惠券将被释放</view>
+        </view>
+        <view class="coupon-radio">{{selectedCouponCode === '' ? '✓' : ''}}</view>
+      </view>
+      <view
+        class="coupon-option {{selectedCouponCode === item.couponCode ? 'selected' : ''}}"
+        wx:for="{{availableCoupons}}"
+        wx:key="couponCode"
+        data-code="{{item.couponCode}}"
+        bindtap="onSelectCoupon"
+      >
+        <view class="coupon-main">
+          <view class="coupon-name">
+            {{item.name}}
+            <text wx:if="{{item.isOriginal}}" class="coupon-tag">原预约</text>
+          </view>
+          <view class="coupon-desc">
+            {{item.minAmount > 0 ? '满' + item.minAmount + '元可用' : '无门槛'}}
+            <text wx:if="{{item.validTo}}"> · 有效期至 {{item.validTo}}</text>
+          </view>
+        </view>
+        <view class="coupon-value">
+          <text class="coupon-currency">¥</text>{{item.amount}}
+        </view>
+        <view class="coupon-radio">{{selectedCouponCode === item.couponCode ? '✓' : ''}}</view>
+      </view>
+      <view wx:if="{{!couponsLoading && availableCoupons.length === 0 && !originalCouponCode}}" class="coupon-empty">
+        暂无可用优惠券
+      </view>
+    </view>
+
     <view class="divider"></view>
     <button class="btn-primary" bindtap="submitAppointment" disabled="{{loading}}">
-      {{loading ? '提交中...' : '确认预约'}}
+      {{loading ? '提交中...' : (isReschedule ? '确认改约' : '确认预约')}}
     </button>
   </view>
 
   <!-- 返回按钮 -->
-  <view wx:if="{{step > 1 && step < 5}}" class="back-btn" bindtap="goBack">
+  <view wx:if="{{step > 1 && step < 5 && !isReschedule}}" class="back-btn" bindtap="goBack">
     上一步
   </view>
 </view>

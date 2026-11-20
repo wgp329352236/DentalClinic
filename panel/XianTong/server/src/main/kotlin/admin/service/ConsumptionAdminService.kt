@@ -16,6 +16,7 @@ import com.dentalclinic.admin.util.ConflictException
 import com.dentalclinic.admin.util.NotFoundException
 import com.dentalclinic.admin.util.ValidationException
 import com.dentalclinic.common.BaseService
+import com.dentalclinic.common.security.PhoneCipherService
 import com.dentalclinic.common.ReferralRewardOutcome
 import com.dentalclinic.common.ReferralRewardService
 import com.dentalclinic.common.scheduler.ScheduledNotifier
@@ -67,7 +68,8 @@ class ConsumptionAdminService(
      */
     suspend fun createConsumption(
         request: CreateConsumptionRequest,
-        operator: String
+        operator: String,
+        scope: com.dentalclinic.admin.auth.ClinicScope = com.dentalclinic.admin.auth.ClinicScope.ALL
     ): ConsumptionSettlementDto = dbQuery {
         val now = LocalDateTime.now()
 
@@ -75,11 +77,11 @@ class ConsumptionAdminService(
             throw ValidationException("消费金额必须大于0")
         }
 
-        val user = Users.selectAll()
-            .where { Users.id eq request.userId }
-            .toList()
-            .firstOrNull()
-            ?: throw NotFoundException("客户不存在")
+        if (!scope.allowsClinic(request.clinicId)) {
+            throw com.dentalclinic.admin.util.ForbiddenException("无权在该门店录入消费")
+        }
+
+        val user = requireUserInScope(request.userId, scope)
         if (user[Users.status] == 0) {
             throw ValidationException("客户已被禁用，无法录入消费")
         }
@@ -94,14 +96,13 @@ class ConsumptionAdminService(
         }
 
         val appointment = request.appointmentId?.let { appointmentId ->
-            Appointments.selectAll()
-                .where { Appointments.id eq appointmentId }
-                .toList()
-                .firstOrNull()
-                ?: throw NotFoundException("关联的预约记录不存在")
+            requireAppointmentInScope(appointmentId, scope)
         }
         if (appointment != null && appointment[Appointments.userId] != request.userId) {
             throw ValidationException("关联的预约记录不属于该客户")
+        }
+        if (appointment != null && appointment[Appointments.clinicId] != request.clinicId) {
+            throw ValidationException("关联的预约记录不属于当前消费门店")
         }
 
         // 1. 会员等级折扣（需求 3.3.2）
@@ -110,7 +111,7 @@ class ConsumptionAdminService(
         val discountAmount = originalAmount.subtract(originalAmount.multiply(levelSnapshot.discountRate).money()).money()
         val discountedAmount = originalAmount.subtract(discountAmount)
 
-        // 2. 优惠券抵扣（仅校验并锁定，实际核销在消费记录落库之后）
+        // 2. 优惠券抵扣（先校验并占用，避免同一张券在待支付期间被重复使用）
         val coupon = request.userCouponId?.let {
             resolveCoupon(it, request.userId, discountedAmount, appointment)
         }
@@ -125,11 +126,10 @@ class ConsumptionAdminService(
 
         // 3. 余额扣减（需求 3.3.1：优先使用余额，不足部分由微信支付补齐）
         val payment = deductBalance(request.userId, payAmount, request.useBalance)
+        val paymentStatus = if (payment.wechatPaid > BigDecimal.ZERO) "pending" else "success"
 
-        // 4. 消费积分（需求 3.4.1：每消费1元积1分，基数为实付金额）
-        val pointsAward = calculateConsumptionPoints(request.userId, payAmount)
-
-        // 5. 写消费记录
+        // 4. 写消费记录。待微信尾款支付的订单先不发放消费积分/升级/推荐奖励，
+        //    也不把预约回写为已完成，这些权益统一由支付成功后的 finalize 流程发放。
         val recordId = ConsumptionRecords.insert {
             it[ConsumptionRecords.userId] = request.userId
             it[ConsumptionRecords.clinicId] = request.clinicId
@@ -141,14 +141,15 @@ class ConsumptionAdminService(
             it[ConsumptionRecords.userCouponId] = coupon?.userCouponId
             it[ConsumptionRecords.balanceUsed] = payment.balanceUsed
             it[ConsumptionRecords.wechatPaid] = payment.wechatPaid
-            it[ConsumptionRecords.paymentStatus] = if (payment.wechatPaid > BigDecimal.ZERO) "pending" else "success"
+            it[ConsumptionRecords.paymentStatus] = paymentStatus
             it[ConsumptionRecords.payAmount] = payAmount
-            it[ConsumptionRecords.pointsEarned] = pointsAward.points
+            it[ConsumptionRecords.pointsEarned] = 0
             it[ConsumptionRecords.pointsUsed] = pointsUsed
             it[ConsumptionRecords.pointsDeduct] = pointsDeduct
             it[ConsumptionRecords.status] = "success"
             it[ConsumptionRecords.operatorName] = operator
             it[ConsumptionRecords.description] = request.description
+            if (paymentStatus == "success") it[ConsumptionRecords.paidAt] = now
         } get ConsumptionRecords.id
 
         if (coupon != null) {
@@ -185,64 +186,40 @@ class ConsumptionAdminService(
             )
         }
 
-        val pointsBalanceAfter = if (pointsAward.points > 0) {
-            pointsService.addPoints(
-                userId = request.userId,
-                amount = pointsAward.points,
-                sourceType = "consumption",
-                description = "消费获得积分",
-                validityMonths = pointsAward.validityMonths,
-                sourceId = recordId
-            )
+        // 5. 无微信尾款的消费在当前事务内直接完成权益结算；有待支付尾款时只返回待支付结果。
+        val settlement = if (paymentStatus == "success") {
+            finalizeConsumption(recordId, paidAt = now)
         } else {
-            readPointsBalance(request.userId)
+            val pointsBalanceNow = readPointsBalance(request.userId)
+            val currentAccumulated = levelSnapshot.userLevel
+                ?.get(UserMemberLevels.accumulatedConsumption)
+                ?: BigDecimal.ZERO
+            ConsumptionFinalizationOutcome(
+                pointsEarned = 0,
+                pointsBalanceAfter = pointsBalanceNow,
+                accumulatedConsumption = currentAccumulated.toDouble(),
+                levelName = levelSnapshot.level?.get(MemberLevels.levelName),
+                levelUpgraded = false,
+                referralReward = null
+            )
         }
 
-        // 6. 累计消费并按门槛自动升级（只升不降）
-        val levelChange = accumulateAndUpgradeLevel(request.userId, discountedAmount, levelSnapshot, recordId)
-
-        // 7. 推荐奖励（需求 3.5.2：首消奖励 / 持续奖励，含月度上限）
-        val referralOutcome = referralRewardService.settleConsumptionReward(
-            refereeId = request.userId,
-            payAmount = payAmount,
-            consumptionRecordId = recordId
-        )
-
-        // 8. 就诊闭环：录入消费即视为本次就诊完成（已取消/爽约/已完成的预约不回改）
-        if (appointment != null && appointment[Appointments.status] !in TERMINAL_APPOINTMENT_STATUS) {
-            Appointments.update({ Appointments.id eq appointment[Appointments.id] }) {
-                it[Appointments.status] = "completed"
-                it[Appointments.completedAt] = now
-                it[Appointments.updatedAt] = now
-            }
+        if (paymentStatus == "pending") {
+            ScheduledNotifier.notify(
+                userId = request.userId,
+                templateKey = "consumption_pending",
+                title = "消费待支付",
+                content = "本次消费已录入，尚需微信支付尾款 ${payment.wechatPaid.money()} 元。支付完成后将自动发放积分并完成本次就诊。",
+                subscribeData = mapOf(
+                    "thing1" to "诊疗消费",
+                    "amount2" to "${payment.wechatPaid.money()}元",
+                    "date3" to now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+                ),
+                page = "/pages/wallet/wallet",
+                msgType = "consumption",
+                relatedId = recordId
+            )
         }
-
-        // 9. 消费通知（需求 3.6.1 + P1-7：接入微信订阅消息，降级站内信）
-        val noticeContent = buildConsumptionNotice(
-            originalAmount = originalAmount,
-            discountAmount = discountAmount,
-            couponName = coupon?.name,
-            couponDeduct = couponDeduct,
-            pointsUsed = pointsUsed,
-            pointsDeduct = pointsDeduct,
-            payment = payment,
-            payAmount = payAmount,
-            pointsEarned = pointsAward.points
-        )
-        ScheduledNotifier.notify(
-            userId = request.userId,
-            templateKey = "consumption_success",
-            title = "消费成功",
-            content = noticeContent,
-            subscribeData = mapOf(
-                "thing1" to "诊疗消费",
-                "amount2" to "${payAmount}元",
-                "date3" to LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
-            ),
-            page = "/pages/consumption/detail?id=$recordId",
-            msgType = "consumption",
-            relatedId = recordId
-        )
 
         ConsumptionSettlementDto(
             recordId = recordId,
@@ -258,13 +235,185 @@ class ConsumptionAdminService(
             wechatPaid = payment.wechatPaid.toDouble(),
             balanceAfter = payment.balanceAfter.toDouble(),
             bonusBalanceAfter = payment.bonusBalanceAfter.toDouble(),
+            pointsEarned = settlement.pointsEarned,
+            pointsBalanceAfter = settlement.pointsBalanceAfter,
+            accumulatedConsumption = settlement.accumulatedConsumption,
+            levelName = settlement.levelName,
+            levelUpgraded = settlement.levelUpgraded,
+            referralReward = settlement.referralReward,
+            paymentStatus = paymentStatus,
+            paidAt = if (paymentStatus == "success") now.format(DATE_TIME_FORMATTER) else null,
+            createdAt = now.format(DATE_TIME_FORMATTER)
+        )
+    }
+
+    /**
+     * 支付成功后完成消费权益结算。
+     *
+     * 这是幂等入口：仅 pending -> success 的条件更新成功者执行积分、等级、推荐奖励、
+     * 预约完成与通知；重复回调/主动查单并发时返回 true 但不会重复发放。
+     */
+    suspend fun finalizePaidConsumption(
+        consumptionId: Long,
+        wechatTransactionId: String?
+    ): Boolean = dbQuery {
+        val record = ConsumptionRecords.selectAll()
+            .where { ConsumptionRecords.id eq consumptionId }
+            .toList()
+            .singleOrNull()
+            ?: return@dbQuery false
+
+        if (record[ConsumptionRecords.paymentStatus] == "success") return@dbQuery true
+        if (record[ConsumptionRecords.paymentStatus] != "pending") return@dbQuery false
+
+        val now = LocalDateTime.now()
+        val flipped = ConsumptionRecords.update({
+            (ConsumptionRecords.id eq consumptionId) and
+                (ConsumptionRecords.paymentStatus eq "pending")
+        }) {
+            it[ConsumptionRecords.paymentStatus] = "success"
+            it[ConsumptionRecords.paidAt] = now
+            if (!wechatTransactionId.isNullOrBlank()) {
+                it[ConsumptionRecords.wechatTransactionId] = wechatTransactionId.take(64)
+            }
+        }
+        if (flipped == 0) {
+            // 并发的回调/查单已抢先完成结算；不再执行任何权益发放。
+            return@dbQuery true
+        }
+
+        finalizeConsumption(consumptionId, paidAt = now)
+        logger.info("[Consumption] 消费 {} 尾款支付完成，权益结算已提交", consumptionId)
+        true
+    }
+
+    /**
+     * 实际发放消费权益。调用方必须保证同一消费单只会进入一次（状态翻转或首次建单）。
+     */
+    private suspend fun finalizeConsumption(
+        consumptionId: Long,
+        paidAt: LocalDateTime
+    ): ConsumptionFinalizationOutcome {
+        val record = ConsumptionRecords.selectAll()
+            .where { ConsumptionRecords.id eq consumptionId }
+            .toList()
+            .singleOrNull()
+            ?: throw NotFoundException("消费记录不存在")
+
+        val userId = record[ConsumptionRecords.userId]
+        val payAmount = record[ConsumptionRecords.payAmount]
+        val discountedAmount = record[ConsumptionRecords.amount]
+        val pointsUsed = record[ConsumptionRecords.pointsUsed]
+        val pointsDeduct = record[ConsumptionRecords.pointsDeduct]
+        val couponDeduct = record[ConsumptionRecords.couponDeduct]
+        val balanceUsed = record[ConsumptionRecords.balanceUsed]
+        val wechatPaid = record[ConsumptionRecords.wechatPaid]
+
+        // 消费积分（需求 3.4.1：每消费1元积1分，基数为实付金额）
+        val pointsAward = calculateConsumptionPoints(userId, payAmount)
+        val pointsBalanceAfter = if (pointsAward.points > 0) {
+            pointsService.addPoints(
+                userId = userId,
+                amount = pointsAward.points,
+                sourceType = "consumption",
+                description = "消费获得积分",
+                validityMonths = pointsAward.validityMonths,
+                sourceId = consumptionId
+            )
+        } else {
+            readPointsBalance(userId)
+        }
+
+        // 累计消费并按门槛自动升级（只升不降）
+        val levelChange = accumulateAndUpgradeLevel(
+            userId = userId,
+            amount = discountedAmount,
+            snapshot = loadMemberLevel(userId),
+            consumptionRecordId = consumptionId
+        )
+
+        // 推荐奖励（需求 3.5.2：首消奖励 / 持续奖励，含月度上限）
+        val referralOutcome = referralRewardService.settleConsumptionReward(
+            refereeId = userId,
+            payAmount = payAmount,
+            consumptionRecordId = consumptionId
+        )
+
+        // 就诊闭环：只有消费权益真正结算后才把预约回写为已完成
+        val appointmentId = record[ConsumptionRecords.appointmentId]
+        if (appointmentId != null) {
+            val appointment = Appointments.selectAll()
+                .where { Appointments.id eq appointmentId }
+                .toList()
+                .singleOrNull()
+            if (appointment != null && appointment[Appointments.status] !in TERMINAL_APPOINTMENT_STATUS) {
+                Appointments.update({ Appointments.id eq appointmentId }) {
+                    it[Appointments.status] = "completed"
+                    it[Appointments.completedAt] = paidAt
+                    it[Appointments.updatedAt] = paidAt
+                }
+            }
+        }
+
+        ConsumptionRecords.update({ ConsumptionRecords.id eq consumptionId }) {
+            it[ConsumptionRecords.pointsEarned] = pointsAward.points
+        }
+
+        val wallet = UserWallets.selectAll()
+            .where { UserWallets.userId eq userId }
+            .toList()
+            .singleOrNull()
+        val balanceAfter = wallet?.get(UserWallets.balance) ?: BigDecimal.ZERO
+        val bonusAfter = wallet?.get(UserWallets.bonusBalance) ?: BigDecimal.ZERO
+
+        val couponName = record[ConsumptionRecords.userCouponId]?.let { userCouponId ->
+            UserCoupons.selectAll()
+                .where { UserCoupons.id eq userCouponId }
+                .toList()
+                .singleOrNull()
+                ?.let { userCoupon ->
+                    CouponTemplates.selectAll()
+                        .where { CouponTemplates.id eq userCoupon[UserCoupons.templateId] }
+                        .toList()
+                        .singleOrNull()
+                        ?.get(CouponTemplates.name)
+                }
+        }
+
+        val noticeContent = buildConsumptionNotice(
+            originalAmount = record[ConsumptionRecords.originalAmount],
+            discountAmount = record[ConsumptionRecords.discountAmount],
+            couponName = couponName,
+            couponDeduct = couponDeduct,
+            pointsUsed = pointsUsed,
+            pointsDeduct = pointsDeduct,
+            balanceUsed = balanceUsed,
+            wechatPaid = wechatPaid,
+            balanceAfter = balanceAfter.add(bonusAfter),
+            pointsEarned = pointsAward.points
+        )
+        ScheduledNotifier.notify(
+            userId = userId,
+            templateKey = "consumption_success",
+            title = "消费成功",
+            content = noticeContent,
+            subscribeData = mapOf(
+                "thing1" to "诊疗消费",
+                "amount2" to "${payAmount}元",
+                "date3" to paidAt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+            ),
+            page = "/pages/consumption/detail?id=$consumptionId",
+            msgType = "consumption",
+            relatedId = consumptionId
+        )
+
+        return ConsumptionFinalizationOutcome(
             pointsEarned = pointsAward.points,
             pointsBalanceAfter = pointsBalanceAfter,
             accumulatedConsumption = levelChange.accumulatedConsumption,
             levelName = levelChange.levelName,
             levelUpgraded = levelChange.upgraded,
-            referralReward = toReferralSummary(referralOutcome),
-            createdAt = now.format(DATE_TIME_FORMATTER)
+            referralReward = toReferralSummary(referralOutcome)
         )
     }
 
@@ -326,7 +475,7 @@ class ConsumptionAdminService(
                 id = row[ConsumptionRecords.id],
                 userId = row[ConsumptionRecords.userId],
                 customerName = customer?.get(Users.realName) ?: customer?.get(Users.nickname),
-                phone = customer?.get(Users.phone),
+                phone = PhoneCipherService.readPhone(customer?.get(Users.phoneCipher), customer?.get(Users.phone)),
                 clinicId = row[ConsumptionRecords.clinicId],
                 clinicName = clinicsMap[row[ConsumptionRecords.clinicId]]?.get(Clinics.name),
                 appointmentId = row[ConsumptionRecords.appointmentId],
@@ -341,6 +490,8 @@ class ConsumptionAdminService(
                 wechatPaid = row[ConsumptionRecords.wechatPaid].toDouble(),
                 pointsEarned = row[ConsumptionRecords.pointsEarned],
                 status = row[ConsumptionRecords.status],
+                paymentStatus = row[ConsumptionRecords.paymentStatus],
+                paidAt = row[ConsumptionRecords.paidAt]?.format(DATE_TIME_FORMATTER),
                 operatorName = row[ConsumptionRecords.operatorName],
                 description = row[ConsumptionRecords.description],
                 createdAt = row[ConsumptionRecords.createdAt].format(DATE_TIME_FORMATTER)
@@ -754,10 +905,12 @@ class ConsumptionAdminService(
         couponDeduct: BigDecimal,
         pointsUsed: Int,
         pointsDeduct: BigDecimal,
-        payment: PaymentSplit,
-        payAmount: BigDecimal,
+        balanceUsed: BigDecimal,
+        wechatPaid: BigDecimal,
+        balanceAfter: BigDecimal,
         pointsEarned: Int
     ): String = buildString {
+        val payAmount = balanceUsed.add(wechatPaid).money()
         append("本次消费 ${payAmount.money()} 元")
         if (discountAmount > BigDecimal.ZERO) {
             append("（原价 ${originalAmount.money()} 元，会员折扣 -${discountAmount.money()} 元）")
@@ -769,10 +922,10 @@ class ConsumptionAdminService(
             append("，积分抵扣 -${pointsDeduct.money()} 元（消耗 $pointsUsed 分）")
         }
         append("。")
-        if (payment.balanceUsed > BigDecimal.ZERO) append("余额支付 ${payment.balanceUsed.money()} 元，")
-        if (payment.wechatPaid > BigDecimal.ZERO) append("微信支付 ${payment.wechatPaid.money()} 元，")
+        if (balanceUsed > BigDecimal.ZERO) append("余额支付 ${balanceUsed.money()} 元，")
+        if (wechatPaid > BigDecimal.ZERO) append("微信支付 ${wechatPaid.money()} 元，")
         if (pointsEarned > 0) append("获得 $pointsEarned 积分，")
-        append("当前可用余额 ${(payment.balanceAfter + payment.bonusBalanceAfter).money()} 元。")
+        append("当前可用余额 ${balanceAfter.money()} 元。")
     }
 
     private fun toReferralSummary(outcome: ReferralRewardOutcome): ReferralRewardSummary? = when (outcome) {
@@ -814,6 +967,16 @@ private fun BigDecimal.money(): BigDecimal = setScale(2, RoundingMode.HALF_UP)
 // ------------------------------------------------------------------
 // 内部值对象
 // ------------------------------------------------------------------
+
+/** 一次消费权益结算的返回快照。 */
+private data class ConsumptionFinalizationOutcome(
+    val pointsEarned: Int,
+    val pointsBalanceAfter: Int,
+    val accumulatedConsumption: Double,
+    val levelName: String?,
+    val levelUpgraded: Boolean,
+    val referralReward: ReferralRewardSummary?
+)
 
 /** 客户当前会员等级快照 */
 private data class MemberLevelSnapshot(
@@ -922,6 +1085,8 @@ data class ConsumptionSettlementDto(
     val levelName: String?,
     val levelUpgraded: Boolean,
     val referralReward: ReferralRewardSummary?,
+    val paymentStatus: String,
+    val paidAt: String? = null,
     val createdAt: String
 )
 
@@ -945,6 +1110,8 @@ data class ConsumptionAdminDto(
     val wechatPaid: Double,
     val pointsEarned: Int,
     val status: String,
+    val paymentStatus: String,
+    val paidAt: String?,
     val operatorName: String?,
     val description: String?,
     val createdAt: String

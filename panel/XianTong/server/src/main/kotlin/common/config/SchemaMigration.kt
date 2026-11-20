@@ -1,9 +1,17 @@
 package com.dentalclinic.common.config
 
+import com.dentalclinic.admin.entity.Users
+import com.dentalclinic.common.security.PhoneCipherService
 import kotlinx.coroutines.flow.toList
+import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.isNotNull
+import org.jetbrains.exposed.v1.core.isNull
+import org.jetbrains.exposed.v1.core.or
 import org.jetbrains.exposed.v1.core.statements.StatementType
 import org.jetbrains.exposed.v1.r2dbc.R2dbcTransaction
+import org.jetbrains.exposed.v1.r2dbc.selectAll
 import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
+import org.jetbrains.exposed.v1.r2dbc.update
 import org.slf4j.LoggerFactory
 
 /**
@@ -28,14 +36,16 @@ object SchemaMigration {
         try {
             suspendTransaction(DBConfig.database) {
                 migrateConsumptionRecord()
-                migrateUserPhoneHash()
+                migrateUserPhoneEncryption()
                 migratePointsRuleUnitAmount()
                 migratePointsRuleUniqueActionType()
                 migrateDoctorScheduleUnique()
                 migrateUploadedFileOwnerType()
                 migrateRechargeOrderColumns()
                 migrateAppointmentReminderFlags()
+                migrateAppointmentCancelRequestColumns()
                 migratePointsRecordExpiryColumns()
+                migrateProfileCompletePointsUniqueIndex()
                 migrateReferralRelationIndex()
                 migrateMpBannerActivity()
             }
@@ -61,7 +71,9 @@ object SchemaMigration {
             addColumnIfMissing("consumption_record", "points_deduct", "DECIMAL(12,2) NOT NULL DEFAULT 0"),
             addColumnIfMissing("consumption_record", "payment_status", "VARCHAR(20) NOT NULL DEFAULT 'success'"),
             addColumnIfMissing("consumption_record", "out_trade_no", "VARCHAR(64) NULL"),
-            addColumnIfMissing("consumption_record", "prepay_id", "VARCHAR(64) NULL")
+            addColumnIfMissing("consumption_record", "prepay_id", "VARCHAR(64) NULL"),
+            addColumnIfMissing("consumption_record", "wechat_transaction_id", "VARCHAR(64) NULL"),
+            addColumnIfMissing("consumption_record", "paid_at", "TIMESTAMP NULL")
         ).count { it }
 
         if (added == 0) return
@@ -73,19 +85,74 @@ object SchemaMigration {
     }
 
     /**
-     * user 表补 phone_hash 列（需求 P0-4 合规：手机号盲索引）。
+     * user 表手机号加密迁移（需求 P0-4 合规）。
      *
-     * 为未来手机号加密存储做准备：phone_hash 存储手机号的 SHA-256 哈希，
-     * 用于按手机号查询时的盲索引匹配。历史数据 phone_hash 为 NULL，
-     * 待后续迁移脚本批量计算回填。
+     * - phone_cipher 保存 AES-256-GCM 密文；
+     * - phone_hash 保存 HMAC-SHA256 盲索引，用于精确查询与唯一约束；
+     * - 历史 phone 明文逐行加密后清空，迁移幂等，已有合法密文不重复处理；
+     * - 唯一索引创建前先检查盲索引重复，存在重复时跳过并告警，避免回滚整批迁移。
      */
-    private suspend fun R2dbcTransaction.migrateUserPhoneHash() {
+    private suspend fun R2dbcTransaction.migrateUserPhoneEncryption() {
         addColumnIfMissing("user", "phone_hash", "VARCHAR(64) NULL")
+        addColumnIfMissing("user", "phone_cipher", "TEXT NULL")
         // P2-18: 客户备注字段
         addColumnIfMissing("user", "remark", "TEXT NULL")
         // P2-19: 门店经纬度字段（用于距离计算）
         addColumnIfMissing("clinic", "latitude", "DOUBLE PRECISION NULL")
         addColumnIfMissing("clinic", "longitude", "DOUBLE PRECISION NULL")
+
+        val rows = Users.selectAll()
+            .where { Users.phone.isNotNull() or Users.phoneHash.isNull() }
+            .toList()
+
+        var migrated = 0
+        rows.forEach { row ->
+            val userId = row[Users.id]
+            val plaintext = row[Users.phone]?.takeIf { it.isNotBlank() }
+            val existingCipher = row[Users.phoneCipher]?.takeIf { it.isNotBlank() }
+
+            if (plaintext != null) {
+                val encrypted = PhoneCipherService.encrypt(plaintext)
+                Users.update({ Users.id eq userId }) {
+                    it[Users.phone] = null
+                    it[Users.phoneCipher] = encrypted.ciphertext
+                    it[Users.phoneHash] = encrypted.blindIndex
+                }
+                migrated++
+            } else if (existingCipher != null && row[Users.phoneHash].isNullOrBlank()) {
+                val decrypted = PhoneCipherService.decrypt(existingCipher)
+                if (decrypted != null) {
+                    Users.update({ Users.id eq userId }) {
+                        it[Users.phoneHash] = PhoneCipherService.blindIndex(decrypted)
+                    }
+                    migrated++
+                } else {
+                    logger.warn("[SchemaMigration] 用户 {} 的 phone_cipher 无法解密，跳过盲索引回填", userId)
+                }
+            }
+        }
+
+        if (migrated > 0) {
+            logger.info("[SchemaMigration] 已完成 {} 个用户手机号加密/盲索引迁移。", migrated)
+        }
+
+        if (!indexExists("user", "cuser_uk_phone_hash")) {
+            val duplicated = exec(
+                "SELECT phone_hash FROM \"user\" " +
+                    "WHERE phone_hash IS NOT NULL GROUP BY phone_hash HAVING COUNT(*) > 1",
+                explicitStatementType = StatementType.SELECT,
+                transform = { 1 }
+            )?.toList().orEmpty()
+            if (duplicated.isEmpty()) {
+                exec("CREATE UNIQUE INDEX IF NOT EXISTS cuser_uk_phone_hash ON \"user\" (phone_hash)")
+                logger.info("[SchemaMigration] user.phone_hash 唯一索引已创建。")
+            } else {
+                logger.warn(
+                    "[SchemaMigration] user.phone_hash 存在 {} 组重复，跳过唯一索引；请人工清理后重启。",
+                    duplicated.size
+                )
+            }
+        }
     }
 
     /**
@@ -208,6 +275,15 @@ object SchemaMigration {
         addColumnIfMissing("appointment", "remind_morning_sent", "INTEGER NOT NULL DEFAULT 0")
     }
 
+    /** appointment 补取消申请与门店审核审计字段。 */
+    private suspend fun R2dbcTransaction.migrateAppointmentCancelRequestColumns() {
+        addColumnIfMissing("appointment", "cancel_request_status", "VARCHAR(20) NULL")
+        addColumnIfMissing("appointment", "cancel_request_reason", "TEXT NULL")
+        addColumnIfMissing("appointment", "cancel_requested_at", "TIMESTAMP NULL")
+        addColumnIfMissing("appointment", "cancel_reviewed_by", "BIGINT NULL")
+        addColumnIfMissing("appointment", "cancel_reviewed_at", "TIMESTAMP NULL")
+    }
+
     /**
      * points_record 补积分批次过期处理列。
      *
@@ -217,6 +293,38 @@ object SchemaMigration {
     private suspend fun R2dbcTransaction.migratePointsRecordExpiryColumns() {
         addColumnIfMissing("points_record", "expired_amount", "INTEGER NOT NULL DEFAULT 0")
         addColumnIfMissing("points_record", "expiry_notified_at", "TIMESTAMP NULL")
+    }
+
+    /**
+     * 完善资料积分每个用户只允许成功领取一次。
+     *
+     * 历史版本可能在并发或重复请求下写入多条同来源流水。直接建唯一索引会导致启动失败，
+     * 因此先检查重复；存在重复时只告警并跳过，待人工清理后下次启动自动补建。
+     */
+    private suspend fun R2dbcTransaction.migrateProfileCompletePointsUniqueIndex() {
+        val indexName = "points_uk_profile_complete"
+        if (indexExists("points_record", indexName)) return
+
+        val duplicates = exec(
+            "SELECT user_id FROM points_record " +
+                "WHERE source_type = 'profile_complete' GROUP BY user_id HAVING COUNT(*) > 1",
+            explicitStatementType = StatementType.SELECT,
+            transform = { 1 }
+        )?.toList().orEmpty()
+
+        if (duplicates.isNotEmpty()) {
+            logger.warn(
+                "[SchemaMigration] points_record 存在完善资料积分重复用户，跳过唯一索引 {}；userIds={}",
+                indexName,
+                duplicates
+            )
+            return
+        }
+
+        exec(
+            "CREATE UNIQUE INDEX IF NOT EXISTS $indexName " +
+                "ON points_record (user_id) WHERE source_type = 'profile_complete'"
+        )
     }
 
     /**

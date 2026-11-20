@@ -57,28 +57,29 @@ fun Application.userReferralRoutes(referralService: ReferralService) {
             get("/qrcode") {
                 val userId = call.userId()
                 val code = referralService.getReferralCode(userId)
-                
-                // Try to generate WeChat mini program QR code
-                val qrImage = try {
-                    com.dentalclinic.common.wx.WechatMiniClient.getWxaCodeUnlimit(
-                        scene = "ref=$code",
-                        page = "pages/index/index"
+                val payload = "ref=$code"
+
+                // 始终返回 JSON：成功带 data URI，失败给出可降级提示，
+                // 不再出现「成功返回 PNG、失败返回 JSON」导致前端解析不一致。
+                val qrImage = com.dentalclinic.common.wx.WechatMiniClient.getWxaCodeUnlimit(
+                    scene = payload,
+                    page = "pages/index/index"
+                )
+                val data = if (qrImage != null) {
+                    ReferralQrCodeResponse(
+                        available = true,
+                        payload = payload,
+                        qrcodeImageBase64 = "data:image/png;base64," +
+                            java.util.Base64.getEncoder().encodeToString(qrImage)
                     )
-                } catch (e: Exception) {
-                    logger.warn("[Referral] 生成小程序码失败: ${e.message}")
-                    null
-                }
-                
-                if (qrImage != null) {
-                    call.respondBytes(qrImage, io.ktor.http.ContentType.Image.PNG)
                 } else {
-                    // Fallback: return plain text for frontend QR code generation
-                    call.respond(ApiResponse(
-                        code = 0,
-                        message = "success",
-                        data = mapOf("payload" to "ref=$code")
-                    ))
+                    ReferralQrCodeResponse(
+                        available = false,
+                        payload = payload,
+                        message = "当前环境无法生成小程序码，请使用分享按钮邀请好友"
+                    )
                 }
+                call.respond(ApiResponse(code = 0, message = "success", data = data))
             }
 
             /**
@@ -91,17 +92,8 @@ fun Application.userReferralRoutes(referralService: ReferralService) {
                 val pageSize = call.request.queryParameters["pageSize"]?.toIntOrNull() ?: 20
 
                 val response = referralService.getReferralRecords(userId, page, pageSize)
-                call.respond(ApiResponse(
-                    code = 0,
-                    message = "success",
-                    data = mapOf(
-                        "list" to response.list,
-                        "total" to response.total,
-                        "monthlyCount" to response.monthlyCount,
-                        "page" to response.page,
-                        "pageSize" to response.pageSize
-                    )
-                ))
+                // 直接返回具名响应体：mapOf 会被推断为 Map<String, Any>，kotlinx 无对应序列化器
+                call.respond(ApiResponse(code = 0, message = "success", data = response))
             }
 
             /**

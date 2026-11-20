@@ -1,5 +1,6 @@
 package com.dentalclinic.admin.service
 
+import com.dentalclinic.admin.auth.ClinicScope
 import com.dentalclinic.admin.entity.PointsRecords
 import com.dentalclinic.admin.entity.PointsRules
 import com.dentalclinic.admin.entity.UserPointsSummary
@@ -13,6 +14,7 @@ import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greaterEq
 import org.jetbrains.exposed.v1.core.lessEq
+import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.r2dbc.andWhere
 import org.jetbrains.exposed.v1.r2dbc.insert
 import org.jetbrains.exposed.v1.r2dbc.selectAll
@@ -187,12 +189,26 @@ class AdminPointsService : BaseService() {
         startDate: String?,
         endDate: String?,
         page: Int,
-        pageSize: Int
+        pageSize: Int,
+        scope: ClinicScope
     ): PointsRecordsResponse = dbQuery {
+        if (scope.isEmpty) {
+            return@dbQuery PointsRecordsResponse(emptyList(), 0, page, pageSize)
+        }
+        if (userId != null) {
+            requireUserInScope(userId, scope)
+        }
+
         var query = PointsRecords.selectAll()
 
             if (userId != null) {
                 query = query.andWhere { PointsRecords.userId eq userId }
+            } else if (!scope.all) {
+                val scopedUserIds = restrictedScopedUserIds(scope)
+                if (scopedUserIds.isEmpty()) {
+                    return@dbQuery PointsRecordsResponse(emptyList(), 0, page, pageSize)
+                }
+                query = query.andWhere { PointsRecords.userId inList scopedUserIds }
             }
 
             if (sourceType != null) {

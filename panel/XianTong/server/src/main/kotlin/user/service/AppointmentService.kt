@@ -2,14 +2,17 @@ package com.dentalclinic.user.service
 
 import com.dentalclinic.admin.entity.*
 import com.dentalclinic.common.BaseService
+import com.dentalclinic.common.CouponUsageSupport
 import com.dentalclinic.common.config.AppointmentConfig
 import com.dentalclinic.common.security.CheckinCodeService
+import com.dentalclinic.common.scheduler.ScheduledNotifier
 import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.*
 import org.jetbrains.exposed.v1.r2dbc.insert
 import org.jetbrains.exposed.v1.r2dbc.selectAll
 import org.jetbrains.exposed.v1.r2dbc.update
+import org.slf4j.LoggerFactory
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -24,6 +27,8 @@ class AppointmentService(
     /** 门店签到码验签：只有后端签发的 HMAC 码才能解出可信 clinicId */
     private val checkinCodeService: CheckinCodeService
 ) : BaseService() {
+
+    private val logger = LoggerFactory.getLogger("AppointmentService")
 
     /**
      * Get all active clinics.
@@ -41,6 +46,9 @@ class AppointmentService(
                     phone = row[Clinics.phone],
                     openTime = row[Clinics.openTime],
                     closeTime = row[Clinics.closeTime],
+                    businessDays = row[Clinics.businessDays],
+                    latitude = row[Clinics.latitude],
+                    longitude = row[Clinics.longitude],
                     description = row[Clinics.description],
                     coverImage = row[Clinics.coverImage]
                 )
@@ -97,12 +105,65 @@ class AppointmentService(
         }
     }
 
+    /** 解析营业星期；空值或脏数据按全周营业处理，避免把门店误判为闭店。 */
+    private fun parseBusinessDays(raw: String?): Set<Int> =
+        raw.orEmpty().split(',')
+            .mapNotNull { it.trim().toIntOrNull() }
+            .filter { it in 1..7 }
+            .toSet()
+
+    private fun parseClock(raw: String?): LocalTime? =
+        raw?.let { runCatching { LocalTime.parse(it) }.getOrNull() }
+
+    /**
+     * 门店营业状态校验：返回不可预约的原因，null 表示可预约。
+     */
+    private suspend fun clinicClosedReason(
+        clinicId: Long,
+        date: LocalDate,
+        startTime: LocalTime
+    ): String? {
+        val clinic = Clinics.selectAll()
+            .where { Clinics.id eq clinicId }
+            .toList()
+            .singleOrNull()
+            ?: return "门诊不存在"
+        if (clinic[Clinics.status] != 1) return "该门店暂停营业"
+
+        val businessDays = parseBusinessDays(clinic[Clinics.businessDays])
+        if (businessDays.isNotEmpty() && date.dayOfWeek.value !in businessDays) {
+            return "该门店当日不营业，请选择其他日期"
+        }
+
+        val open = parseClock(clinic[Clinics.openTime])
+        val close = parseClock(clinic[Clinics.closeTime])
+        if (open != null && close != null && (startTime.isBefore(open) || !startTime.isBefore(close))) {
+            return "该时段不在门店营业时间内"
+        }
+        return null
+    }
+
     /**
      * Get available time slots for a doctor on a specific date.
      * Returns slots with remaining capacity.
      */
-    suspend fun getAvailableSlots(doctorId: Long, date: LocalDate): List<SlotDto> = dbQuery {
+    suspend fun getAvailableSlots(
+        doctorId: Long,
+        date: LocalDate,
+        clinicId: Long? = null
+    ): List<SlotDto> = dbQuery {
         val dayOfWeek = date.dayOfWeek.value // 1=Monday, 7=Sunday
+
+        // 门店维度约束：闭店日直接无可约时段；营业时间与医生排班取交集
+        val clinic = clinicId?.let { id ->
+            Clinics.selectAll().where { Clinics.id eq id }.toList().singleOrNull()
+        }
+        if (clinic != null) {
+            val businessDays = parseBusinessDays(clinic[Clinics.businessDays])
+            if (businessDays.isNotEmpty() && dayOfWeek !in businessDays) return@dbQuery emptyList()
+        }
+        val clinicOpen = clinic?.let { parseClock(it[Clinics.openTime]) }
+        val clinicClose = clinic?.let { parseClock(it[Clinics.closeTime]) }
 
         // Get schedule for this doctor on this day of week
         val schedules = DoctorSchedules.selectAll()
@@ -117,8 +178,15 @@ class AppointmentService(
         val slots = mutableListOf<SlotDto>()
 
         for (schedule in schedules) {
-            val startTime = java.time.LocalTime.parse(schedule[DoctorSchedules.startTime])
-            val endTime = java.time.LocalTime.parse(schedule[DoctorSchedules.endTime])
+            // 排班时段裁剪到门店营业时间内，避免营业时间外仍可预约
+            val startTime = maxOf(
+                LocalTime.parse(schedule[DoctorSchedules.startTime]),
+                clinicOpen ?: LocalTime.MIN
+            )
+            val endTime = minOf(
+                LocalTime.parse(schedule[DoctorSchedules.endTime]),
+                clinicClose ?: LocalTime.MAX
+            )
             val slotDuration = schedule[DoctorSchedules.slotDuration]
             val maxAppointments = schedule[DoctorSchedules.maxAppointments]
 
@@ -186,25 +254,33 @@ class AppointmentService(
             return AppointmentResult.Error("暂不支持当天预约，请选择未来日期")
         }
 
-        // 爽约黑名单阈值与窗口天数由系统配置下发（默认 3 次 / 30 天）
+        // 爽约黑名单阈值与窗口天数由系统配置下发（默认 3 次 / 30 天，阈值 0 表示关闭该限制）
         val noShowLimit = AppointmentConfig.noShowLimit()
         val noShowWindowDays = AppointmentConfig.noShowWindowDays()
 
-        return dbQuery {
+        val result = try {
+            dbQuery {
+            // 门店闭店/非营业时间不允许下单（管理端代客预约不受此限制）
+            clinicClosedReason(request.clinicId, appointmentDate, startTimeObj)?.let {
+                return@dbQuery AppointmentResult.Error(it)
+            }
             // 爽约黑名单：窗口内累计 no_show 达到阈值的用户禁止在线预约（需求：3 次爽约限预约 30 天）。
             // 按 appointment_date 计数实际爽约单，不依赖可能失修的 no_show_count 冗余列。
-            val noShowSince = LocalDate.now().minusDays(noShowWindowDays)
-            val recentNoShowCount = Appointments.selectAll()
-                .where {
-                    (Appointments.userId eq userId) and
-                    (Appointments.status eq "no_show") and
-                    (Appointments.appointmentDate greaterEq noShowSince)
+            // 阈值配置为 0 表示关闭爽约限制（否则 0 会让所有用户命中 >=0 被误拦）。
+            if (noShowLimit > 0) {
+                val noShowSince = LocalDate.now().minusDays(noShowWindowDays)
+                val recentNoShowCount = Appointments.selectAll()
+                    .where {
+                        (Appointments.userId eq userId) and
+                        (Appointments.status eq "no_show") and
+                        (Appointments.appointmentDate greaterEq noShowSince)
+                    }
+                    .count()
+                if (recentNoShowCount >= noShowLimit) {
+                    return@dbQuery AppointmentResult.Error(
+                        "您近${noShowWindowDays}天内已有${noShowLimit}次爽约记录，暂无法在线预约，请联系门店处理"
+                    )
                 }
-                .count()
-            if (recentNoShowCount >= noShowLimit) {
-                return@dbQuery AppointmentResult.Error(
-                    "您近${noShowWindowDays}天内已有${noShowLimit}次爽约记录，暂无法在线预约，请联系门店处理"
-                )
             }
 
             // Check if slot is still available
@@ -270,10 +346,75 @@ class AppointmentService(
                             it[Appointments.remark] = request.remark
                         } get Appointments.id
 
+                        // 首次预约即确定客户归属门店；已有归属时绝不因后续跨店预约被覆盖。
+                        Users.update({
+                            (Users.id eq userId) and Users.primaryClinicId.isNull()
+                        }) {
+                            it[Users.primaryClinicId] = request.clinicId
+                        }
+
+                        if (!request.couponCode.isNullOrBlank()) {
+                            when (val couponResult = CouponUsageSupport.useForAppointment(
+                                userId = userId,
+                                couponCode = request.couponCode,
+                                appointmentId = appointmentId
+                            )) {
+                                is CouponUsageSupport.UseResult.Success -> Unit
+                                is CouponUsageSupport.UseResult.Error ->
+                                    throw CouponUsageFailure(couponResult.message)
+                            }
+                        }
+
                         AppointmentResult.Success(appointmentId)
                     }
                 }
+                }
             }
+        } catch (e: CouponUsageFailure) {
+            AppointmentResult.Error(e.message ?: "优惠券使用失败")
+        }
+        if (result is AppointmentResult.Success) {
+            notifyAppointmentSubmitted(userId, result.appointmentId, request)
+        }
+        return result
+    }
+
+    /**
+     * 预约提交成功后异步通知用户等待门店确认。
+     *
+     * 通知必须放在创建事务提交之后：查询门店名失败或微信订阅消息异常都不能回滚预约。
+     */
+    private suspend fun notifyAppointmentSubmitted(
+        userId: Long,
+        appointmentId: Long,
+        request: CreateAppointmentRequest
+    ) {
+        try {
+            val clinicName = dbQuery {
+                Clinics.selectAll()
+                    .where { Clinics.id eq request.clinicId }
+                    .toList()
+                    .singleOrNull()
+                    ?.get(Clinics.name)
+                    ?: "就诊门店"
+            }
+            val appointmentTime = "${request.appointmentDate} ${request.startTime}"
+            ScheduledNotifier.notifyAsync(
+                userId = userId,
+                templateKey = "appointment_submitted",
+                title = "预约已提交",
+                content = "您的预约已提交，等待门店确认。就诊时间：$appointmentTime，门店：$clinicName。",
+                subscribeData = mapOf(
+                    "date1" to request.appointmentDate,
+                    "time2" to request.startTime,
+                    "thing3" to clinicName.let { if (it.length <= 20) it else it.take(19) + "…" }
+                ),
+                page = "/pages/appointments/appointments",
+                msgType = "system",
+                relatedId = appointmentId
+            )
+        } catch (e: Exception) {
+            logger.warn("[Appointment]: 预约 {} 提交通知失败，不影响预约结果: {}", appointmentId, e.message)
         }
     }
 
@@ -297,30 +438,69 @@ class AppointmentService(
         }
 
         val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-        rows.map { row ->
-            // Fetch clinic and doctor names separately
-            val clinicName = Clinics.selectAll()
-                .where { Clinics.id eq row[Appointments.clinicId] }
+        val clinicIds = rows.map { it[Appointments.clinicId] }.distinct()
+        val doctorIds = rows.map { it[Appointments.doctorId] }.distinct()
+        val departmentIds = rows.mapNotNull { it[Appointments.departmentId] }.distinct()
+        val clinicsMap = if (clinicIds.isEmpty()) emptyMap() else {
+            Clinics.selectAll().where { Clinics.id inList clinicIds }.toList()
+                .associateBy { it[Clinics.id] }
+        }
+        val doctorsMap = if (doctorIds.isEmpty()) emptyMap() else {
+            Doctors.selectAll().where { Doctors.id inList doctorIds }.toList()
+                .associateBy { it[Doctors.id] }
+        }
+        val departmentsMap = if (departmentIds.isEmpty()) emptyMap() else {
+            Departments.selectAll().where { Departments.id inList departmentIds }.toList()
+                .associateBy { it[Departments.id] }
+        }
+        val appointmentIds = rows.map { it[Appointments.id] }.distinct()
+        val couponsByAppointment = if (appointmentIds.isEmpty()) emptyMap() else {
+            UserCoupons.selectAll()
+                .where {
+                    (UserCoupons.userId eq userId) and
+                        (UserCoupons.appointmentId inList appointmentIds) and
+                        (UserCoupons.status eq "used")
+                }
                 .toList()
-                .singleOrNull()
-                ?.get(Clinics.name) ?: ""
+                .groupBy { it[UserCoupons.appointmentId] }
+        }
+        val couponTemplateIds = couponsByAppointment.values
+            .flatten()
+            .map { it[UserCoupons.templateId] }
+            .distinct()
+        val couponTemplatesMap = if (couponTemplateIds.isEmpty()) emptyMap() else {
+            CouponTemplates.selectAll()
+                .where { CouponTemplates.id inList couponTemplateIds }
+                .toList()
+                .associateBy { it[CouponTemplates.id] }
+        }
 
-            val doctorName = Doctors.selectAll()
-                .where { Doctors.id eq row[Appointments.doctorId] }
-                .toList()
-                .singleOrNull()
-                ?.get(Doctors.name) ?: ""
+        rows.map { row ->
+            val departmentId = row[Appointments.departmentId]
+            val department = departmentId?.let { departmentsMap[it] }
+            val coupon = couponsByAppointment[row[Appointments.id]]?.firstOrNull()
+            val couponTemplate = coupon?.let { couponTemplatesMap[it[UserCoupons.templateId]] }
 
             MyAppointmentDto(
                 id = row[Appointments.id],
-                clinicName = clinicName,
-                doctorName = doctorName,
+                clinicId = row[Appointments.clinicId],
+                clinicName = clinicsMap[row[Appointments.clinicId]]?.get(Clinics.name) ?: "",
+                doctorId = row[Appointments.doctorId],
+                doctorName = doctorsMap[row[Appointments.doctorId]]?.get(Doctors.name) ?: "",
+                departmentId = departmentId,
+                departmentName = department?.get(Departments.name),
                 appointmentDate = row[Appointments.appointmentDate].format(formatter),
                 startTime = row[Appointments.startTime],
                 endTime = row[Appointments.endTime],
                 status = row[Appointments.status],
                 remark = row[Appointments.remark],
-                createdAt = row[Appointments.createdAt].toString()
+                cancelRequestStatus = row[Appointments.cancelRequestStatus],
+                cancelRequestReason = row[Appointments.cancelRequestReason],
+                cancelRequestedAt = row[Appointments.cancelRequestedAt]?.toString(),
+                createdAt = row[Appointments.createdAt].toString(),
+                couponCode = coupon?.get(UserCoupons.couponCode),
+                couponName = couponTemplate?.get(CouponTemplates.name),
+                couponFaceValue = couponTemplate?.get(CouponTemplates.faceValue)?.toDouble()
             )
         }
     }
@@ -348,6 +528,7 @@ class AppointmentService(
                     (Appointments.id eq appointmentId) and
                     (Appointments.userId eq userId)
                 }
+                .forUpdate()
                 .toList()
                 .singleOrNull()
                 ?: return@dbQuery AppointmentResult.Error("预约不存在")
@@ -373,6 +554,12 @@ class AppointmentService(
                 "completed" -> return@dbQuery AppointmentResult.Error("预约已完成，无需签到")
                 "cancelled" -> return@dbQuery AppointmentResult.Error("预约已取消，无法签到")
                 "no_show" -> return@dbQuery AppointmentResult.Error("预约已爽约，无法签到")
+                "pending", "confirmed" -> Unit
+                else -> return@dbQuery AppointmentResult.Error("当前预约状态无法签到")
+            }
+
+            if (appointment[Appointments.cancelRequestStatus] == "pending") {
+                return@dbQuery AppointmentResult.Error("取消申请审核中，暂不能签到，请等待门店处理")
             }
 
             // 仅剩 pending/confirmed 可签到；只允许就诊当天签到，防止提前几天远程签到
@@ -407,57 +594,78 @@ class AppointmentService(
     /**
      * Cancel an appointment.
      */
-    suspend fun cancelAppointment(userId: Long, appointmentId: Long): AppointmentResult {
+    suspend fun cancelAppointment(userId: Long, appointmentId: Long): AppointmentCancelResult {
         val deadlineMinutes = AppointmentConfig.cancelDeadlineMinutes()
         return dbQuery {
-        val appointment = Appointments.selectAll()
-            .where {
-                (Appointments.id eq appointmentId) and
-                (Appointments.userId eq userId)
-            }
-            .toList()
-            .singleOrNull()
+            val appointment = Appointments.selectAll()
+                .where {
+                    (Appointments.id eq appointmentId) and
+                        (Appointments.userId eq userId)
+                }
+                .forUpdate()
+                .toList()
+                .singleOrNull()
+                ?: return@dbQuery AppointmentCancelResult.Error("预约不存在")
 
-        if (appointment == null) {
-            AppointmentResult.Error("预约不存在")
-        } else {
-            val status = appointment[Appointments.status]
-            when (status) {
-                "cancelled" -> {
-                    AppointmentResult.Error("预约已取消")
-                }
-                "completed" -> {
-                    AppointmentResult.Error("预约已完成，无法取消")
-                }
-                else -> {
-                    // 就诊前 N 分钟内不可自助取消，需联系门店（门店侧管理端不受此限）
-                    if (isWithinCancelDeadline(
-                            appointment[Appointments.appointmentDate],
-                            appointment[Appointments.startTime],
-                            deadlineMinutes
-                        )
-                    ) {
-                        AppointmentResult.Error("距就诊不足${deadlineMinutes / 60}小时，无法自助取消，请联系门店")
-                    } else {
-                        // Update status
-                        Appointments.update({ Appointments.id eq appointmentId }) {
-                            it[Appointments.status] = "cancelled"
-                            it[Appointments.cancelledAt] = java.time.LocalDateTime.now()
-                            it[Appointments.cancelledBy] = userId
-                        }
-
-                        AppointmentResult.Success(appointmentId)
-                    }
-                }
+            when (appointment[Appointments.status]) {
+                "cancelled" -> return@dbQuery AppointmentCancelResult.Error("预约已取消")
+                "completed" -> return@dbQuery AppointmentCancelResult.Error("预约已完成，无法取消")
+                "arrived" -> return@dbQuery AppointmentCancelResult.Error("您已到店签到，无法取消")
+                "no_show" -> return@dbQuery AppointmentCancelResult.Error("预约已爽约，无法取消")
+                "pending", "confirmed" -> Unit
+                else -> return@dbQuery AppointmentCancelResult.Error("当前预约状态无法取消")
             }
-        }
+
+            when (appointment[Appointments.cancelRequestStatus]) {
+                "pending" -> return@dbQuery AppointmentCancelResult.Error("取消申请已提交，请等待门店处理")
+                "approved" -> return@dbQuery AppointmentCancelResult.Error("取消申请已通过，请勿重复提交")
+            }
+
+            val now = LocalDateTime.now()
+            if (isWithinCancelDeadline(
+                    appointment[Appointments.appointmentDate],
+                    appointment[Appointments.startTime],
+                    deadlineMinutes
+                )
+            ) {
+                Appointments.update({ Appointments.id eq appointmentId }) {
+                    it[cancelRequestStatus] = "pending"
+                    it[cancelRequestReason] = "用户申请取消，等待门店确认"
+                    it[cancelRequestedAt] = now
+                    it[cancelReviewedBy] = null
+                    it[cancelReviewedAt] = null
+                    it[updatedAt] = now
+                }
+                AppointmentCancelResult.Requested(appointmentId)
+            } else {
+                Appointments.update({ Appointments.id eq appointmentId }) {
+                    it[status] = "cancelled"
+                    it[cancelReason] = "用户取消"
+                    it[cancelledBy] = userId
+                    it[cancelledAt] = now
+                    it[cancelRequestStatus] = null
+                    it[cancelRequestReason] = null
+                    it[cancelRequestedAt] = null
+                    it[cancelReviewedBy] = null
+                    it[cancelReviewedAt] = null
+                    it[updatedAt] = now
+                }
+                CouponUsageSupport.releaseForAppointment(userId, appointmentId)
+                AppointmentCancelResult.Cancelled(appointmentId)
+            }
         }
     }
 
     /**
      * Reschedule an appointment to a new date/time.
      */
-    suspend fun rescheduleAppointment(userId: Long, appointmentId: Long, newDate: String, newStartTime: String): AppointmentResult {
+    suspend fun rescheduleAppointment(
+        userId: Long,
+        appointmentId: Long,
+        newDate: String,
+        newStartTime: String,
+        couponCode: String? = null
+    ): AppointmentResult {
         // Parse new date
         val appointmentDate = try {
             LocalDate.parse(newDate)
@@ -478,45 +686,51 @@ class AppointmentService(
 
         val deadlineMinutes = AppointmentConfig.cancelDeadlineMinutes()
 
-        // Pre-check appointment exists and status
-        val preCheck = dbQuery {
-            Appointments.selectAll()
+        return try {
+            dbQuery {
+            // 改约读取必须与审批/取消共用行锁：否则读取后门店刚好同意取消，
+            // 后续更新可能把已取消预约重新写回 pending。
+            val appointment = Appointments.selectAll()
                 .where {
                     (Appointments.id eq appointmentId) and
-                    (Appointments.userId eq userId)
+                        (Appointments.userId eq userId)
                 }
+                .forUpdate()
                 .toList()
                 .singleOrNull()
-        }
+                ?: return@dbQuery AppointmentResult.Error("预约不存在")
 
-        if (preCheck == null) {
-            return AppointmentResult.Error("预约不存在")
-        }
+            when (appointment[Appointments.status]) {
+                "cancelled" -> return@dbQuery AppointmentResult.Error("预约已取消")
+                "completed" -> return@dbQuery AppointmentResult.Error("预约已完成")
+                "arrived" -> return@dbQuery AppointmentResult.Error("您已到店签到，无法改约")
+                "no_show" -> return@dbQuery AppointmentResult.Error("预约已爽约，无法改约")
+                "pending", "confirmed" -> Unit
+                else -> return@dbQuery AppointmentResult.Error("当前预约状态无法改约")
+            }
+            if (appointment[Appointments.cancelRequestStatus] == "pending") {
+                return@dbQuery AppointmentResult.Error("取消申请审核中，暂不能改约")
+            }
+            if (isWithinCancelDeadline(
+                    appointment[Appointments.appointmentDate],
+                    appointment[Appointments.startTime],
+                    deadlineMinutes
+                )
+            ) {
+                return@dbQuery AppointmentResult.Error("距就诊不足${deadlineMinutes / 60}小时，无法自助改约，请联系门店")
+            }
+            if (appointment[Appointments.appointmentDate] == appointmentDate &&
+                appointment[Appointments.startTime] == newStartTime
+            ) {
+                return@dbQuery AppointmentResult.Error("新预约时间与原预约相同")
+            }
 
-        val status = preCheck[Appointments.status]
-        if (status == "cancelled") {
-            return AppointmentResult.Error("预约已取消")
-        }
-        if (status == "completed") {
-            return AppointmentResult.Error("预约已完成")
-        }
+            // 改约同样受门店营业日/营业时间约束
+            clinicClosedReason(appointment[Appointments.clinicId], appointmentDate, startTimeObj)?.let {
+                return@dbQuery AppointmentResult.Error(it)
+            }
 
-        // 就诊前 N 分钟内不可自助改约（与取消同规则）；已到店签到的单也不允许改约
-        if (status == "arrived") {
-            return AppointmentResult.Error("您已到店签到，无法改约")
-        }
-        if (isWithinCancelDeadline(
-                preCheck[Appointments.appointmentDate],
-                preCheck[Appointments.startTime],
-                deadlineMinutes
-            )
-        ) {
-            return AppointmentResult.Error("距就诊不足${deadlineMinutes / 60}小时，无法自助改约，请联系门店")
-        }
-
-        val doctorId = preCheck[Appointments.doctorId]
-
-        return dbQuery {
+            val doctorId = appointment[Appointments.doctorId]
             val formatter = DateTimeFormatter.ofPattern("HH:mm")
 
             // Check if new slot is available (exclude current appointment)
@@ -527,6 +741,17 @@ class AppointmentService(
                     (Appointments.startTime eq newStartTime) and
                     (Appointments.status neq "cancelled") and
                     (Appointments.id neq appointmentId)
+                }
+                .count()
+
+            // 用户本人不能在同一时段同时保留两张有效预约（可改到其他医生）
+            val userBookedCount = Appointments.selectAll()
+                .where {
+                    (Appointments.userId eq userId) and
+                        (Appointments.appointmentDate eq appointmentDate) and
+                        (Appointments.startTime eq newStartTime) and
+                        (Appointments.status neq "cancelled") and
+                        (Appointments.id neq appointmentId)
                 }
                 .count()
 
@@ -551,6 +776,8 @@ class AppointmentService(
                 val maxAppointments = schedule[DoctorSchedules.maxAppointments]
                 if (bookedCount >= maxAppointments) {
                     AppointmentResult.Error("该时段已满")
+                } else if (userBookedCount > 0) {
+                    AppointmentResult.Error("您在该时段已有预约")
                 } else {
                     // Calculate new end time（startTimeObj 已在进事务前解析并校验过格式）
                     val slotDuration = schedule[DoctorSchedules.slotDuration]
@@ -562,13 +789,45 @@ class AppointmentService(
                         it[Appointments.appointmentDate] = appointmentDate
                         it[Appointments.startTime] = newStartTime
                         it[Appointments.endTime] = newEndTime
+                        it[Appointments.status] = "pending"
+                        it[Appointments.remindEveningSent] = 0
+                        it[Appointments.remindMorningSent] = 0
+                        it[Appointments.cancelReason] = null
+                        it[Appointments.cancelledBy] = null
+                        it[Appointments.cancelledAt] = null
+                        it[Appointments.cancelRequestStatus] = null
+                        it[Appointments.cancelRequestReason] = null
+                        it[Appointments.cancelRequestedAt] = null
+                        it[Appointments.cancelReviewedBy] = null
+                        it[Appointments.cancelReviewedAt] = null
+                        it[Appointments.updatedAt] = LocalDateTime.now()
+                    }
+
+                    if (couponCode != null) {
+                        CouponUsageSupport.releaseForAppointment(userId, appointmentId)
+                        if (couponCode.isNotBlank()) {
+                            when (val couponResult = CouponUsageSupport.useForAppointment(
+                                userId = userId,
+                                couponCode = couponCode,
+                                appointmentId = appointmentId
+                            )) {
+                                is CouponUsageSupport.UseResult.Success -> Unit
+                                is CouponUsageSupport.UseResult.Error ->
+                                    throw CouponUsageFailure(couponResult.message)
+                            }
+                        }
                     }
 
                     AppointmentResult.Success(appointmentId)
                 }
+                }
             }
+        } catch (e: CouponUsageFailure) {
+            AppointmentResult.Error(e.message ?: "优惠券使用失败")
         }
     }
+
+    private class CouponUsageFailure(message: String) : RuntimeException(message)
 }
 
 // DTOs
@@ -581,6 +840,9 @@ data class ClinicDto(
     val phone: String,
     val openTime: String,
     val closeTime: String,
+    val businessDays: String,
+    val latitude: Double?,
+    val longitude: Double?,
     val description: String?,
     val coverImage: String?
 )
@@ -617,7 +879,8 @@ data class CreateAppointmentRequest(
     val departmentId: Long?,
     val appointmentDate: String,  // yyyy-MM-dd format
     val startTime: String,
-    val remark: String?
+    val remark: String?,
+    val couponCode: String? = null
 )
 
 sealed class AppointmentResult {
@@ -627,15 +890,34 @@ sealed class AppointmentResult {
     data class Error(val message: String) : AppointmentResult()
 }
 
+sealed class AppointmentCancelResult {
+    @Serializable
+    data class Cancelled(val appointmentId: Long) : AppointmentCancelResult()
+    @Serializable
+    data class Requested(val appointmentId: Long) : AppointmentCancelResult()
+    @Serializable
+    data class Error(val message: String) : AppointmentCancelResult()
+}
+
 @Serializable
 data class MyAppointmentDto(
     val id: Long,
+    val clinicId: Long,
     val clinicName: String,
+    val doctorId: Long,
     val doctorName: String,
+    val departmentId: Long?,
+    val departmentName: String?,
     val appointmentDate: String,
     val startTime: String,
     val endTime: String,
     val status: String,
     val remark: String?,
-    val createdAt: String
+    val cancelRequestStatus: String?,
+    val cancelRequestReason: String?,
+    val cancelRequestedAt: String?,
+    val createdAt: String,
+    val couponCode: String? = null,
+    val couponName: String? = null,
+    val couponFaceValue: Double? = null
 )

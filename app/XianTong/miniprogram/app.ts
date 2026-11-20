@@ -27,6 +27,13 @@ interface AppGlobalData {
    */
   pendingClinicId: number | null
   /**
+   * 待改约的预约 id。
+   *
+   * 预约记录页不是 tabBar 页面，而预约页是 tabBar 页面；wx.switchTab 不支持 query，
+   * 因此从记录页点「改约」时通过全局态中转，预约页 onShow 读取后立即清空。
+   */
+  pendingRescheduleId: number | null
+  /**
    * 待绑定的推荐码。
    *
    * 来源有两个：
@@ -42,6 +49,8 @@ interface AppGlobalData {
    * 由优惠券页在 onShow 消费：调推广领券接口后清空（含 storage）。
    */
   pendingPromoTemplateId: number | null
+  /** 优惠券页「去使用」后，经 tabBar 中转给预约页的券码 */
+  pendingCouponCode: string | null
 }
 
 /**
@@ -92,8 +101,10 @@ App<IAppOption>({
     clinics: [],
     wechatPhone: '',
     pendingClinicId: null,
+    pendingRescheduleId: null,
     pendingReferralCode: null,
-    pendingPromoTemplateId: null
+    pendingPromoTemplateId: null,
+    pendingCouponCode: null
   } as AppGlobalData,
 
   onLaunch(options) {
@@ -161,6 +172,11 @@ App<IAppOption>({
     this.globalData.pendingClinicId = clinicId
   },
 
+  // 设置待改约预约（预约记录页 → 预约页）
+  setPendingRescheduleId(appointmentId: number | null) {
+    this.globalData.pendingRescheduleId = appointmentId
+  },
+
   /**
    * 暂存/清除待绑定推荐码。
    * 传 null 或空串时同时清掉 globalData 与 storage（登录后消费完成时调用）。
@@ -188,6 +204,12 @@ App<IAppOption>({
     } else {
       wx.removeStorageSync(PROMO_STORAGE_KEY)
     }
+  },
+
+  // 设置待使用的优惠券码（优惠券页 → 预约页）
+  setPendingCouponCode(couponCode: string | null) {
+    const value = couponCode && couponCode.trim() ? couponCode.trim() : null
+    this.globalData.pendingCouponCode = value
   },
 
   // 登出

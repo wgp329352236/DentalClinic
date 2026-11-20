@@ -27,6 +27,13 @@
         <view class="coupon-date">有效期至 {{item.validTo}}</view>
       </view>
       <view class="coupon-status badge {{item.statusCls}}">{{item.statusText}}</view>
+      <button
+        wx:if="{{item.status === 'unused'}}"
+        class="coupon-use-btn"
+        size="mini"
+        data-code="{{item.couponCode}}"
+        bindtap="useCoupon"
+      >去使用</button>
     </view>
   </view>
 

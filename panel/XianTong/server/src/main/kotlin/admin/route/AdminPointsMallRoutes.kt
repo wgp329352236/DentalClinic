@@ -1,6 +1,7 @@
 package com.dentalclinic.admin.route
 
 import com.dentalclinic.admin.auth.AdminPrincipalKey
+import com.dentalclinic.admin.auth.clinicScope
 import com.dentalclinic.admin.auth.requirePermission
 import com.dentalclinic.admin.dto.response.ApiResponse
 import com.dentalclinic.admin.service.AdminPointsMallService
@@ -21,7 +22,7 @@ fun Route.adminPointsMallRoutes(adminPointsMallService: AdminPointsMallService) 
                 val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 1
                 val pageSize = call.request.queryParameters["pageSize"]?.toIntOrNull() ?: 20
 
-                val response = adminPointsMallService.listPendingOrders(page, pageSize)
+                val response = adminPointsMallService.listPendingOrders(page, pageSize, call.clinicScope())
                 call.respond(ApiResponse.ok(response))
             }
         }
@@ -33,7 +34,7 @@ fun Route.adminPointsMallRoutes(adminPointsMallService: AdminPointsMallService) 
                 val principal = call.attributes[AdminPrincipalKey]
                 val operatorName = principal.username
 
-                val result = adminPointsMallService.redeemOrder(request.redeemCode, operatorName)
+                val result = adminPointsMallService.redeemOrder(request.redeemCode, operatorName, call.clinicScope())
                 call.respond(ApiResponse.ok(result, "核销成功"))
             }
         }

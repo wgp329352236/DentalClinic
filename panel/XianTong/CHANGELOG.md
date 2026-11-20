@@ -15,6 +15,50 @@
 - **原因**：微信开发者工具默认定位为 `(0,0)`，与北京门店坐标算出的距离达上万公里；C 端营业日逐项罗列不易读；预约页取时段未带门店 ID，闭店日仍显示可约，与后端校验口径不一致。
 - **影响范围**：仅 C 端展示与时段查询参数、管理端门诊列表文案，接口字段不变（`clinicId` 为可选）。回归：门店 2（周一至周五营业）周六时段返回空、不带 `clinicId` 仍返回时段；小程序 `npm run typecheck` 通过。
 
+### 手机号加密存储与安全回归
+
+- **改了什么**：
+  1. 新增 `common/security/PhoneCipherService.kt`：手机号归一化、AES-256-GCM 加密、HMAC-SHA256 盲索引、解密与兼容读取；密文损坏时不回退明文。
+  2. `common/config/SchemaMigration.kt` 为 `user` 表补 `phone_hash` 列与唯一索引（存在重复时跳过建索引并告警），启动时把历史明文手机号迁移为密文。
+  3. `common/config/StartupPreflight.kt` 增加生产环境密钥预检：`security.phoneEncryptionKey` / `security.phoneBlindIndexKey` 缺失时阻断启动。
+  4. `UserAuthService`、`UserProfileService` 的手机号读写统一走加密服务；`application.yaml` 与 `.env.local.example` 增加两项空配置及生成说明。
+  5. 新增 `SecurityRegressionTest.kt`，覆盖手机号归一化/加解密/盲索引、损坏密文、门店范围守卫与支付回调单号识别。
+- **原因**：`user.phone` 此前明文落库，不符合个人信息加密要求；同时缺少上线前密钥校验，配置遗漏会在生产静默使用开发默认值。
+- **影响范围**：登录、资料读取、资料修改的手机号链路；历史数据在启动时一次性迁移，接口返回仍为明文手机号。`:server:test` 全部通过。
+
+### 四组功能专项测试缺陷修复
+
+- **改了什么**：
+  1. `UserCouponRoutes.kt` 新增 `CouponClaimDto/CouponRedeemDto/PromoClaimDto`，领券、核销、推广领券成功分支改用具名 DTO。
+  2. 新增 `common/CouponUsageSupport.kt`，抽离预约下单/改约的优惠券占用、释放与校验逻辑，`CouponService`、`AppointmentService` 复用。
+  3. `AppointmentService.kt` 新增 `parseBusinessDays/parseClock/clinicClosedReason`，`getAvailableSlots` 增加 `clinicId`，闭店日返回空时段；创建预约、改约校验门店营业日与营业时间。
+  4. 爽约限制改为仅在阈值 `> 0` 时生效，`0` 表示关闭；`DataSeedService` 配置说明补充该口径。
+  5. `UserReferralRoutes.kt` 推荐记录接口直接返回 `ReferralRecordsResponse`（含 `list/total/monthlyCount/summary/tierRewards`）。
+  6. 按商圈补齐 6 家门店经纬度（数据修正，无代码变更）；`BusinessResponse.kt` 门店 DTO 补充 `businessDays/openTime/closeTime/latitude/longitude`。
+- **原因**：专项测试发现领券/核销与推荐记录因 `mapOf` 无法序列化返回 400；营业日只展示未参与校验，闭店日仍可下单；爽约阈值 0 会拦截全部用户；门店坐标为空导致 C 端距离功能无数据。
+- **影响范围**：C 端领券、核销、推荐页、预约与改约；管理端代客预约保持放行。回归：核销幂等、过期券提示、推荐页数据、闭店日时段为空与下单拒绝、阈值 0 可下单均验证通过；测试数据已清理，预约 14、审计 67 基线不变。
+
+### 管理端看板、客户画像与门诊表单
+
+- **改了什么**：
+  1. `views/appointment/board.vue` 本周看板按天展开预约，补充状态统计与排班展示；`appointment/index.vue`、`detail-modal.vue` 同步取消申请状态、改约入口与明细字段。
+  2. `views/customer/detail-modal.vue` 与 `api/customer.ts` 补全客户画像（消费、积分、券、推荐、归属门店等）。
+  3. `views/clinic/form-modal.vue` 经纬度成对校验与营业日选择；门诊列表营业日文案改为区间展示。
+  4. `AdminDashboardService`、`ConsumptionAdminService`、`AdminReferralService`、`MembershipAdminService` 等补齐看板与画像所需字段。
+- **原因**：四组专项测试中看板信息不足、客户画像字段缺失、门诊表单缺少坐标校验。
+- **影响范围**：仅管理端页面展示与查询字段，接口路径不变。
+
+### C 端预约、钱包、资料与推荐页联调
+
+- **改了什么**：
+  1. `pages/appointments` 展示取消申请状态（待审批/已通过/已驳回）与改约入口；`pages/appointment` 补充改约摘要、优惠券选择与门店营业状态。
+  2. `pages/wallet` 接入尾款支付（余额不足时微信补差）、充值档位与消费记录；`UserConsumptionPaymentService`、`UserRechargeRoutes` 配合调整支付状态流转。
+  3. `pages/profile-edit` 支持首次设置归属门店、手机号只读回显；`PointsService`、`UserProfileService` 完善资料积分发放与等级字段。
+  4. `pages/referral` 展示邀请记录、档位奖励与月度统计；`pages/coupon` 区分可用/已使用/已过期。
+  5. `app.json` 增加 `scope.userLocation` 权限说明与 `requiredPrivateInfos: ["getLocation"]`。
+- **原因**：C 端多处页面只有静态结构，缺少与后端新字段的联调；定位能力需要显式声明才能在小程序中使用。
+- **影响范围**：小程序上述页面；后端仅补字段与状态，未改动既有接口路径。小程序 `npm run typecheck` 通过。
+
 ## 2026-11-19
 
 ### 修复多门店隔离与尾款支付的三处缺陷

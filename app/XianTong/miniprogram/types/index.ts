@@ -101,7 +101,13 @@ export interface Clinic {
   address: string
   phone: string
   businessHours: string
+  businessDays: string
+  latitude?: number | null
+  longitude?: number | null
   distance?: number
+  distanceText?: string
+  businessDayText?: string
+  openStatusText?: string
   image: string
   /** 后端门店表字段名，首页/预约页会兼容读取 */
   coverImage?: string
@@ -139,9 +145,18 @@ export interface Appointment {
   doctorName: string
   departmentId: number
   departmentName: string
-  appointmentTime: string // YYYY-MM-DD HH:mm
+  appointmentDate: string // YYYY-MM-DD
+  startTime: string // HH:mm
+  endTime?: string | null
   status: 'pending' | 'confirmed' | 'arrived' | 'completed' | 'cancelled' | 'no_show'
+  remark?: string | null
+  cancelRequestStatus?: 'pending' | 'approved' | 'rejected' | null
+  cancelRequestReason?: string | null
+  cancelRequestedAt?: string | null
   createdAt: string
+  couponCode?: string | null
+  couponName?: string | null
+  couponFaceValue?: number | null
 }
 
 // 钱包相关类型
@@ -192,12 +207,19 @@ export interface ReferralInfo {
   referralLink: string
   totalReferrals: number
   monthlyReferrals: number
+  pointsGranted: number
+  balanceGranted: number
+  pendingRewards: number
+  qrcodeImage?: string
+  qrcodeTip?: string
   rewards: ReferralReward[]
 }
 
 export interface ReferralReward {
   id: number
-  type: 'register' | 'first_consumption' | 'tier'
+  type: 'registration' | 'first_consumption' | 'tier' | 'ongoing'
+  rewardType?: 'points' | 'balance' | 'points_balance' | null
+  rewardValue?: number | null
   points?: number
   balance?: number
   couponAmount?: number
@@ -209,6 +231,7 @@ export interface ReferralReward {
 // 优惠券相关类型
 export interface Coupon {
   id: number
+  couponCode: string
   name: string
   amount: number
   minAmount: number
@@ -216,6 +239,7 @@ export interface Coupon {
   validFrom: string
   validTo: string
   status: 'unused' | 'used' | 'expired'
+  usedAt?: string | null
 }
 
 // 积分商城商品

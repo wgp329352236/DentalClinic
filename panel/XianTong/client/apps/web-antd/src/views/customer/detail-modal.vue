@@ -5,7 +5,7 @@ import { useVbenModal } from '@vben/common-ui';
 
 import { Button, message, Select, Tag } from 'ant-design-vue';
 
-import { getCustomerDetail } from '#/api/customer';
+import { getCustomerDetail, updateCustomerRemark } from '#/api/customer';
 import {
   getCustomerTags,
   setUserTags,
@@ -18,6 +18,25 @@ const genderMap: Record<number, string> = { 0: '未知', 1: '男', 2: '女' };
 const user = ref<any>({});
 const wallet = ref<any>({});
 const memberLevel = ref<any>({});
+const summary = ref<any>({});
+const appointments = ref<any[]>([]);
+const consumptions = ref<any[]>([]);
+const pointsRecords = ref<any[]>([]);
+const remark = ref('');
+const savingRemark = ref(false);
+
+const appointmentStatusMap: Record<string, { color: string; text: string }> = {
+  pending: { color: 'orange', text: '待确认' },
+  confirmed: { color: 'blue', text: '已确认' },
+  arrived: { color: 'cyan', text: '已到店' },
+  completed: { color: 'green', text: '已完成' },
+  cancelled: { color: 'default', text: '已取消' },
+  no_show: { color: 'red', text: '爽约' },
+};
+
+function money(value: unknown) {
+  return Number(value || 0).toFixed(2);
+}
 
 // 推荐链路：把树拍平成带缩进层级的列表，扁平展示避免引入递归组件
 const referralRows = ref<
@@ -56,6 +75,11 @@ const [Modal, modalApi] = useVbenModal({
       user.value = res.user || {};
       wallet.value = res.wallet || {};
       memberLevel.value = res.memberLevel || {};
+      summary.value = res.summary || {};
+      appointments.value = res.appointments || [];
+      consumptions.value = res.consumptions || [];
+      pointsRecords.value = res.pointsRecords || [];
+      remark.value = res.user?.remark || '';
       allTags.value = tags || [];
       tagOptions.value = (tags || []).map((tag: CustomerTag) => ({
         label: tag.tagName,
@@ -74,6 +98,17 @@ async function onSaveTags() {
     message.success('标签已保存');
   } finally {
     savingTags.value = false;
+  }
+}
+
+async function onSaveRemark() {
+  savingRemark.value = true;
+  try {
+    await updateCustomerRemark(user.value.id, remark.value.trim());
+    user.value.remark = remark.value.trim();
+    message.success('客户备注已保存');
+  } finally {
+    savingRemark.value = false;
   }
 }
 </script>
@@ -123,6 +158,75 @@ async function onSaveTags() {
       </div>
     </div>
 
+    <!-- 客户完整画像摘要 -->
+    <div class="mt-4 border-t pt-3">
+      <div class="mb-2 text-sm font-medium">客户画像</div>
+      <div class="grid grid-cols-4 gap-2 text-sm">
+        <div class="rounded bg-gray-50 p-2">
+          <div class="text-xs opacity-60">累计消费</div>
+          <div class="font-medium">￥{{ money(summary.totalConsumption) }}</div>
+        </div>
+        <div class="rounded bg-gray-50 p-2">
+          <div class="text-xs opacity-60">累计实付</div>
+          <div class="font-medium">￥{{ money(summary.totalPaidAmount) }}</div>
+        </div>
+        <div class="rounded bg-gray-50 p-2">
+          <div class="text-xs opacity-60">消费笔数</div>
+          <div class="font-medium">{{ summary.consumptionCount ?? 0 }}</div>
+        </div>
+        <div class="rounded bg-gray-50 p-2">
+          <div class="text-xs opacity-60">积分余额</div>
+          <div class="font-medium">{{ summary.pointsBalance ?? 0 }}</div>
+        </div>
+        <div class="rounded bg-gray-50 p-2">
+          <div class="text-xs opacity-60">预约总数</div>
+          <div class="font-medium">{{ summary.appointmentTotal ?? 0 }}</div>
+        </div>
+        <div class="rounded bg-gray-50 p-2">
+          <div class="text-xs opacity-60">已完成</div>
+          <div class="font-medium">
+            {{ summary.appointmentCompleted ?? 0 }}
+          </div>
+        </div>
+        <div class="rounded bg-gray-50 p-2">
+          <div class="text-xs opacity-60">已取消</div>
+          <div class="font-medium">
+            {{ summary.appointmentCancelled ?? 0 }}
+          </div>
+        </div>
+        <div class="rounded bg-gray-50 p-2">
+          <div class="text-xs opacity-60">最近到店</div>
+          <div class="truncate font-medium" :title="summary.recentVisitAt">
+            {{ summary.recentVisitAt || '-' }}
+          </div>
+        </div>
+      </div>
+      <div class="mt-2 text-xs opacity-60">
+        最近消费：{{ summary.recentConsumptionAt || '暂无消费记录' }}
+      </div>
+    </div>
+
+    <!-- 客户备注 -->
+    <div class="mt-4 border-t pt-3">
+      <div class="mb-2 flex items-center justify-between">
+        <span class="text-sm font-medium">客户备注</span>
+        <Button
+          type="link"
+          size="small"
+          :loading="savingRemark"
+          @click="onSaveRemark"
+        >
+          保存备注
+        </Button>
+      </div>
+      <textarea
+        v-model="remark"
+        class="min-h-20 w-full rounded border border-gray-300 p-2 text-sm outline-none focus:border-blue-400"
+        maxlength="2000"
+        placeholder="记录就诊偏好、沟通注意事项等"
+      ></textarea>
+    </div>
+
     <!-- 客户标签：展示 + 直接编辑（全量覆盖保存） -->
     <div class="mt-4 border-t pt-3">
       <div class="mb-2 flex items-center justify-between">
@@ -152,6 +256,94 @@ async function onSaveTags() {
         >
           {{ allTags.find((tag) => tag.id === tagId)?.tagName || tagId }}
         </Tag>
+      </div>
+    </div>
+
+    <!-- 最近预约 -->
+    <div class="mt-4 border-t pt-3">
+      <div class="mb-2 text-sm font-medium">最近预约（最多 20 条）</div>
+      <div
+        v-for="item in appointments"
+        :key="item.id"
+        class="border-b border-gray-100 py-2 text-sm last:border-0"
+      >
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="font-medium">{{ item.appointmentDate }} {{ item.startTime }}</span>
+          <Tag :color="appointmentStatusMap[item.status]?.color || 'default'">
+            {{ appointmentStatusMap[item.status]?.text || item.status }}
+          </Tag>
+          <span class="opacity-70">{{ item.clinicName }}</span>
+          <span class="opacity-70">{{ item.doctorName }}</span>
+          <span v-if="item.departmentName" class="opacity-60">
+            {{ item.departmentName }}
+          </span>
+        </div>
+        <div v-if="item.remark" class="mt-1 text-xs opacity-60">
+          备注：{{ item.remark }}
+        </div>
+      </div>
+      <div v-if="!appointments.length" class="py-2 text-sm text-gray-400">
+        暂无预约记录
+      </div>
+    </div>
+
+    <!-- 最近消费 -->
+    <div class="mt-4 border-t pt-3">
+      <div class="mb-2 text-sm font-medium">最近消费（最多 20 条）</div>
+      <div
+        v-for="item in consumptions"
+        :key="item.id"
+        class="border-b border-gray-100 py-2 text-sm last:border-0"
+      >
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="font-medium">￥{{ money(item.payAmount) }}</span>
+          <span class="opacity-60">折后 ￥{{ money(item.amount) }}</span>
+          <span v-if="Number(item.couponDeduct)" class="opacity-60">
+            优惠券 -￥{{ money(item.couponDeduct) }}
+          </span>
+          <Tag v-if="item.status !== 'success'" color="red">
+            {{ item.status === 'refunded' ? '已退款' : item.status }}
+          </Tag>
+          <Tag v-else-if="item.paymentStatus !== 'success'" color="orange">
+            待支付
+          </Tag>
+          <span class="ml-auto text-xs opacity-50">{{ item.createdAt }}</span>
+        </div>
+        <div class="mt-1 text-xs opacity-60">
+          {{ item.clinicName }}
+          <span v-if="item.pointsEarned"> · 获得 {{ item.pointsEarned }} 积分</span>
+          <span v-if="item.description"> · {{ item.description }}</span>
+        </div>
+      </div>
+      <div v-if="!consumptions.length" class="py-2 text-sm text-gray-400">
+        暂无消费记录
+      </div>
+    </div>
+
+    <!-- 积分流水 -->
+    <div class="mt-4 border-t pt-3">
+      <div class="mb-2 text-sm font-medium">积分流水（最多 20 条）</div>
+      <div
+        v-for="item in pointsRecords"
+        :key="item.id"
+        class="flex items-start gap-3 border-b border-gray-100 py-2 text-sm last:border-0"
+      >
+        <span
+          class="w-16 text-right font-medium"
+          :class="item.changeAmount >= 0 ? 'text-green-600' : 'text-red-500'"
+        >
+          {{ item.changeAmount >= 0 ? '+' : '' }}{{ item.changeAmount }}
+        </span>
+        <div class="min-w-0 flex-1">
+          <div>{{ item.description || item.sourceType }}</div>
+          <div class="text-xs opacity-50">
+            余额 {{ item.balanceAfter }} · 有效期至 {{ item.expiresAt }}
+          </div>
+        </div>
+        <span class="text-xs opacity-50">{{ item.createdAt }}</span>
+      </div>
+      <div v-if="!pointsRecords.length" class="py-2 text-sm text-gray-400">
+        暂无积分流水
       </div>
     </div>
 

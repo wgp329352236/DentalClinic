@@ -35,6 +35,15 @@ referral:
 checkin:
   signingSecret: ""
 
+# ─── 手机号加密存储（P0-4 合规） ───
+# PHONE_ENCRYPTION_KEY：AES-256-GCM 密钥材料；PHONE_BLIND_INDEX_KEY：HMAC-SHA256 盲索引密钥。
+# 两者必须独立生成且在生产环境显式配置。缺失时仅非生产环境使用内置开发默认值并打 WARN，
+# APP_ENV=prod 时启动预检会阻断。轮换加密密钥前需完成历史密文重加密，否则旧手机号无法解密。
+# 生成方式：openssl rand -hex 32
+security:
+  phoneEncryptionKey: ""
+  phoneBlindIndexKey: ""
+
 # ─── JWT 签名密钥（管理端 + 用户端） ───
 # 生产环境务必通过环境变量注入（优先级高于此处）：ADMIN_JWT_SECRET / USER_JWT_SECRET
 # 生成方式：openssl rand -hex 32（两端必须使用各自独立的随机密钥）

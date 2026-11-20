@@ -71,7 +71,7 @@ class AdminDashboardService : BaseService() {
                 .where {
                     (ConsumptionRecords.createdAt greaterEq todayStart) and
                             (ConsumptionRecords.createdAt less todayEnd) and
-                            (ConsumptionRecords.status eq "success")
+                            (ConsumptionRecords.status eq "success") and (ConsumptionRecords.paymentStatus eq "success")
                 }
                 .scopeClinic(scope, ConsumptionRecords.clinicId)
                 .toList()
@@ -126,7 +126,7 @@ class AdminDashboardService : BaseService() {
             val revenueByClinic = ConsumptionRecords.selectAll()
                 .where {
                     (ConsumptionRecords.createdAt greaterEq monthStartTime) and
-                            (ConsumptionRecords.status eq "success")
+                            (ConsumptionRecords.status eq "success") and (ConsumptionRecords.paymentStatus eq "success")
                 }
                 .scopeClinic(scope, ConsumptionRecords.clinicId)
                 .toList()
@@ -197,7 +197,7 @@ class AdminDashboardService : BaseService() {
                 .where {
                     (ConsumptionRecords.createdAt greaterEq rangeStart) and
                             (ConsumptionRecords.createdAt less rangeEnd) and
-                            (ConsumptionRecords.status eq "success")
+                            (ConsumptionRecords.status eq "success") and (ConsumptionRecords.paymentStatus eq "success")
                 }
                 .scopeClinic(scope, ConsumptionRecords.clinicId)
                 .toList()
@@ -406,7 +406,7 @@ class AdminDashboardService : BaseService() {
                     .where {
                         (ConsumptionRecords.userId inList refereeIds) and
                                 (ConsumptionRecords.createdAt greaterEq monthStart) and
-                                (ConsumptionRecords.status eq "success")
+                                (ConsumptionRecords.status eq "success") and (ConsumptionRecords.paymentStatus eq "success")
                     }
                     .scopeClinic(scope, ConsumptionRecords.clinicId)
                     .toList()

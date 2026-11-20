@@ -89,10 +89,17 @@ suspend fun requireUserInScope(userId: Long, scope: ClinicScope): ResultRow {
 
 /**
  * 校验预约属于当前门店范围并返回预约行。必须在数据库事务内调用。
+ *
+ * @param lockForUpdate 为 true 时对预约行加锁，供审批、取消、改约等状态变更串行执行。
  */
-suspend fun requireAppointmentInScope(appointmentId: Long, scope: ClinicScope): ResultRow {
-    val appointment = Appointments.selectAll()
+suspend fun requireAppointmentInScope(
+    appointmentId: Long,
+    scope: ClinicScope,
+    lockForUpdate: Boolean = false
+): ResultRow {
+    val query = Appointments.selectAll()
         .where { Appointments.id eq appointmentId }
+    val appointment = (if (lockForUpdate) query.forUpdate() else query)
         .toList()
         .singleOrNull()
         ?: throw NotFoundException("预约不存在")

@@ -2,6 +2,8 @@ package com.dentalclinic.common.scheduler
 
 import com.dentalclinic.admin.entity.AdminNotificationHistories
 import com.dentalclinic.admin.entity.AdminNotificationRules
+import com.dentalclinic.admin.entity.Appointments
+import com.dentalclinic.admin.entity.ConsumptionRecords
 import com.dentalclinic.common.BaseService
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
@@ -10,10 +12,18 @@ import io.ktor.client.request.*
 import io.ktor.http.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.toList
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.greaterEq
+import org.jetbrains.exposed.v1.core.less
+import org.jetbrains.exposed.v1.core.neq
 import org.jetbrains.exposed.v1.r2dbc.insert
 import org.jetbrains.exposed.v1.r2dbc.selectAll
 import org.slf4j.LoggerFactory
+import java.math.BigDecimal
+import java.time.LocalDate
 import java.time.LocalDateTime
 
 /**
@@ -97,11 +107,28 @@ object NotificationRuleEngine : BaseService() {
         val threshold = rule[AdminNotificationRules.threshold]
         val webhookUrl = rule[AdminNotificationRules.webhookUrl]
 
-        // 评估条件（示例：基于预约数量、消费金额等）
-        val conditionMet = evaluateCondition(conditionType, threshold)
+        val evaluation = evaluateCondition(conditionType, threshold) ?: run {
+            logger.warn("[NotificationRuleEngine] 忽略未知条件类型: $conditionType（规则 $ruleName）")
+            return
+        }
 
-        if (conditionMet) {
-            val message = buildMessage(ruleName, conditionType, threshold)
+        if (evaluation.met) {
+            // 同一规则当天成功通知后不再重复推送；失败记录允许下一轮重试。
+            val dayStart = evaluation.statisticDate.atStartOfDay()
+            val alreadySent = AdminNotificationHistories.selectAll()
+                .where {
+                    (AdminNotificationHistories.ruleId eq ruleId) and
+                        (AdminNotificationHistories.deliveryStatus eq "success") and
+                        (AdminNotificationHistories.triggeredAt greaterEq dayStart) and
+                        (AdminNotificationHistories.triggeredAt less dayStart.plusDays(1))
+                }
+                .count() > 0
+            if (alreadySent) {
+                logger.debug("[NotificationRuleEngine] 规则 $ruleName 今日已成功通知，跳过")
+                return
+            }
+
+            val message = buildMessage(ruleName, conditionType, threshold, evaluation)
 
             // 发送 webhook
             val success = sendWebhook(webhookUrl, message)
@@ -119,36 +146,69 @@ object NotificationRuleEngine : BaseService() {
     }
 
     /**
-     * 评估条件（示例实现）。
-     *
-     * 实际生产环境应根据 conditionType 查询业务数据并评估。
+     * 评估条件。未知条件返回 null，由调用方仅告警、不触发。
      */
-    private suspend fun evaluateCondition(conditionType: String, threshold: Int): Boolean {
-        // 示例：基于预约数量
-        // 实际应根据 conditionType 查询不同业务表
+    private suspend fun evaluateCondition(conditionType: String, threshold: Int): ConditionEvaluation? {
+        val today = LocalDate.now()
         return when (conditionType) {
             "appointment_count" -> {
-                // 示例：今日预约数超过阈值
-                // val todayCount = Appointments.selectAll().where { ... }.count()
-                // todayCount > threshold
-                false // 占位实现
+                val count = Appointments.selectAll()
+                    .where {
+                        (Appointments.appointmentDate eq today) and
+                            (Appointments.status neq "cancelled") and
+                            (Appointments.status neq "no_show")
+                    }
+                    .count()
+                ConditionEvaluation(
+                    met = count > threshold,
+                    actualValue = BigDecimal(count),
+                    unit = "单",
+                    statisticDate = today
+                )
             }
             "consumption_amount" -> {
-                // 示例：今日消费金额超过阈值
-                false // 占位实现
+                val dayStart = today.atStartOfDay()
+                val total = ConsumptionRecords.selectAll()
+                    .where {
+                        (ConsumptionRecords.status eq "success") and
+                            (ConsumptionRecords.paymentStatus eq "success") and
+                            (ConsumptionRecords.createdAt greaterEq dayStart) and
+                            (ConsumptionRecords.createdAt less dayStart.plusDays(1))
+                    }
+                    .toList()
+                    .fold(BigDecimal.ZERO) { sum, row ->
+                        sum.add(row[ConsumptionRecords.amount])
+                    }
+                ConditionEvaluation(
+                    met = total > BigDecimal(threshold),
+                    actualValue = total,
+                    unit = "元",
+                    statisticDate = today
+                )
             }
-            else -> {
-                logger.warn("[NotificationRuleEngine] 未知的条件类型: $conditionType")
-                false
-            }
+            else -> null
         }
     }
 
     /**
      * 构建通知消息。
      */
-    private fun buildMessage(ruleName: String, conditionType: String, threshold: Int): String {
-        return "【通知规则触发】规则名称: $ruleName, 条件类型: $conditionType, 阈值: $threshold, 触发时间: ${LocalDateTime.now()}"
+    private fun buildMessage(
+        ruleName: String,
+        conditionType: String,
+        threshold: Int,
+        evaluation: ConditionEvaluation
+    ): String {
+        val conditionLabel = when (conditionType) {
+            "appointment_count" -> "今日预约数"
+            "consumption_amount" -> "今日消费金额"
+            else -> conditionType
+        }
+        val actual = evaluation.actualValue.stripTrailingZeros().toPlainString()
+        val thresholdText = BigDecimal(threshold).stripTrailingZeros().toPlainString()
+        return "【通知规则触发】规则名称: $ruleName, " +
+            "$conditionLabel: $actual${evaluation.unit}, 阈值: $thresholdText${evaluation.unit}, " +
+            "统计日期: ${evaluation.statisticDate}, 触发时间: ${LocalDateTime.now()}"
     }
 
     /**
@@ -156,9 +216,13 @@ object NotificationRuleEngine : BaseService() {
      */
     private suspend fun sendWebhook(url: String, message: String): Boolean {
         return try {
+            val body = buildJsonObject {
+                put("message", message)
+                put("timestamp", LocalDateTime.now().toString())
+            }
             val response = httpClient.post(url) {
                 contentType(ContentType.Application.Json)
-                setBody("""{"message": "$message", "timestamp": "${LocalDateTime.now()}"}""")
+                setBody(body.toString())
             }
             response.status.isSuccess()
         } catch (e: Exception) {
@@ -186,4 +250,11 @@ object NotificationRuleEngine : BaseService() {
             it[AdminNotificationHistories.triggeredAt] = LocalDateTime.now()
         }
     }
+
+    private data class ConditionEvaluation(
+        val met: Boolean,
+        val actualValue: BigDecimal,
+        val unit: String,
+        val statisticDate: LocalDate
+    )
 }

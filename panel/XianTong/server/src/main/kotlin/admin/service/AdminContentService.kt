@@ -7,6 +7,7 @@ import com.dentalclinic.admin.entity.MpNotices
 import com.dentalclinic.admin.util.NotFoundException
 import com.dentalclinic.admin.util.ValidationException
 import com.dentalclinic.common.BaseService
+import com.dentalclinic.common.scheduler.ScheduledNotifier
 import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.SortOrder
@@ -65,35 +66,86 @@ class AdminContentService : BaseService() {
         }
     }
 
-    suspend fun createActivity(request: SaveActivityRequest, operator: String): Long = dbQuery {
+    suspend fun createActivity(request: SaveActivityRequest, operator: String): Long {
         validateActivity(request)
-        MpActivities.insert {
-            it[MpActivities.title] = request.title.trim()
-            it[MpActivities.coverImage] = request.coverImage?.trim()?.takeIf(String::isNotEmpty)
-            it[MpActivities.summary] = request.summary?.trim()?.takeIf(String::isNotEmpty)
-            it[MpActivities.content] = request.content?.trim()?.takeIf(String::isNotEmpty)
-            it[MpActivities.sortOrder] = request.sortOrder
-            it[MpActivities.status] = request.status
-            it[MpActivities.startAt] = parseDate(request.startAt, endOfDay = false)
-            it[MpActivities.endAt] = parseDate(request.endAt, endOfDay = true)
-            it[MpActivities.createdBy] = operator
-        } get MpActivities.id
+        val activityId = dbQuery {
+            MpActivities.insert {
+                it[MpActivities.title] = request.title.trim()
+                it[MpActivities.coverImage] = request.coverImage?.trim()?.takeIf(String::isNotEmpty)
+                it[MpActivities.summary] = request.summary?.trim()?.takeIf(String::isNotEmpty)
+                it[MpActivities.content] = request.content?.trim()?.takeIf(String::isNotEmpty)
+                it[MpActivities.sortOrder] = request.sortOrder
+                it[MpActivities.status] = request.status
+                it[MpActivities.startAt] = parseDate(request.startAt, endOfDay = false)
+                it[MpActivities.endAt] = parseDate(request.endAt, endOfDay = true)
+                it[MpActivities.createdBy] = operator
+            } get MpActivities.id
+        }
+        if (request.status == 1) {
+            dispatchActivityNotice(activityId, request.title.trim(), request.summary, request.content)
+        }
+        return activityId
     }
 
-    suspend fun updateActivity(id: Long, request: SaveActivityRequest) = dbQuery {
+    suspend fun updateActivity(id: Long, request: SaveActivityRequest) {
         validateActivity(request)
-        val updated = MpActivities.update({ MpActivities.id eq id }) {
-            it[MpActivities.title] = request.title.trim()
-            it[MpActivities.coverImage] = request.coverImage?.trim()?.takeIf(String::isNotEmpty)
-            it[MpActivities.summary] = request.summary?.trim()?.takeIf(String::isNotEmpty)
-            it[MpActivities.content] = request.content?.trim()?.takeIf(String::isNotEmpty)
-            it[MpActivities.sortOrder] = request.sortOrder
-            it[MpActivities.status] = request.status
-            it[MpActivities.startAt] = parseDate(request.startAt, endOfDay = false)
-            it[MpActivities.endAt] = parseDate(request.endAt, endOfDay = true)
-            it[updatedAt] = LocalDateTime.now()
+        val shouldNotify = dbQuery {
+            val current = MpActivities.selectAll()
+                .where { MpActivities.id eq id }
+                .toList()
+                .singleOrNull()
+                ?: throw NotFoundException("活动不存在")
+            MpActivities.update({ MpActivities.id eq id }) {
+                it[MpActivities.title] = request.title.trim()
+                it[MpActivities.coverImage] = request.coverImage?.trim()?.takeIf(String::isNotEmpty)
+                it[MpActivities.summary] = request.summary?.trim()?.takeIf(String::isNotEmpty)
+                it[MpActivities.content] = request.content?.trim()?.takeIf(String::isNotEmpty)
+                it[MpActivities.sortOrder] = request.sortOrder
+                it[MpActivities.status] = request.status
+                it[MpActivities.startAt] = parseDate(request.startAt, endOfDay = false)
+                it[MpActivities.endAt] = parseDate(request.endAt, endOfDay = true)
+                it[updatedAt] = LocalDateTime.now()
+            }
+            // 只在「停用/草稿 → 上线」时群发，编辑已上线活动不重复打扰用户。
+            current[MpActivities.status] != 1 && request.status == 1
         }
-        if (updated == 0) throw NotFoundException("活动不存在")
+        if (shouldNotify) {
+            dispatchActivityNotice(id, request.title.trim(), request.summary, request.content)
+        }
+    }
+
+    /**
+     * 活动上线通知：站内信必达，微信订阅消息尽力发送。
+     *
+     * 放到后台执行，通知模板缺失、用户未授权或微信网络异常都不能影响活动保存事务。
+     */
+    private fun dispatchActivityNotice(
+        activityId: Long,
+        title: String,
+        summary: String?,
+        content: String?
+    ) {
+        val detail = content?.trim()?.takeIf(String::isNotEmpty)
+            ?: summary?.trim()?.takeIf(String::isNotEmpty)
+            ?: "点击查看活动详情"
+        val notificationContent = buildString {
+            append("活动名称：").append(title)
+            append("\n活动内容：").append(detail)
+        }
+        val wechatSummary = (summary?.trim()?.takeIf(String::isNotEmpty) ?: detail)
+            .let { if (it.length <= 20) it else it.take(19) + "…" }
+        ScheduledNotifier.notifyActiveUsersAsync(
+            templateKey = "activity_notice",
+            title = "活动通知：$title",
+            content = notificationContent,
+            subscribeData = mapOf(
+                "thing1" to title.let { if (it.length <= 20) it else it.take(19) + "…" },
+                "thing2" to wechatSummary
+            ),
+            page = "/pages/activity/activity?id=$activityId",
+            msgType = "activity",
+            relatedId = activityId
+        )
     }
 
     /** 已绑定轮播图的活动不能删：轮播图会指向空活动，C 端点击必然 404。 */

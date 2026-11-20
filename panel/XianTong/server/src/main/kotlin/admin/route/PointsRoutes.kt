@@ -1,6 +1,7 @@
 package com.dentalclinic.admin.route
 
 import com.dentalclinic.admin.auth.authenticated
+import com.dentalclinic.admin.auth.clinicScope
 import com.dentalclinic.admin.auth.requirePermission
 import com.dentalclinic.admin.dto.response.ApiResponse
 import com.dentalclinic.admin.service.AdminPointsService
@@ -78,7 +79,8 @@ fun Route.pointsRoutes(pointsService: AdminPointsService) {
                         startDate = startDate,
                         endDate = endDate,
                         page = page,
-                        pageSize = pageSize
+                        pageSize = pageSize,
+                        scope = call.clinicScope()
                     )
 
                     call.ok(response)

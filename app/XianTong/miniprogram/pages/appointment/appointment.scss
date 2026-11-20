@@ -61,7 +61,26 @@
 .list-item-extra {
   font-size: 24rpx;
   color: #1890ff;
-  margin-top: 4rpx;
+}
+
+.clinic-option-meta {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  margin-top: 8rpx;
+}
+
+.clinic-open-status {
+  padding: 4rpx 10rpx;
+  border-radius: 999rpx;
+  background: #f6ffed;
+  color: #389e0d;
+  font-size: 20rpx;
+}
+
+.clinic-open-status.is-closed {
+  background: #f5f5f5;
+  color: #999;
 }
 
 .clinic-option {
@@ -142,6 +161,32 @@
   margin-bottom: 20rpx;
 }
 
+.reschedule-summary {
+  margin-bottom: 24rpx;
+  border-radius: 12rpx;
+  padding: 20rpx;
+  background: #e6f7ff;
+  color: #0958d9;
+}
+
+.reschedule-title {
+  margin-bottom: 10rpx;
+  font-size: 28rpx;
+  font-weight: bold;
+}
+
+.reschedule-line {
+  margin-top: 6rpx;
+  font-size: 25rpx;
+  line-height: 1.5;
+}
+
+.reschedule-hint {
+  margin-top: 12rpx;
+  color: #597ef7;
+  font-size: 23rpx;
+}
+
 .time-slot-date {
   font-size: 28rpx;
   font-weight: bold;
@@ -201,6 +246,118 @@
 .confirm-label {
   color: #999;
   margin-right: 10rpx;
+}
+
+.confirm-original {
+  color: #999;
+  font-size: 25rpx;
+}
+
+.coupon-section {
+  margin-top: 20rpx;
+  border-top: 1rpx solid #f0f0f0;
+  padding-top: 20rpx;
+}
+
+.coupon-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16rpx;
+}
+
+.coupon-title {
+  font-size: 28rpx;
+  font-weight: bold;
+  color: #333;
+}
+
+.coupon-loading,
+.coupon-empty {
+  color: #999;
+  font-size: 24rpx;
+}
+
+.coupon-empty {
+  padding: 24rpx 0;
+  text-align: center;
+}
+
+.coupon-option {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 20rpx;
+  margin-bottom: 12rpx;
+  border: 2rpx solid #e8e8e8;
+  border-radius: 12rpx;
+  background: #fff;
+}
+
+.coupon-option.selected {
+  border-color: #1890ff;
+  background: #f0f8ff;
+}
+
+.coupon-none {
+  justify-content: space-between;
+}
+
+.coupon-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.coupon-name {
+  font-size: 27rpx;
+  color: #333;
+  font-weight: 500;
+}
+
+.coupon-tag {
+  margin-left: 8rpx;
+  padding: 2rpx 8rpx;
+  border-radius: 8rpx;
+  background: #fff1f0;
+  color: #cf1322;
+  font-size: 20rpx;
+  font-weight: normal;
+}
+
+.coupon-desc {
+  margin-top: 8rpx;
+  color: #999;
+  font-size: 22rpx;
+  line-height: 1.4;
+}
+
+.coupon-value {
+  flex-shrink: 0;
+  color: #cf1322;
+  font-size: 36rpx;
+  font-weight: bold;
+}
+
+.coupon-currency {
+  font-size: 22rpx;
+  margin-right: 2rpx;
+}
+
+.coupon-radio {
+  width: 34rpx;
+  height: 34rpx;
+  flex-shrink: 0;
+  border: 2rpx solid #d9d9d9;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 22rpx;
+  line-height: 34rpx;
+  text-align: center;
+}
+
+.coupon-option.selected .coupon-radio {
+  border-color: #1890ff;
+  background: #1890ff;
 }
 
 .back-btn {

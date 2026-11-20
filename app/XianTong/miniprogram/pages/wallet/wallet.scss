@@ -43,6 +43,46 @@
   opacity: 0.7;
 }
 
+.pending-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 28rpx 32rpx;
+  margin-bottom: 20rpx;
+  color: #ad4e00;
+  background: linear-gradient(135deg, #fff7e6, #ffe7ba);
+  border: 1rpx solid #ffd591;
+  border-radius: 16rpx;
+}
+
+.pending-label {
+  margin-bottom: 8rpx;
+  font-size: 24rpx;
+  color: #d46b08;
+}
+
+.pending-amount {
+  font-size: 42rpx;
+  font-weight: bold;
+  line-height: 1.2;
+}
+
+.pending-symbol {
+  margin-right: 4rpx;
+  font-size: 26rpx;
+}
+
+.pending-action {
+  font-size: 26rpx;
+  font-weight: bold;
+}
+
+.pending-arrow {
+  margin-left: 8rpx;
+  font-size: 36rpx;
+  vertical-align: middle;
+}
+
 .tabs {
   display: flex;
   background: #fff;
@@ -66,6 +106,22 @@
   font-weight: bold;
 }
 
+.tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32rpx;
+  height: 32rpx;
+  padding: 0 8rpx;
+  margin-left: 6rpx;
+  font-size: 20rpx;
+  line-height: 32rpx;
+  color: #fff;
+  background: #ff4d4f;
+  border-radius: 16rpx;
+  vertical-align: 2rpx;
+}
+
 .tab-divider {
   width: 1rpx;
   margin: 20rpx 0;
@@ -74,4 +130,54 @@
 
 .record-item {
   /* 无额外样式 */
+}
+
+.unpaid-item {
+  border-left: 6rpx solid #fa8c16;
+}
+
+.unpaid-price {
+  font-size: 36rpx;
+  font-weight: bold;
+  color: #d46b08;
+}
+
+.unpaid-description {
+  padding: 16rpx 0;
+  font-size: 28rpx;
+  color: #333;
+  border-top: 1rpx solid #f0f0f0;
+}
+
+.unpaid-footer {
+  align-items: center;
+  margin-top: 8rpx;
+}
+
+.pay-tail-btn {
+  min-width: 152rpx;
+  height: 64rpx;
+  padding: 0 28rpx;
+  margin: 0;
+  font-size: 26rpx;
+  line-height: 64rpx;
+  color: #fff;
+  background: #fa8c16;
+  border-radius: 32rpx;
+}
+
+.pay-tail-btn::after {
+  border: none;
+}
+
+.pay-tail-btn[disabled] {
+  color: #fff;
+  background: #ffc069;
+  opacity: 0.8;
+}
+
+.record-clinic {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
 }

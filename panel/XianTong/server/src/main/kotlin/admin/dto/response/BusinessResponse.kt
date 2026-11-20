@@ -8,6 +8,8 @@ import kotlinx.serialization.Serializable
 data class ClinicResponse(
     val id: Long, val name: String, val address: String, val phone: String,
     val openTime: String, val closeTime: String,
+    val businessDays: String,
+    val latitude: Double?, val longitude: Double?,
     val description: String?, val coverImage: String?,
     val status: Int, val sortOrder: Int
 )
@@ -36,6 +38,7 @@ data class ScheduleResponse(
 data class ClinicRequest(
     val name: String, val address: String, val phone: String,
     val openTime: String, val closeTime: String,
+    val businessDays: String = "1,2,3,4,5,6,7",
     val description: String? = null, val coverImage: String? = null,
     val latitude: Double? = null, val longitude: Double? = null,
     val status: Int = 1, val sortOrder: Int = 0
@@ -79,11 +82,23 @@ data class AppointmentAdminResponse(
     val endTime: String?,
     val status: String,
     val remark: String?,
+    val cancelReason: String? = null,
+    val cancelledBy: Long? = null,
+    val cancelledAt: String? = null,
+    val cancelRequestStatus: String? = null,
+    val cancelRequestReason: String? = null,
+    val cancelRequestedAt: String? = null,
+    val cancelReviewedBy: Long? = null,
+    val cancelReviewedAt: String? = null,
     val createdAt: String
 )
 
 @Serializable
-data class AppointmentStatusRequest(val status: String, val remark: String? = null)
+data class AppointmentStatusRequest(
+    val status: String,
+    val remark: String? = null,
+    val cancelReason: String? = null
+)
 
 /**
  * 管理端代客预约请求（前台/客服替客户下单）。
@@ -127,6 +142,15 @@ data class AppointmentDetailDto(
     val diagnosis: String?,
     val treatmentPlan: String?,
     val remark: String?,
+    val cancelReason: String? = null,
+    val cancelledBy: Long? = null,
+    val cancelledAt: String? = null,
+    val cancelRequestStatus: String? = null,
+    val cancelRequestReason: String? = null,
+    val cancelRequestedAt: String? = null,
+    val cancelReviewedBy: Long? = null,
+    val cancelReviewedByName: String? = null,
+    val cancelReviewedAt: String? = null,
     val arrivedAt: String?,
     val completedAt: String?,
     val createdAt: String
@@ -184,7 +208,64 @@ data class CustomerListResponse(
 data class CustomerDetailResponse(
     val user: CustomerInfoDto,
     val wallet: CustomerWalletDto,
-    val memberLevel: CustomerLevelDto
+    val memberLevel: CustomerLevelDto,
+    val summary: CustomerProfileSummaryDto,
+    val appointments: List<CustomerProfileAppointmentDto> = emptyList(),
+    val consumptions: List<CustomerProfileConsumptionDto> = emptyList(),
+    val pointsRecords: List<CustomerProfilePointsRecordDto> = emptyList()
+)
+
+/** 客户完整画像摘要：口径与客户列表、营收看板保持一致。 */
+@Serializable
+data class CustomerProfileSummaryDto(
+    val totalConsumption: Double,
+    val totalPaidAmount: Double,
+    val consumptionCount: Int,
+    val appointmentTotal: Int,
+    val appointmentCompleted: Int,
+    val appointmentCancelled: Int,
+    val pointsBalance: Int,
+    val recentVisitAt: String? = null,
+    val recentConsumptionAt: String? = null
+)
+
+@Serializable
+data class CustomerProfileAppointmentDto(
+    val id: Long,
+    val appointmentDate: String,
+    val startTime: String,
+    val endTime: String?,
+    val clinicName: String,
+    val doctorName: String,
+    val departmentName: String?,
+    val status: String,
+    val remark: String?,
+    val createdAt: String
+)
+
+@Serializable
+data class CustomerProfileConsumptionDto(
+    val id: Long,
+    val clinicName: String,
+    val amount: Double,
+    val payAmount: Double,
+    val couponDeduct: Double,
+    val pointsEarned: Int,
+    val status: String,
+    val paymentStatus: String,
+    val description: String?,
+    val createdAt: String
+)
+
+@Serializable
+data class CustomerProfilePointsRecordDto(
+    val id: Long,
+    val changeAmount: Int,
+    val balanceAfter: Int,
+    val sourceType: String,
+    val description: String?,
+    val expiresAt: String,
+    val createdAt: String
 )
 
 @Serializable

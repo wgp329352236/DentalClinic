@@ -14,12 +14,34 @@
         <view class="stat-value">{{referralInfo.monthlyReferrals}}</view>
         <view class="stat-label">本月推荐</view>
       </view>
+      <view class="stat-item">
+        <view class="stat-value">{{referralInfo.pointsGranted}}</view>
+        <view class="stat-label">累计积分</view>
+      </view>
+      <view class="stat-item">
+        <view class="stat-value">¥{{referralInfo.balanceGranted}}</view>
+        <view class="stat-label">累计余额</view>
+      </view>
     </view>
 
     <!-- 推荐码 -->
     <view class="referral-code-section" wx:if="{{referralInfo}}">
       <view class="text-muted font-small mb-10">我的推荐码</view>
       <view class="referral-code">{{referralInfo.referralCode}}</view>
+      <view class="pending-rewards">
+        待发放奖励 <text class="pending-count">{{referralInfo.pendingRewards}}</text> 笔
+      </view>
+    </view>
+
+    <view class="qrcode-section" wx:if="{{referralInfo}}">
+      <image
+        wx:if="{{referralInfo.qrcodeImage}}"
+        class="referral-qrcode"
+        src="{{referralInfo.qrcodeImage}}"
+        mode="widthFix"
+        show-menu-by-longpress
+      ></image>
+      <view wx:else class="text-muted font-small">{{referralInfo.qrcodeTip}}</view>
     </view>
 
     <!-- 操作按钮 -->
@@ -37,21 +59,35 @@
         <view class="rule-icon">🎁</view>
         <view class="rule-content">
           <view class="rule-title font-bold">注册奖励</view>
-          <view>你获得20积分，好友获得50积分+新人券包</view>
+          <view>好友注册后建立推荐关系；好友完成首次消费后，你获得20积分，好友获得50积分+新人券包。</view>
         </view>
       </view>
       <view class="rule-item">
         <view class="rule-icon">💰</view>
         <view class="rule-content">
           <view class="rule-title font-bold">首消奖励</view>
-          <view>你获得100积分+50元余额，好友获得100元新人诊疗券</view>
+          <view>好友首次消费后，你额外获得100积分+50元赠送余额，好友获得100元新人诊疗券。</view>
+        </view>
+      </view>
+      <view class="rule-item">
+        <view class="rule-icon">📈</view>
+        <view class="rule-content">
+          <view class="rule-title font-bold">持续奖励</view>
+          <view>好友后续单笔实付每满1000元，你获得10积分；不足1000元的部分不累计。</view>
         </view>
       </view>
       <view class="rule-item">
         <view class="rule-icon">🏆</view>
         <view class="rule-content">
           <view class="rule-title font-bold">阶梯奖励</view>
-          <view>累计推荐满5人，额外获得200积分</view>
+          <view>累计推荐满5人，额外获得200积分，同一推荐人仅发放一次。</view>
+        </view>
+      </view>
+      <view class="rule-item">
+        <view class="rule-icon">📅</view>
+        <view class="rule-content">
+          <view class="rule-title font-bold">月度上限</view>
+          <view>每月通过推荐最多获得500积分，超出部分不再发放。</view>
         </view>
       </view>
     </view>
@@ -64,14 +100,15 @@
       <view class="record-item" wx:for="{{referralInfo.rewards}}" wx:key="id">
         <view class="flex-between mb-10">
           <view class="font-bold">
-            {{item.type === 'register' ? '注册奖励' : (item.type === 'first_consumption' ? '首消奖励' : '阶梯奖励')}}
+            {{item.type === 'registration' ? '注册奖励' : (item.type === 'first_consumption' ? '首消奖励' : (item.type === 'ongoing' ? '持续奖励' : '阶梯奖励'))}}
           </view>
           <view class="badge {{item.status === 'issued' ? 'badge-success' : 'badge-warning'}}">
             {{item.status === 'issued' ? '已发放' : '待发放'}}
           </view>
         </view>
-        <view class="text-muted font-small" wx:if="{{item.points}}">+{{item.points}}积分</view>
-        <view class="text-muted font-small" wx:if="{{item.balance}}">+¥{{item.balance}}余额</view>
+        <view class="text-muted font-small" wx:if="{{item.rewardType === 'points'}}">+{{item.rewardValue}}积分</view>
+        <view class="text-muted font-small" wx:if="{{item.rewardType === 'balance'}}">+¥{{item.rewardValue}}余额</view>
+        <view class="text-muted font-small" wx:if="{{item.rewardType === 'points_balance'}}">奖励流水已到账（积分+余额）</view>
         <view class="text-muted font-small" wx:if="{{item.referredPerson}}">推荐人：{{item.referredPerson}}</view>
         <view class="text-muted font-small">{{item.createdAt}}</view>
       </view>

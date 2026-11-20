@@ -66,6 +66,47 @@
   font-size: 28rpx;
 }
 
+.clinic-picker {
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.clinic-value {
+  flex: 1;
+  overflow: hidden;
+  color: #333;
+  font-size: 28rpx;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clinic-value.placeholder {
+  color: #999;
+}
+
+.picker-arrow {
+  margin-left: 10rpx;
+  color: #999;
+  font-size: 36rpx;
+}
+
+.clinic-value.locked {
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.clinic-name {
+  color: #333;
+  font-size: 28rpx;
+}
+
+.clinic-lock-tip {
+  margin-top: 4rpx;
+  color: #999;
+  font-size: 21rpx;
+}
+
 .tip {
   padding: 0 8rpx 24rpx;
 }

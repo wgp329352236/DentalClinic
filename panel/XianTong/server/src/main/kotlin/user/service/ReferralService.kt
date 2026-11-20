@@ -5,6 +5,7 @@ import com.dentalclinic.common.BaseService
 import com.dentalclinic.common.ReferralRewardOutcome
 import com.dentalclinic.common.ReferralRewardService
 import kotlinx.coroutines.flow.toList
+import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
@@ -93,19 +94,47 @@ class ReferralService(
                 .associateBy { it[Users.id] }
         } else emptyMap()
 
+        // 一次性读取该用户作为推荐人的全部奖励流水，再按好友分组，避免逐条推荐记录查询。
+        // relationId=0 的持续奖励按 refereeId 回退匹配；relationId=0 且 refereeId=0 为阶梯奖励。
+        val rewardRows = ReferralRewards.selectAll()
+            .where { ReferralRewards.referrerId eq userId }
+            .orderBy(ReferralRewards.createdAt, SortOrder.ASC)
+            .toList()
+        val relationIds = paginatedRows.map { it[ReferralRelations.id] }.toSet()
+        val pageRefereeIds = paginatedRows.map { it[ReferralRelations.refereeId] }.toSet()
+        val relationRewards = rewardRows
+            .filter { it[ReferralRewards.relationId] in relationIds }
+            .groupBy { it[ReferralRewards.relationId] }
+        val ongoingRewards = rewardRows
+            .filter {
+                it[ReferralRewards.relationId] == 0L &&
+                    it[ReferralRewards.refereeId] != 0L &&
+                    it[ReferralRewards.refereeId] in pageRefereeIds
+            }
+            .groupBy { it[ReferralRewards.refereeId] }
+
         val records = paginatedRows.map { row ->
             val referee = usersMap[row[ReferralRelations.refereeId]]
             val rawName = referee?.get(Users.nickname) ?: "用户${row[ReferralRelations.refereeId]}"
             // Desensitize name: show first char + ** for privacy
             val desensitizedName = if (rawName.length > 1) "${rawName[0]}**" else rawName
-            
-            // Calculate rewards based on status
-            val rewardPoints = when (row[ReferralRelations.rewardStatus]) {
-                "full" -> 120 // 20 (registration) + 100 (first consumption)
-                "partial" -> 20 // Only registration reward
-                else -> 0
+
+            val relationId = row[ReferralRelations.id]
+            val refereeId = row[ReferralRelations.refereeId]
+            val rawRewards = (relationRewards[relationId].orEmpty() + ongoingRewards[refereeId].orEmpty())
+            val rewards = toUserRewardDtos(rawRewards).ifEmpty {
+                // 历史数据没有奖励流水时只兼容展示关系状态，不再按状态推算固定积分/余额。
+                listOf(
+                    ReferralRewardDto(
+                        id = -relationId,
+                        type = if (row[ReferralRelations.rewardStatus] == "full") "first_consumption" else "registration",
+                        status = if (row[ReferralRelations.rewardStatus] == "full" || row[ReferralRelations.rewardStatus] == "partial") "issued" else "pending",
+                        rewardType = null,
+                        rewardValue = null,
+                        createdAt = row[ReferralRelations.registeredAt].format(dateTimeFormatter)
+                    )
+                )
             }
-            val rewardBonus = if (row[ReferralRelations.rewardStatus] == "full") 50.0 else 0.0
             
             ReferralRecordDto(
                 id = row[ReferralRelations.id],
@@ -113,19 +142,65 @@ class ReferralService(
                 registeredAt = row[ReferralRelations.registeredAt].format(dateTimeFormatter),
                 firstConsumedAt = row[ReferralRelations.firstConsumedAt]?.format(dateTimeFormatter),
                 rewardStatus = row[ReferralRelations.rewardStatus],
-                rewardPoints = rewardPoints,
-                rewardBonus = rewardBonus
+                rewards = rewards,
+                rewardPoints = rewards.filter { it.rewardType == "points" }
+                    .sumOf { it.rewardValue?.toInt() ?: 0 },
+                rewardBonus = rewards.filter { it.rewardType == "balance" }
+                    .sumOf { it.rewardValue ?: 0.0 }
             )
         }
+
+        val effectiveUserRewards = dedupeRegistrationRewards(rewardRows)
+        val tierRewards = effectiveUserRewards
+            .filter { it[ReferralRewards.stage] == "tier" }
+            .map { toUserRewardDto(it) }
 
         ReferralRecordsResponse(
             list = records,
             total = total,
             monthlyCount = monthlyCount,
             page = page,
-            pageSize = pageSize
+            pageSize = pageSize,
+            summary = ReferralRewardSummaryDto(
+                pointsGranted = effectiveUserRewards
+                    .filter { it[ReferralRewards.rewardType] == "points" }
+                    .sumOf { it[ReferralRewards.rewardValue].toInt() },
+                balanceGranted = effectiveUserRewards
+                    .filter { it[ReferralRewards.rewardType] == "balance" }
+                    .sumOf { it[ReferralRewards.rewardValue].toDouble() },
+                // 注册奖励延迟到好友首消后发放，因此“待发”应按尚未完成首消的推荐关系统计，
+                // 不能只看 reward 流水：新关系在首消前本就不会提前生成奖励行。
+                pendingCount = filtered.count { it[ReferralRelations.rewardStatus] != "full" }
+            ),
+            tierRewards = tierRewards
         )
     }
+
+    /** 注册阶段会同时写入推荐人与被推荐人两条流水，页面只展示推荐人自己的那条。 */
+    private fun dedupeRegistrationRewards(rows: List<org.jetbrains.exposed.v1.core.ResultRow>) =
+        rows.groupBy { it[ReferralRewards.relationId] to it[ReferralRewards.stage] }
+            .flatMap { (_, grouped) ->
+                if (grouped.first()[ReferralRewards.stage] == "registration") grouped.take(1)
+                else grouped
+            }
+
+    /** 将真实奖励流水转为页面 DTO；同一好友的持续奖励保留每一笔。 */
+    private fun toUserRewardDtos(rows: List<org.jetbrains.exposed.v1.core.ResultRow>): List<ReferralRewardDto> {
+        if (rows.isEmpty()) return emptyList()
+        val registration = rows.filter { it[ReferralRewards.stage] == "registration" }.take(1)
+        return (registration + rows.filter { it[ReferralRewards.stage] != "registration" })
+            .distinctBy { it[ReferralRewards.id] }
+            .map { toUserRewardDto(it) }
+    }
+
+    private fun toUserRewardDto(row: org.jetbrains.exposed.v1.core.ResultRow) = ReferralRewardDto(
+        id = row[ReferralRewards.id],
+        type = row[ReferralRewards.stage],
+        status = if (row[ReferralRewards.status] == "granted") "issued" else "pending",
+        rewardType = row[ReferralRewards.rewardType],
+        rewardValue = row[ReferralRewards.rewardValue].toDouble(),
+        createdAt = (row[ReferralRewards.grantedAt] ?: row[ReferralRewards.createdAt]).format(dateTimeFormatter)
+    )
 
     /**
      * 新用户凭推荐码绑定推荐关系。
@@ -267,22 +342,52 @@ class ReferralService(
 
 // DTOs
 
+@Serializable
 data class ReferralRecordDto(
     val id: Long,
     val refereeName: String,
     val registeredAt: String,
     val firstConsumedAt: String?,
     val rewardStatus: String,
+    val rewards: List<ReferralRewardDto> = emptyList(),
     val rewardPoints: Int = 0,
     val rewardBonus: Double = 0.0
 )
 
+@Serializable
+data class ReferralRewardDto(
+    val id: Long,
+    val type: String,
+    val status: String,
+    val rewardType: String?,
+    val rewardValue: Double?,
+    val createdAt: String
+)
+
+@Serializable
+data class ReferralRewardSummaryDto(
+    val pointsGranted: Int,
+    val balanceGranted: Double,
+    val pendingCount: Int
+)
+
+@Serializable
 data class ReferralRecordsResponse(
     val list: List<ReferralRecordDto>,
     val total: Long,
     val monthlyCount: Int,
     val page: Int,
-    val pageSize: Int
+    val pageSize: Int,
+    val summary: ReferralRewardSummaryDto,
+    val tierRewards: List<ReferralRewardDto>
+)
+
+@Serializable
+data class ReferralQrCodeResponse(
+    val available: Boolean,
+    val payload: String,
+    val qrcodeImageBase64: String? = null,
+    val message: String? = null
 )
 
 sealed class ReferralResult {

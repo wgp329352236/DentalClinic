@@ -1,5 +1,6 @@
 package com.dentalclinic.admin.service
 
+import com.dentalclinic.admin.auth.ClinicScope
 import com.dentalclinic.admin.entity.CouponTemplates
 import com.dentalclinic.admin.entity.UserCoupons
 import com.dentalclinic.common.BaseService
@@ -86,7 +87,18 @@ class AdminCouponService : BaseService() {
     /**
      * Grant coupons to specific users manually.
      */
-    suspend fun grantCouponsToUsers(templateId: Long, userIds: List<Long>, operator: String): GrantResult = dbQuery {
+    suspend fun grantCouponsToUsers(
+        templateId: Long,
+        userIds: List<Long>,
+        operator: String,
+        scope: ClinicScope
+    ): GrantResult = dbQuery {
+        // 同一请求里的重复客户只发一张券，库存计算和发放循环必须共用这份去重结果。
+        val distinctUserIds = userIds.distinct()
+
+        // 先验证全部目标客户，任一越权/不存在就整体拒绝，避免出现部分发放。
+        distinctUserIds.forEach { userId -> requireUserInScope(userId, scope) }
+
         // Check if template exists
         val template = CouponTemplates.selectAll()
             .where { CouponTemplates.id eq templateId }
@@ -99,14 +111,14 @@ class AdminCouponService : BaseService() {
         val totalQuantity = template[CouponTemplates.totalQuantity]
         val remaining = totalQuantity - issuedQuantity
 
-        if (remaining < userIds.size) {
-            return@dbQuery GrantResult.Error("库存不足，剩余：$remaining，需要：${userIds.size}")
+        if (remaining < distinctUserIds.size) {
+            return@dbQuery GrantResult.Error("库存不足，剩余：$remaining，需要：${distinctUserIds.size}")
         }
 
         var successCount = 0
         val failedUsers = mutableListOf<Long>()
 
-        for (userId in userIds) {
+        for (userId in distinctUserIds) {
             try {
                 val couponCode = generateCouponCode(templateId, userId)
                 UserCoupons.insert {
@@ -173,18 +185,25 @@ class AdminCouponService : BaseService() {
     /**
      * Scan and redeem coupon by QR data.
      */
-    suspend fun scanAndRedeemCoupon(qrData: String, operator: String): ScanRedeemResult = dbQuery {
+    suspend fun scanAndRedeemCoupon(
+        qrData: String,
+        operator: String,
+        scope: ClinicScope
+    ): ScanRedeemResult = dbQuery {
+        // Parse QR data: couponCode|userId|couponId
+        val parts = qrData.split("|")
+        if (parts.size != 3) {
+            return@dbQuery ScanRedeemResult.Error("无效的二维码格式")
+        }
+
+        val couponCode = parts[0]
+        val userId = parts[1].toLongOrNull() ?: return@dbQuery ScanRedeemResult.Error("无效的用户ID")
+        val couponId = parts[2].toLongOrNull() ?: return@dbQuery ScanRedeemResult.Error("无效的优惠券ID")
+
+        // 核销权限以券持有人所属门店为准；越权异常不能被下方业务异常兜底吞成 400。
+        requireUserInScope(userId, scope)
+
         try {
-            // Parse QR data: couponCode|userId|couponId
-            val parts = qrData.split("|")
-            if (parts.size != 3) {
-                return@dbQuery ScanRedeemResult.Error("无效的二维码格式")
-            }
-
-            val couponCode = parts[0]
-            val userId = parts[1].toLongOrNull() ?: return@dbQuery ScanRedeemResult.Error("无效的用户ID")
-            val couponId = parts[2].toLongOrNull() ?: return@dbQuery ScanRedeemResult.Error("无效的优惠券ID")
-
             // Find the coupon
             val coupon = UserCoupons.selectAll()
                 .where {
@@ -242,12 +261,28 @@ class AdminCouponService : BaseService() {
         templateId: Long?,
         status: String?,
         page: Int,
-        pageSize: Int
+        pageSize: Int,
+        scope: ClinicScope
     ): UserCouponsResponse = dbQuery {
+        if (userId != null) {
+            requireUserInScope(userId, scope)
+        }
+
         var query = UserCoupons.selectAll()
 
         if (userId != null) {
             query = query.andWhere { UserCoupons.userId eq userId }
+        } else if (!scope.all) {
+            val scopedUserIds = restrictedScopedUserIds(scope)
+            if (scopedUserIds.isEmpty()) {
+                return@dbQuery UserCouponsResponse(
+                    list = emptyList(),
+                    total = 0,
+                    page = page,
+                    pageSize = pageSize
+                )
+            }
+            query = query.andWhere { UserCoupons.userId inList scopedUserIds }
         }
         if (templateId != null) {
             query = query.andWhere { UserCoupons.templateId eq templateId }

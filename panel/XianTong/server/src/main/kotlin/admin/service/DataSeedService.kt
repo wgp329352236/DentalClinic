@@ -311,7 +311,7 @@ object DataSeedService {
             Cfg(
                 key = "appointment.no_show_limit",
                 value = "3",
-                desc = "爽约次数阈值，达到后禁止在线预约"
+                desc = "爽约次数阈值，达到后禁止在线预约（0=关闭该限制）"
             ),
             Cfg(
                 key = "appointment.no_show_window_days",
@@ -507,6 +507,11 @@ object DataSeedService {
                 content = "您的预约已确认，请准时到院就诊。"
             ),
             MessageTemplateSeed(
+                templateKey = "appointment_submitted",
+                title = "预约已提交",
+                content = "您的预约已提交，等待门店确认。"
+            ),
+            MessageTemplateSeed(
                 templateKey = "appointment_cancelled",
                 title = "预约已取消",
                 content = "您的预约已取消，如需重新预约请在小程序操作。"
@@ -520,6 +525,11 @@ object DataSeedService {
                 templateKey = "recharge_success",
                 title = "充值成功通知",
                 content = "您的充值已到账，可前往钱包查看余额。"
+            ),
+            MessageTemplateSeed(
+                templateKey = "activity_notice",
+                title = "新活动上线通知",
+                content = "门诊发布了新活动，点击查看活动详情。"
             )
         )
 

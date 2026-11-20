@@ -110,6 +110,7 @@ Page({
       if (result.code === 0 && Array.isArray(result.data)) {
         const coupons: Coupon[] = result.data.map((c: any) => ({
           id: c.id,
+          couponCode: c.couponCode,
           name: c.templateName,
           amount: c.faceValue,
           minAmount: c.minConsumption,

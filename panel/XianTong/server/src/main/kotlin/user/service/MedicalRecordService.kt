@@ -160,10 +160,14 @@ class MedicalRecordService : BaseService() {
 
         val deptName = deptsMap[appointmentRow[Appointments.departmentId]]
 
-        // Get all consumption records for this appointment
+        // 仅已支付消费计入病历费用汇总；待尾款记录仍展示明细但带支付状态。
         val consumptionRows = ConsumptionRecords.selectAll()
             .where { ConsumptionRecords.appointmentId eq appointmentId }
             .toList()
+        val settledConsumptionRows = consumptionRows.filter {
+            it[ConsumptionRecords.status] == "success" &&
+                it[ConsumptionRecords.paymentStatus] == "success"
+        }
 
         val consumptionDetails = consumptionRows.map { row ->
             ConsumptionDetailDto(
@@ -172,12 +176,13 @@ class MedicalRecordService : BaseService() {
                 balanceUsed = row[ConsumptionRecords.balanceUsed].toDouble(),
                 wechatPaid = row[ConsumptionRecords.wechatPaid].toDouble(),
                 pointsEarned = row[ConsumptionRecords.pointsEarned],
+                paymentStatus = row[ConsumptionRecords.paymentStatus],
                 description = row[ConsumptionRecords.description],
                 createdAt = row[ConsumptionRecords.createdAt].format(dateTimeFormatter)
             )
         }
 
-        val totalAmount = consumptionRows.sumOf { it[ConsumptionRecords.amount].toDouble() }
+        val totalAmount = settledConsumptionRows.sumOf { it[ConsumptionRecords.amount].toDouble() }
 
         MedicalRecordDetailDto(
             id = appointmentRow[Appointments.id],
@@ -236,7 +241,11 @@ class MedicalRecordService : BaseService() {
         return ConsumptionRecords.selectAll()
             .where { ConsumptionRecords.appointmentId inList appointmentIds }
             .toList()
-            .filter { it[ConsumptionRecords.appointmentId] != null }
+            .filter {
+                it[ConsumptionRecords.appointmentId] != null &&
+                    it[ConsumptionRecords.status] == "success" &&
+                    it[ConsumptionRecords.paymentStatus] == "success"
+            }
             .groupBy { it[ConsumptionRecords.appointmentId]!! }
             .mapValues { (_, rows) -> rows.sumOf { it[ConsumptionRecords.amount].toDouble() } }
     }
@@ -297,6 +306,7 @@ data class ConsumptionDetailDto(
     val balanceUsed: Double,
     val wechatPaid: Double,
     val pointsEarned: Int,
+    val paymentStatus: String,
     val description: String?,
     val createdAt: String
 )

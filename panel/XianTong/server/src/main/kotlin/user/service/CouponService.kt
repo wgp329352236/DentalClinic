@@ -1,13 +1,17 @@
 package com.dentalclinic.user.service
 
 import com.dentalclinic.admin.entity.CouponTemplates
+import com.dentalclinic.admin.entity.Appointments
 import com.dentalclinic.admin.entity.UserCoupons
 import com.dentalclinic.common.BaseService
+import com.dentalclinic.common.CouponUsageSupport
 import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.inList
+import org.jetbrains.exposed.v1.core.neq
 import org.jetbrains.exposed.v1.r2dbc.insert
 import org.jetbrains.exposed.v1.r2dbc.selectAll
 import org.jetbrains.exposed.v1.r2dbc.update
@@ -28,26 +32,21 @@ class CouponService : BaseService() {
             .orderBy(UserCoupons.createdAt, SortOrder.DESC)
             .toList()
 
+        val templateIds = coupons.map { it[UserCoupons.templateId] }.distinct()
+        val templates = if (templateIds.isEmpty()) emptyMap() else {
+            CouponTemplates.selectAll()
+                .where { CouponTemplates.id inList templateIds }
+                .toList()
+                .associateBy { it[CouponTemplates.id] }
+        }
         val now = LocalDateTime.now()
         val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-        
+
         coupons.mapNotNull { couponRow ->
             val templateId = couponRow[UserCoupons.templateId]
-            val template = CouponTemplates.selectAll()
-                .where { CouponTemplates.id eq templateId }
-                .toList()
-                .singleOrNull()
-
-            if (template == null) return@mapNotNull null
-
-            // Filter out expired coupons (status is still "unused" but past validTo)
-            val validTo = template[CouponTemplates.validTo]
-            if (couponRow[UserCoupons.status] == "unused" && now.isAfter(validTo)) {
-                return@mapNotNull null
-            }
-
-            val rowStatus = couponRow[UserCoupons.status]
-            if (!status.isNullOrEmpty() && rowStatus != status) {
+            val template = templates[templateId] ?: return@mapNotNull null
+            val effectiveStatus = effectiveStatus(couponRow[UserCoupons.status], template[CouponTemplates.validTo], now)
+            if (!status.isNullOrEmpty() && effectiveStatus != status) {
                 return@mapNotNull null
             }
 
@@ -60,7 +59,7 @@ class CouponService : BaseService() {
                 minConsumption = template[CouponTemplates.minConsumption].toDouble(),
                 validFrom = template[CouponTemplates.validFrom].format(formatter),
                 validTo = template[CouponTemplates.validTo].format(formatter),
-                status = rowStatus,
+                status = effectiveStatus,
                 usedAt = couponRow[UserCoupons.usedAt]?.format(formatter)
             )
         }
@@ -70,61 +69,27 @@ class CouponService : BaseService() {
      * Redeem (use) a coupon.
      */
     suspend fun redeemCoupon(userId: Long, couponCode: String, appointmentId: Long?): CouponRedeemResult {
-        // Pre-checks outside transaction
-        val couponCheck = dbQuery {
-            UserCoupons.selectAll()
-                .where {
-                    (UserCoupons.userId eq userId) and
-                    (UserCoupons.couponCode eq couponCode)
-                }
-                .toList()
-                .singleOrNull()
-        }
-
-        if (couponCheck == null) {
-            return CouponRedeemResult.Error("优惠券不存在")
-        }
-
-        if (couponCheck[UserCoupons.status] != "unused") {
-            return CouponRedeemResult.Error("优惠券已使用或已过期")
-        }
-
-        val templateId = couponCheck[UserCoupons.templateId]
-        val template = dbQuery {
-            CouponTemplates.selectAll()
-                .where { CouponTemplates.id eq templateId }
-                .toList()
-                .singleOrNull()
-        }
-
-        if (template == null) {
-            return CouponRedeemResult.Error("优惠券模板不存在")
-        }
-
-        val now = LocalDateTime.now()
-        if (now.isBefore(template[CouponTemplates.validFrom]) || now.isAfter(template[CouponTemplates.validTo])) {
-            return CouponRedeemResult.Error("优惠券已过期")
-        }
-
         return dbQuery {
-            // Mark as used
-            UserCoupons.update({ UserCoupons.couponCode eq couponCode }) {
-                it[UserCoupons.status] = "used"
-                it[UserCoupons.usedAt] = now
-                if (appointmentId != null) {
-                    it[UserCoupons.appointmentId] = appointmentId
-                }
+            if (appointmentId != null) {
+                Appointments.selectAll()
+                    .where {
+                        (Appointments.id eq appointmentId) and
+                            (Appointments.userId eq userId) and
+                            (Appointments.status neq "cancelled")
+                    }
+                    .forUpdate()
+                    .toList()
+                    .singleOrNull()
+                    ?: return@dbQuery CouponRedeemResult.Error("预约不存在或已取消")
             }
 
-            // Update used quantity in template
-            CouponTemplates.update({ CouponTemplates.id eq templateId }) {
-                it[CouponTemplates.usedQuantity] = template[CouponTemplates.usedQuantity] + 1
+            when (val result = CouponUsageSupport.use(userId, couponCode, appointmentId)) {
+                is CouponUsageSupport.UseResult.Error -> CouponRedeemResult.Error(result.message)
+                is CouponUsageSupport.UseResult.Success -> CouponRedeemResult.Success(
+                    couponName = result.couponName,
+                    faceValue = result.faceValue
+                )
             }
-
-            CouponRedeemResult.Success(
-                couponName = template[CouponTemplates.name],
-                faceValue = template[CouponTemplates.faceValue].toDouble()
-            )
         }
     }
 
@@ -267,6 +232,11 @@ class CouponService : BaseService() {
             .singleOrNull() ?: return@dbQuery null
 
         val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+        val effectiveStatus = effectiveStatus(
+            coupon[UserCoupons.status],
+            template[CouponTemplates.validTo],
+            LocalDateTime.now()
+        )
 
         CouponDetailDto(
             id = coupon[UserCoupons.id],
@@ -277,10 +247,13 @@ class CouponService : BaseService() {
             minConsumption = template[CouponTemplates.minConsumption].toDouble(),
             validFrom = template[CouponTemplates.validFrom].format(formatter),
             validTo = template[CouponTemplates.validTo].format(formatter),
-            status = coupon[UserCoupons.status],
+            status = effectiveStatus,
             qrData = "${coupon[UserCoupons.couponCode]}|${userId}|${coupon[UserCoupons.id]}"
         )
     }
+
+    private fun effectiveStatus(status: String, validTo: LocalDateTime, now: LocalDateTime): String =
+        if (status == "unused" && now.isAfter(validTo)) "expired" else status
 }
 
 // DTOs

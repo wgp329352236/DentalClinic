@@ -28,8 +28,7 @@ fun Route.clinicRoutes(clinicService: ClinicService, checkinCodeService: Checkin
                 get("/{id}/checkin-code") {
                     val id = call.parameters["id"]?.toLongOrNull()
                         ?: throw ValidationException("无效的ID")
-                    val clinic = clinicService.getClinic(id)
-                        ?: throw ValidationException("门诊不存在")
+                    val clinic = clinicService.getClinic(id, call.clinicScope())
                     val code = checkinCodeService.issue(id)
                     call.ok(
                         mapOf(
@@ -43,7 +42,7 @@ fun Route.clinicRoutes(clinicService: ClinicService, checkinCodeService: Checkin
             requirePermission("clinic:create") {
                 post {
                     val req = call.receive<ClinicRequest>()
-                    val id = clinicService.createClinic(req)
+                    val id = clinicService.createClinic(req, call.clinicScope())
                     call.ok(mapOf("id" to id), "创建成功")
                 }
             }
@@ -51,14 +50,14 @@ fun Route.clinicRoutes(clinicService: ClinicService, checkinCodeService: Checkin
                 put("/{id}") {
                     val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的ID")
                     val req = call.receive<ClinicRequest>()
-                    clinicService.updateClinic(id, req)
+                    clinicService.updateClinic(id, req, call.clinicScope())
                     call.ok<Unit>(message = "更新成功")
                 }
             }
             requirePermission("clinic:delete") {
                 delete("/{id}") {
                     val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的ID")
-                    clinicService.deleteClinic(id)
+                    clinicService.deleteClinic(id, call.clinicScope())
                     call.ok<Unit>(message = "删除成功")
                 }
             }
@@ -74,14 +73,14 @@ fun Route.departmentRoutes(departmentService: DepartmentService) {
             requirePermission("department:list") {
                 get {
                     val cid = call.request.queryParameters["clinicId"]?.toLongOrNull()
-                    val data = departmentService.listDepartments(cid)
+                    val data = departmentService.listDepartments(cid, call.clinicScope())
                     call.ok(data)
                 }
             }
             requirePermission("department:create") {
                 post {
                     val req = call.receive<DepartmentRequest>()
-                    val id = departmentService.createDepartment(req)
+                    val id = departmentService.createDepartment(req, call.clinicScope())
                     call.ok(mapOf("id" to id), "创建成功")
                 }
             }
@@ -89,14 +88,14 @@ fun Route.departmentRoutes(departmentService: DepartmentService) {
                 put("/{id}") {
                     val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的ID")
                     val req = call.receive<DepartmentRequest>()
-                    departmentService.updateDepartment(id, req)
+                    departmentService.updateDepartment(id, req, call.clinicScope())
                     call.ok<Unit>(message = "更新成功")
                 }
             }
             requirePermission("department:delete") {
                 delete("/{id}") {
                     val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的ID")
-                    departmentService.deleteDepartment(id)
+                    departmentService.deleteDepartment(id, call.clinicScope())
                     call.ok<Unit>(message = "删除成功")
                 }
             }
@@ -111,14 +110,14 @@ fun Route.doctorRoutes(doctorService: DoctorService) {
         authenticated {
             requirePermission("doctor:list") {
                 get {
-                    val data = doctorService.listDoctors()
+                    val data = doctorService.listDoctors(call.clinicScope())
                     call.ok(data)
                 }
             }
             requirePermission("doctor:create") {
                 post {
                     val req = call.receive<DoctorRequest>()
-                    val id = doctorService.createDoctor(req)
+                    val id = doctorService.createDoctor(req, call.clinicScope())
                     call.ok(mapOf("id" to id), "创建成功")
                 }
             }
@@ -126,14 +125,14 @@ fun Route.doctorRoutes(doctorService: DoctorService) {
                 put("/{id}") {
                     val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的ID")
                     val req = call.receive<DoctorRequest>()
-                    doctorService.updateDoctor(id, req)
+                    doctorService.updateDoctor(id, req, call.clinicScope())
                     call.ok<Unit>(message = "更新成功")
                 }
             }
             requirePermission("doctor:delete") {
                 delete("/{id}") {
                     val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的ID")
-                    doctorService.deleteDoctor(id)
+                    doctorService.deleteDoctor(id, call.clinicScope())
                     call.ok<Unit>(message = "删除成功")
                 }
             }
@@ -150,21 +149,21 @@ fun Route.scheduleRoutes(scheduleService: ScheduleService) {
                 get {
                     val did = call.request.queryParameters["doctorId"]?.toLongOrNull()
                         ?: throw ValidationException("缺少医生ID")
-                    val data = scheduleService.listSchedules(did)
+                    val data = scheduleService.listSchedules(did, call.clinicScope())
                     call.ok(data)
                 }
             }
             requirePermission("doctor:update") {
                 post {
                     val req = call.receive<ScheduleRequest>()
-                    val id = scheduleService.createSchedule(req)
+                    val id = scheduleService.createSchedule(req, call.clinicScope())
                     call.ok(mapOf("id" to id), "创建成功")
                 }
             }
             requirePermission("doctor:update") {
                 delete("/{id}") {
                     val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的ID")
-                    scheduleService.deleteSchedule(id)
+                    scheduleService.deleteSchedule(id, call.clinicScope())
                     call.ok<Unit>(message = "删除成功")
                 }
             }
@@ -218,7 +217,7 @@ fun Route.appointmentAdminRoutes(appointmentService: AppointmentAdminService) {
                 put("/{id}/status") {
                     val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的ID")
                     val req = call.receive<AppointmentStatusRequest>()
-                    appointmentService.updateStatus(id, req)
+                    appointmentService.updateStatus(id, req, call.adminPrincipal().userId, call.clinicScope())
                     call.ok<Unit>(message = "状态更新成功")
                 }
             }
@@ -227,8 +226,29 @@ fun Route.appointmentAdminRoutes(appointmentService: AppointmentAdminService) {
                 put("/{id}/cancel") {
                     val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的ID")
                     val req = call.receive<Map<String, String?>>()
-                    appointmentService.cancelAppointment(id, req["reason"])
+                    appointmentService.cancelAppointment(
+                        id,
+                        req["reason"],
+                        call.adminPrincipal().userId,
+                        call.clinicScope()
+                    )
                     call.ok<Unit>(message = "预约已取消")
+                }
+            }
+
+            requirePermission("appointment:update") {
+                put("/{id}/cancel-request/approve") {
+                    val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的ID")
+                    appointmentService.approveCancelRequest(id, call.adminPrincipal().userId, call.clinicScope())
+                    call.ok<Unit>(message = "已同意取消申请")
+                }
+            }
+
+            requirePermission("appointment:update") {
+                put("/{id}/cancel-request/reject") {
+                    val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的ID")
+                    appointmentService.rejectCancelRequest(id, call.adminPrincipal().userId, call.clinicScope())
+                    call.ok<Unit>(message = "已驳回取消申请")
                 }
             }
 
@@ -236,7 +256,7 @@ fun Route.appointmentAdminRoutes(appointmentService: AppointmentAdminService) {
             requirePermission("appointment:update") {
                 put("/{id}/confirm") {
                     val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的ID")
-                    appointmentService.confirmAppointment(id)
+                    appointmentService.confirmAppointment(id, call.clinicScope())
                     call.ok<Unit>(message = "预约已确认")
                 }
             }
@@ -248,7 +268,7 @@ fun Route.appointmentAdminRoutes(appointmentService: AppointmentAdminService) {
                     val req = call.receive<Map<String, String?>>()
                     val reason = req["reason"]?.trim().orEmpty()
                     if (reason.isEmpty()) throw ValidationException("请填写拒绝原因")
-                    appointmentService.rejectAppointment(id, reason)
+                    appointmentService.rejectAppointment(id, reason, call.clinicScope())
                     call.ok<Unit>(message = "预约已拒绝")
                 }
             }
@@ -257,7 +277,7 @@ fun Route.appointmentAdminRoutes(appointmentService: AppointmentAdminService) {
             requirePermission("appointment:view") {
                 get("/{id}") {
                     val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的ID")
-                    val response = appointmentService.getAppointmentDetail(id)
+                    val response = appointmentService.getAppointmentDetail(id, call.clinicScope())
                     call.ok(response)
                 }
             }
@@ -267,7 +287,7 @@ fun Route.appointmentAdminRoutes(appointmentService: AppointmentAdminService) {
                 put("/{id}/medical-record") {
                     val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的ID")
                     val req = call.receive<MedicalRecordUpdateRequest>()
-                    appointmentService.updateMedicalRecord(id, req)
+                    appointmentService.updateMedicalRecord(id, req, call.clinicScope())
                     call.ok<Unit>(message = "病历更新成功")
                 }
             }
@@ -309,7 +329,7 @@ fun Route.customerRoutes(customerService: CustomerService) {
             requirePermission("customer:view") {
                 get("/{id}") {
                     val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的客户ID")
-                    val data = customerService.getCustomerDetail(id)
+                    val data = customerService.getCustomerDetail(id, call.clinicScope())
                     call.ok(data)
                 }
             }
@@ -320,7 +340,7 @@ fun Route.customerRoutes(customerService: CustomerService) {
                     val req = call.receive<WalletAdjustRequest>()
                     // 资金调整必须留痕：reason 落入 wallet_transaction，operator 记录是谁调的
                     val principal = call.adminPrincipal()
-                    val result = customerService.adjustWallet(id, req.amount, req.reason, principal.username)
+                    val result = customerService.adjustWallet(id, req.amount, req.reason, principal.username, call.clinicScope())
                     call.ok(result, "余额调整成功")
                 }
             }
@@ -329,7 +349,7 @@ fun Route.customerRoutes(customerService: CustomerService) {
                 put("/{id}/level") {
                     val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的客户ID")
                     val req = call.receive<LevelAdjustRequest>()
-                    customerService.adjustLevel(id, req.levelCode, req.reason)
+                    customerService.adjustLevel(id, req.levelCode, req.reason, call.clinicScope())
                     call.ok<Unit>(message = "会员等级调整成功")
                 }
             }
@@ -339,7 +359,7 @@ fun Route.customerRoutes(customerService: CustomerService) {
                     val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的客户ID")
                     val req = call.receive<PointsAdjustRequest>()
                     val principal = call.adminPrincipal()
-                    customerService.adjustPoints(id, req, principal.username)
+                    customerService.adjustPoints(id, req, principal.username, call.clinicScope())
                     call.ok<Unit>(message = "积分调整成功")
                 }
             }
@@ -349,7 +369,7 @@ fun Route.customerRoutes(customerService: CustomerService) {
                 put("/{id}/remark") {
                     val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的客户ID")
                     val req = call.receive<RemarkUpdateRequest>()
-                    customerService.updateRemark(id, req.remark)
+                    customerService.updateRemark(id, req.remark, call.clinicScope())
                     call.ok<Unit>(message = "备注更新成功")
                 }
             }
