@@ -2,6 +2,19 @@
 
 本文件按日期倒序记录 XianTong 项目的代码改动，每条包含：改了什么、为什么改、影响范围。
 
+## 2026-11-20
+
+### 修复 C 端门店经纬度与营业日显示异常
+
+- **改了什么**：
+  1. `app/XianTong/miniprogram/utils/util.ts`：`formatBusinessDays` 将连续营业日合并为区间（`1,2,3,4,5,6` → 「周一至周六」、全周 → 「每天」）；新增 `isValidCoordinate` 过滤空值、非有限值、`(0,0)` 与境外坐标；`getCurrentLocation` 在定位坐标无效时按未定位返回 `null`。
+  2. `app/XianTong/miniprogram/utils/api.ts`：`getDoctorSlots` 增加可选 `clinicId` 参数。
+  3. `app/XianTong/miniprogram/pages/appointment/appointment.ts`：距离仅在定位与门店坐标均有效时计算，否则隐藏；时段查询透传 `clinicId`，由后端按门店营业日/营业时间过滤。
+  4. `app/XianTong/miniprogram/pages/index/index.ts`：首页门店距离同样使用 `isValidCoordinate`，避免无效坐标参与计算与排序。
+  5. `panel/XianTong/client/apps/web-antd/src/views/clinic/index.vue`：管理端门诊列表营业日文案同步为区间合并，与 C 端一致。
+- **原因**：微信开发者工具默认定位为 `(0,0)`，与北京门店坐标算出的距离达上万公里；C 端营业日逐项罗列不易读；预约页取时段未带门店 ID，闭店日仍显示可约，与后端校验口径不一致。
+- **影响范围**：仅 C 端展示与时段查询参数、管理端门诊列表文案，接口字段不变（`clinicId` 为可选）。回归：门店 2（周一至周五营业）周六时段返回空、不带 `clinicId` 仍返回时段；小程序 `npm run typecheck` 通过。
+
 ## 2026-11-19
 
 ### 修复多门店隔离与尾款支付的三处缺陷

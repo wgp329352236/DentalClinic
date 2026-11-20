@@ -51,13 +51,13 @@ export function refreshToken(refreshToken: string) {
 export interface UserProfileResponse {
   userId: number
   openid: string
-  phone: string
-  nickname: string
-  realName: string
-  gender: number
-  age: number
-  avatar: string
-  primaryClinicId: number
+  phone: string | null
+  nickname: string | null
+  realName: string | null
+  gender: number | null
+  age: number | null
+  avatar: string | null
+  primaryClinicId: number | null
   balance: number
   bonusBalance: number
   // 会员等级（需求 3.7.1 等级卡片）
@@ -79,6 +79,8 @@ export interface UpdateProfileParams {
   age?: number
   avatar?: string
   nickname?: string
+  /** 首次设置归属门店；已有归属门店时后端不允许自助修改 */
+  primaryClinicId?: number
 }
 
 /**
@@ -139,7 +141,13 @@ export interface Clinic {
   address: string
   phone: string
   businessHours: string
+  businessDays: string
+  latitude?: number | null
+  longitude?: number | null
   distance?: number
+  distanceText?: string
+  businessDayText?: string
+  openStatusText?: string
   image: string
   /** 后端门店表字段名，页面会兼容读取 */
   coverImage?: string
@@ -196,8 +204,8 @@ export function getDoctors(clinicId?: number, departmentId?: number) {
 /**
  * 获取医生可预约时段
  */
-export function getDoctorSlots(doctorId: number, date: string) {
-  return get<TimeSlot[]>('/appointments/slots', { doctorId, date }, false)
+export function getDoctorSlots(doctorId: number, date: string, clinicId?: number) {
+  return get<TimeSlot[]>('/appointments/slots', { doctorId, date, clinicId }, false)
 }
 
 // ==================== 预约 ====================
@@ -209,6 +217,8 @@ export interface CreateAppointmentParams {
   appointmentDate: string
   startTime: string
   remark?: string
+  /** 空字符串表示不使用优惠券；不传则由后端按业务场景处理 */
+  couponCode?: string
 }
 
 export interface Appointment {
@@ -221,16 +231,17 @@ export interface Appointment {
   departmentName: string
   appointmentDate: string
   startTime: string
+  endTime?: string | null
   status: 'pending' | 'confirmed' | 'arrived' | 'completed' | 'cancelled' | 'no_show'
   remark?: string
+  /** 就诊前 2 小时内取消会转为门店审批，主状态在审批前保持不变 */
+  cancelRequestStatus?: 'pending' | 'approved' | 'rejected' | null
+  cancelRequestReason?: string | null
+  cancelRequestedAt?: string | null
   createdAt: string
-}
-
-export interface AppointmentsResponse {
-  list: Appointment[]
-  total: number
-  page: number
-  pageSize: number
+  couponCode?: string | null
+  couponName?: string | null
+  couponFaceValue?: number | null
 }
 
 /**
@@ -246,7 +257,8 @@ export function createAppointment(params: CreateAppointmentParams) {
 export function getMyAppointments(status?: string, page = 1, pageSize = 20) {
   const params: any = { page, pageSize }
   if (status) params.status = status
-  return get<AppointmentsResponse>('/appointments/my', params)
+  // 后端当前直接返回数组；page/pageSize 暂时保留用于未来兼容分页响应
+  return get<Appointment[]>('/appointments/my', params)
 }
 
 /**
@@ -262,6 +274,8 @@ export function cancelAppointment(id: number) {
 export interface RescheduleParams {
   appointmentDate: string
   startTime: string
+  /** null/不传保留原券；空字符串释放原券；其他值更换优惠券 */
+  couponCode?: string | null
 }
 
 export function rescheduleAppointment(id: number, params: RescheduleParams) {
@@ -379,6 +393,8 @@ export interface ConsumptionRecord {
   amount: number
   balanceUsed: number
   wechatPaid: number
+  /** 消费结算状态；pending 表示余额不足、微信尾款尚未支付 */
+  paymentStatus?: 'pending' | 'success' | string
   pointsEarned: number
   pointsUsed: number
   pointsDeduct: number
@@ -422,6 +438,59 @@ export function getConsumptionRecords(params?: {
  */
 export function getConsumptionStatistics() {
   return get<ConsumptionStatistics>('/consumption/statistics')
+}
+
+/** 余额不足、等待微信支付尾款的消费记录 */
+export interface UnpaidConsumption {
+  id: number
+  /** 本次消费总金额 */
+  amount: number
+  /** 余额抵扣后仍需微信支付的尾款 */
+  wechatPaid: number
+  description?: string | null
+  createdAt: string
+}
+
+export interface ConsumptionPaymentInitResult {
+  consumptionId: number
+  /** pending=需调起微信支付；success=本地 mock 已完成结算 */
+  status: 'pending' | 'success' | string
+  mock: boolean
+  amount: number
+  payParams?: WxPayParams | null
+}
+
+export interface ConsumptionPaymentStatusResult {
+  consumptionId: number
+  /** pending/success */
+  status: 'pending' | 'success' | string
+  amount: number
+  wechatPaid: number
+  pointsEarned: number
+  paidAt?: string | null
+}
+
+/**
+ * 获取当前用户的待支付消费
+ */
+export function getUnpaidConsumptions() {
+  return get<UnpaidConsumption[]>('/consumption/unpaid')
+}
+
+/**
+ * 发起消费尾款支付
+ *
+ * openid 由服务端按当前登录用户读取，客户端不再上报。
+ */
+export function payConsumption(id: number) {
+  return post<ConsumptionPaymentInitResult>(`/consumption/pay/${id}`)
+}
+
+/**
+ * 查询消费尾款支付状态（pending 时服务端会主动向微信查单）
+ */
+export function getConsumptionPaymentStatus(id: number) {
+  return get<ConsumptionPaymentStatusResult>(`/consumption/pay/${id}/status`)
 }
 
 // ==================== 积分 ====================
@@ -557,17 +626,45 @@ export interface ReferralCodeResponse {
 
 export interface ReferralRecord {
   id: number
-  referredPersonName: string
+  refereeName: string
   registeredAt: string
-  firstConsumptionAt?: string
+  firstConsumedAt?: string
   rewardStatus: string
+  rewards: ReferralRewardRecord[]
+  rewardPoints: number
+  rewardBonus: number
+}
+
+export interface ReferralRewardRecord {
+  id: number
+  type: 'registration' | 'first_consumption' | 'tier' | 'ongoing'
+  status: 'pending' | 'issued'
+  rewardType?: 'points' | 'balance' | 'points_balance' | null
+  rewardValue?: number | null
+  createdAt: string
+}
+
+export interface ReferralRewardSummary {
+  pointsGranted: number
+  balanceGranted: number
+  pendingCount: number
 }
 
 export interface ReferralRecordsResponse {
   list: ReferralRecord[]
   total: number
+  monthlyCount: number
+  summary: ReferralRewardSummary
+  tierRewards: ReferralRewardRecord[]
   page: number
   pageSize: number
+}
+
+export interface ReferralQrCodeResponse {
+  available: boolean
+  payload: string
+  qrcodeImageBase64?: string
+  message?: string
 }
 
 /**
@@ -582,6 +679,11 @@ export function getReferralCode() {
  */
 export function getReferralRecords(page = 1, pageSize = 20) {
   return get<ReferralRecordsResponse>('/referral/records', { page, pageSize })
+}
+
+/** 获取真实微信小程序码；不可用时由页面降级为分享按钮。 */
+export function getReferralQrCode() {
+  return get<ReferralQrCodeResponse>('/referral/qrcode')
 }
 
 /**
@@ -603,6 +705,7 @@ export interface Coupon {
   validFrom: string
   validTo: string
   status: 'unused' | 'used' | 'expired'
+  usedAt?: string | null
 }
 
 /**

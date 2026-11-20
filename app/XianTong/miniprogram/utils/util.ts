@@ -20,6 +20,135 @@ const formatNumber = (n: number) => {
   return s[1] ? s : '0' + s
 }
 
+const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+
+export interface UserLocation {
+  latitude: number
+  longitude: number
+}
+
+/** 获取一次当前定位；用户拒绝授权或设备不可用时静默返回 null。 */
+export function getCurrentLocation(): Promise<UserLocation | null> {
+  return new Promise((resolve) => {
+    wx.getLocation({
+      type: 'gcj02',
+      success: (res) => {
+        // 开发者工具默认定位为 (0,0)，这类无效坐标会算出上万公里距离，直接按未定位处理
+        if (!isValidCoordinate(res.latitude, res.longitude)) {
+          console.warn('[Location] 定位坐标无效，已隐藏距离信息:', res.latitude, res.longitude)
+          resolve(null)
+          return
+        }
+        resolve({ latitude: res.latitude, longitude: res.longitude })
+      },
+      fail: (error) => {
+        console.warn('[Location] 获取定位失败，已隐藏距离信息:', error)
+        resolve(null)
+      }
+    })
+  })
+}
+
+/** 把后端 `1,2,3` 格式的营业日转换成去重、升序的星期数字。 */
+export function parseBusinessDays(raw?: number[] | string | null): number[] {
+  const values = Array.isArray(raw)
+    ? raw
+    : String(raw || '')
+        .split(',')
+        .map((item) => Number(item.trim()))
+  return [...new Set(values)]
+    .filter((day) => Number.isInteger(day) && day >= 1 && day <= 7)
+    .sort((a, b) => a - b)
+}
+
+export function formatBusinessDays(raw?: number[] | string | null): string {
+  const days = parseBusinessDays(raw)
+  if (days.length === 7) return '每天'
+  if (days.length === 0) return '营业日待完善'
+
+  // 连续星期合并为区间，避免「周一、周二、周三…」这类冗长文案
+  const parts: string[] = []
+  let rangeStart = days[0]
+  let rangeEnd = days[0]
+  const flush = () => {
+    parts.push(
+      rangeStart === rangeEnd
+        ? WEEKDAY_LABELS[rangeStart - 1]
+        : `${WEEKDAY_LABELS[rangeStart - 1]}至${WEEKDAY_LABELS[rangeEnd - 1]}`
+    )
+  }
+  for (const day of days.slice(1)) {
+    if (day === rangeEnd + 1) {
+      rangeEnd = day
+      continue
+    }
+    flush()
+    rangeStart = day
+    rangeEnd = day
+  }
+  flush()
+  return parts.join('、')
+}
+
+/** 校验经纬度是否是可用的国内坐标；(0,0)、越界与空值都按无效处理。 */
+export function isValidCoordinate(
+  latitude?: number | null,
+  longitude?: number | null
+): boolean {
+  if (latitude == null || longitude == null) return false
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return false
+  if (Math.abs(latitude) < 1e-6 && Math.abs(longitude) < 1e-6) return false
+  return latitude >= 3.86 && latitude <= 53.55 && longitude >= 73.66 && longitude <= 135.08
+}
+
+/** 根据当前星期与营业时间生成顾客可快速判断的营业状态。 */
+export function getBusinessStatus(
+  businessDays: number[] | string | null | undefined,
+  openTime?: string,
+  closeTime?: string,
+  now = new Date()
+): string {
+  const mondayBasedDay = now.getDay() === 0 ? 7 : now.getDay()
+  if (!parseBusinessDays(businessDays).includes(mondayBasedDay)) return '今日休息'
+
+  const currentMinutes = now.getHours() * 60 + now.getMinutes()
+  const openMinutes = parseTimeToMinutes(openTime)
+  const closeMinutes = parseTimeToMinutes(closeTime)
+  if (openMinutes == null || closeMinutes == null) return '今日营业'
+  if (currentMinutes < openMinutes) return `今日 ${openTime} 开门`
+  if (currentMinutes >= closeMinutes) return '今日已结束'
+  return '营业中'
+}
+
+function parseTimeToMinutes(value?: string): number | null {
+  if (!value) return null
+  const [hour, minute] = value.split(':').map(Number)
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null
+  return hour * 60 + minute
+}
+
+/** 球面距离（米），输入为 GCJ-02 经纬度。 */
+export function getDistanceMeters(from: UserLocation, to: UserLocation): number {
+  const earthRadius = 6_371_000
+  const toRadians = (degree: number) => (degree * Math.PI) / 180
+  const latitudeDelta = toRadians(to.latitude - from.latitude)
+  const longitudeDelta = toRadians(to.longitude - from.longitude)
+  const a =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(toRadians(from.latitude)) *
+      Math.cos(toRadians(to.latitude)) *
+      Math.sin(longitudeDelta / 2) ** 2
+  return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+export function formatDistance(meters: number): string {
+  if (!Number.isFinite(meters) || meters < 0) return ''
+  if (meters < 100) return '<100m'
+  if (meters < 1000) return `${Math.round(meters / 10) * 10}m`
+  const kilometers = meters / 1000
+  return `${kilometers < 10 ? kilometers.toFixed(1) : kilometers.toFixed(0)}km`
+}
+
 
 /**
  * 把后端返回的相对文件地址补成可直接用于 <image src> 的绝对地址。

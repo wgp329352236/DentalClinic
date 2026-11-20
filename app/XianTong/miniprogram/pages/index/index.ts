@@ -1,7 +1,15 @@
 // pages/index/index.ts
 import { wechatLogin, getUserProfile, getClinics, getHomeContent, registerWithReferral } from '../../utils/api'
 import type { Clinic, UserInfo, Banner, Notice } from '../../types'
-import { resolveFileUrl } from '../../utils/util'
+import {
+  formatBusinessDays,
+  formatDistance,
+  getBusinessStatus,
+  getCurrentLocation,
+  getDistanceMeters,
+  isValidCoordinate,
+  resolveFileUrl
+} from '../../utils/util'
 
 // tabBar 页面清单（与 app.json 的 tabBar.list 一致）。
 // wx.navigateTo 跳 tabBar 页会静默失败，必须用 switchTab，
@@ -318,18 +326,49 @@ Page({
   // 加载门店列表
   async loadClinics() {
     try {
-      const result = await getClinics() // 不需要认证
+      // 距离定位只在本页加载时请求一次；拒绝授权或定位失败时不影响门店展示。
+      const [result, location] = await Promise.all([getClinics(), getCurrentLocation()])
       if (result.code === 0 && result.data) {
-        // 转换数据格式（后端返回 openTime/closeTime/coverImage）
-        const clinics: Clinic[] = result.data.map((item: any) => ({
-          id: item.id,
-          name: item.name,
-          address: item.address,
-          phone: item.phone,
-          businessHours: item.businessHours || (item.openTime && item.closeTime ? `${item.openTime}-${item.closeTime}` : ''),
-          distance: item.distance,
-          image: resolveFileUrl(item.image || item.coverImage || '')
-        }))
+        const clinics: Clinic[] = result.data.map((item: any) => {
+          const latitude = item.latitude == null ? null : Number(item.latitude)
+          const longitude = item.longitude == null ? null : Number(item.longitude)
+          const businessDays = item.businessDays || '1,2,3,4,5,6,7'
+          const hasCoordinates =
+            location !== null && isValidCoordinate(latitude, longitude)
+          const fallbackDistance = item.distance == null ? undefined : Number(item.distance)
+          const distance = hasCoordinates
+            ? getDistanceMeters(location, { latitude: latitude!, longitude: longitude! })
+            : Number.isFinite(fallbackDistance)
+              ? fallbackDistance
+              : undefined
+          return {
+            id: item.id,
+            name: item.name,
+            address: item.address,
+            phone: item.phone,
+            businessHours:
+              item.businessHours ||
+              (item.openTime && item.closeTime ? `${item.openTime}-${item.closeTime}` : ''),
+            businessDays,
+            latitude,
+            longitude,
+            distance,
+            distanceText: distance == null ? '' : formatDistance(distance),
+            businessDayText: formatBusinessDays(businessDays),
+            openStatusText: getBusinessStatus(
+              businessDays,
+              item.openTime,
+              item.closeTime
+            ),
+            image: resolveFileUrl(item.image || item.coverImage || '')
+          }
+        })
+        // 「附近门诊」优先按真实距离排序；坐标缺失时仍保留管理端配置的排序。
+        clinics.sort((left, right) => {
+          const leftDistance = left.distance == null ? Number.POSITIVE_INFINITY : left.distance
+          const rightDistance = right.distance == null ? Number.POSITIVE_INFINITY : right.distance
+          return leftDistance - rightDistance
+        })
         this.setData({ clinics })
       }
     } catch (error) {

@@ -10,6 +10,40 @@ import { deleteClinic, getClinics } from '#/api/clinic';
 import ClinicFormModal from './form-modal.vue';
 import ClinicQrModal from './qrcode-modal.vue';
 
+const weekdayLabels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+
+function formatBusinessDays(raw: unknown): string {
+  const days = String(raw || '')
+    .split(',')
+    .map((item) => Number(item.trim()))
+    .filter((day) => Number.isInteger(day) && day >= 1 && day <= 7)
+    .sort((a, b) => a - b);
+  if (days.length === 7) return '每天';
+  if (days.length === 0) return '未设置';
+  // 连续星期合并为区间，与 C 端文案保持一致
+  const parts: string[] = [];
+  let rangeStart = days[0];
+  let rangeEnd = days[0];
+  const flush = () => {
+    parts.push(
+      rangeStart === rangeEnd
+        ? weekdayLabels[rangeStart - 1]
+        : `${weekdayLabels[rangeStart - 1]}至${weekdayLabels[rangeEnd - 1]}`,
+    );
+  };
+  for (const day of days.slice(1)) {
+    if (day === rangeEnd + 1) {
+      rangeEnd = day;
+      continue;
+    }
+    flush();
+    rangeStart = day;
+    rangeEnd = day;
+  }
+  flush();
+  return parts.join('、');
+}
+
 const [FormModal, formModalApi] = useVbenModal({
   connectedComponent: ClinicFormModal,
   destroyOnClose: true,
@@ -99,7 +133,8 @@ async function onDelete(row: any) {
         </Button>
       </template>
       <template #businessHours="{ row }">
-        {{ row.openTime }} - {{ row.closeTime }}
+        <div>{{ formatBusinessDays(row.businessDays) }}</div>
+        <div class="text-xs opacity-60">{{ row.openTime }} - {{ row.closeTime }}</div>
       </template>
       <template #status="{ row }">
         <Tag :color="row.status === 1 ? 'green' : 'default'">
