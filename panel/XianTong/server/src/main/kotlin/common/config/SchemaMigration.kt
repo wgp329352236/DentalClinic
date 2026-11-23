@@ -49,6 +49,7 @@ object SchemaMigration {
                 migrateReferralRelationIndex()
                 migrateMpBannerActivity()
                 migrateCustomerClinicRelations()
+                migrateDropPrimaryClinicId()
             }
         } catch (e: Exception) {
             logger.error("[SchemaMigration] 表结构迁移失败，请检查数据库权限", e)
@@ -370,8 +371,7 @@ object SchemaMigration {
      * customer_clinic_relation 历史数据回填（一次性）。
      *
      * 表由 `SchemaUtils.create` 建好后，若表为空则按既有业务事实回填客户-门店关系：
-     * 预约、消费、充值三类事件各自推导关系，最后用 `user.primary_clinic_id` 兜底
-     * 「有归属门店但无任何业务记录」的客户，避免切换读口径后这部分客户凭空消失。
+     * 预约、消费、充值三类事件各自推导关系。
      *
      * 只在表为空时执行：回填 SQL 的 ON CONFLICT 会累加计数，重复执行会导致计数翻倍。
      */
@@ -435,25 +435,34 @@ object SchemaMigration {
             """.trimIndent()
         )
 
-        // 历史归属兜底：有 primary_clinic_id 但无任何业务记录的客户
-        exec(
-            """
-            INSERT INTO customer_clinic_relation
-              (user_id, clinic_id, first_visit_at, last_visit_at, source)
-            SELECT id, primary_clinic_id, created_at, created_at, 'legacy_primary'
-            FROM "user"
-            WHERE primary_clinic_id IS NOT NULL
-            ON CONFLICT (user_id, clinic_id) DO NOTHING
-            """.trimIndent()
-        )
-
         logger.info("[SchemaMigration] customer_clinic_relation 历史关系回填完成。")
+    }
+
+    /**
+     * 方案 C 阶段 5：删除 `user.primary_clinic_id`。
+     *
+     * 客户属于整个医院，门店只是就诊地点；客户-门店关系已由 customer_clinic_relation
+     * 记录并完成历史回填，单一归属字段不再有读写方。DROP COLUMN IF EXISTS 保证重复启动安全。
+     */
+    private suspend fun R2dbcTransaction.migrateDropPrimaryClinicId() {
+        if (!columnExists("user", "primary_clinic_id")) return
+        exec("ALTER TABLE \"user\" DROP COLUMN IF EXISTS primary_clinic_id")
+        logger.info("[SchemaMigration] user.primary_clinic_id 已删除。")
     }
 
     /** 索引是否已存在。 */
     private suspend fun R2dbcTransaction.indexExists(table: String, indexName: String): Boolean =
         exec(
             "SELECT indexname FROM pg_indexes WHERE tablename = '$table' AND indexname = '$indexName'",
+            explicitStatementType = StatementType.SELECT,
+            transform = { 1 }
+        )?.toList().orEmpty().isNotEmpty()
+
+    /** 表列是否已存在。 */
+    private suspend fun R2dbcTransaction.columnExists(table: String, column: String): Boolean =
+        exec(
+            "SELECT column_name FROM information_schema.columns " +
+                "WHERE table_name = '$table' AND column_name = '$column'",
             explicitStatementType = StatementType.SELECT,
             transform = { 1 }
         )?.toList().orEmpty().isNotEmpty()
@@ -466,14 +475,7 @@ object SchemaMigration {
         column: String,
         definition: String
     ): Boolean {
-        val existing = exec(
-            "SELECT column_name FROM information_schema.columns " +
-                "WHERE table_name = '$table' AND column_name = '$column'",
-            explicitStatementType = StatementType.SELECT,
-            transform = { 1 }
-        )?.toList().orEmpty()
-
-        if (existing.isNotEmpty()) return false
+        if (columnExists(table, column)) return false
 
         // 标识符必须加引号：`user` 是 PostgreSQL 保留字，ALTER TABLE user ... 会直接语法错误
         exec("ALTER TABLE \"$table\" ADD COLUMN IF NOT EXISTS \"$column\" $definition")

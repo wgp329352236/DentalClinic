@@ -374,7 +374,6 @@ object Users : Table("user") {
     val gender = integer("gender").nullable() // 1=男 2=女
     val age = integer("age").nullable()
     val avatar = varchar("avatar", 500).nullable()
-    val primaryClinicId = long("primary_clinic_id").nullable() // 首选就诊门店
     val sourceType = varchar("source_type", 20).default("self") // self/referral/store_entry
     val referredBy = long("referred_by").nullable() // 推荐人ID
     val remark = text("remark").nullable() // P2-18: 客户备注

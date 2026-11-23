@@ -134,12 +134,19 @@ WHERE NOT EXISTS (SELECT 1 FROM mp_notice n WHERE n.content = v.content);
 -- ---------- 8. 演示用户及其钱包/会员等级/积分 ----------
 -- 手机号 13800138000 若已被其他测试账号占用则不写（该列有唯一索引），演示用户仍可正常登录与浏览，
 -- 手机号可在小程序「编辑资料」里补。
-INSERT INTO "user" (openid, phone, nickname, real_name, gender, age, avatar, primary_clinic_id, source_type, status, last_login_at)
+INSERT INTO "user" (openid, phone, nickname, real_name, gender, age, avatar, source_type, status, last_login_at)
 SELECT 'mock_openid_demo',
        (SELECT '13800138000' WHERE NOT EXISTS (SELECT 1 FROM "user" WHERE phone = '13800138000')),
        '小张', '张三', 1, 30, '/images/avatar.jpg',
-       (SELECT id FROM clinic WHERE name = '牙科门诊（总店）'), 'self', 1, NOW()
+       'self', 1, NOW()
 WHERE NOT EXISTS (SELECT 1 FROM "user" u WHERE u.openid = 'mock_openid_demo');
+
+-- 客户不归属单一门店：演示用户与总店建立一条业务关系，便于管理端门店维度演示
+INSERT INTO customer_clinic_relation (user_id, clinic_id, first_visit_at, last_visit_at, source)
+SELECT u.id, c.id, NOW(), NOW(), 'manual'
+FROM "user" u, clinic c
+WHERE u.openid = 'mock_openid_demo' AND c.name = '牙科门诊（总店）'
+ON CONFLICT (user_id, clinic_id) DO NOTHING;
 
 DO $$
 DECLARE

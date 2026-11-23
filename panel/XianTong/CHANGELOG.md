@@ -4,6 +4,12 @@
 
 ## 2026-11-23
 
+### 删除 user.primary_clinic_id 列（修改）
+
+- **改了什么**：`AdminTables.Users` 移除 `primaryClinicId` 列定义；`SchemaMigration` 新增 `migrateDropPrimaryClinicId()`，启动时幂等执行 `ALTER TABLE "user" DROP COLUMN IF EXISTS primary_clinic_id`；移除历史回填中依赖该列的 `legacy_primary` 兜底 SQL；`demo-data.sql` 去掉该列并改为写入 `customer_clinic_relation`。
+- **原因**：阶段 4 已完成读口径切换，客户归属单一门店的字段不再有读写方，保留会成为死数据并误导后续维护。
+- **影响范围**：升级后首次启动会永久删除该列，原归属信息不可恢复（客户-门店的首访/最近到访事实已在 `customer_clinic_relation` 中保留）；升级前请确认数据库已备份。
+
 ### 移除客户「归属门店」，改为客户-门店业务关系（修改）
 
 - **改了什么**：
