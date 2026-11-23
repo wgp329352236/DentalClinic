@@ -33,3 +33,11 @@ export async function adjustLevel(id: number, data: any) {
 export async function adjustPoints(id: number, data: any) {
   return requestClient.put(`/customers/${id}/points`, data);
 }
+
+// 调整客户归属门店（原因必填，后端写入审计日志并通知客户）
+export async function changeCustomerClinic(
+  id: number,
+  data: { clinicId: number; reason: string },
+) {
+  return requestClient.put(`/customers/${id}/clinic`, data);
+}

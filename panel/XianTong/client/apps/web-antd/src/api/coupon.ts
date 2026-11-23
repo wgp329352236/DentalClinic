@@ -1,10 +1,33 @@
 import { requestClient } from '#/api/request';
 
+export interface CouponTemplate {
+  id: number;
+  name: string;
+  couponType: 'cash' | 'discount' | 'service' | string;
+  faceValue: number;
+  minConsumption: number;
+  applicableDepartments?: null | string;
+  validFrom: string;
+  validTo: string;
+  totalQuantity: number;
+  issuedQuantity: number;
+  usedQuantity: number;
+  status: number;
+}
+
+export interface CouponStatistics {
+  totalTemplates: number;
+  totalIssued: number;
+  totalUsed: number;
+  totalRemaining: number;
+  usageRate: number;
+}
+
 // ============================================================
 // 优惠券模板管理
 // ============================================================
 export async function getCouponTemplates() {
-  return requestClient.get('/coupons/templates');
+  return requestClient.get<CouponTemplate[]>('/coupons/templates');
 }
 
 export async function createCouponTemplate(data: any) {
@@ -40,11 +63,17 @@ export async function getCouponPromoQr(id: number) {
 // 优惠券发放与核销
 // ============================================================
 export async function grantCoupons(data: any) {
-  return requestClient.post('/coupons/grant', data);
+  return requestClient.post<{ successCount: number; failedUsers?: number[] }>(
+    '/coupons/grant',
+    data,
+  );
 }
 
 export async function scanRedeemCoupon(data: any) {
-  return requestClient.post('/coupons/scan-redeem', data);
+  return requestClient.post<{ couponName: string; faceValue: number }>(
+    '/coupons/scan-redeem',
+    data,
+  );
 }
 
 // ============================================================
@@ -55,5 +84,5 @@ export async function getCouponRecords(params: any) {
 }
 
 export async function getCouponStatistics(params?: any) {
-  return requestClient.get('/coupons/statistics', { params });
+  return requestClient.get<CouponStatistics>('/coupons/statistics', { params });
 }

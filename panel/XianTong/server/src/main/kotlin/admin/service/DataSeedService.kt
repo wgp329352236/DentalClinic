@@ -916,6 +916,7 @@ object DataSeedService {
         )
         ensureMenu(couponDirId, "优惠券模板", "menu", "/coupon/index", "/coupon/index", "coupon:view", "lucide:ticket", 1)
         ensureMenu(couponDirId, "发放记录", "menu", "/coupon/record", "/coupon/record", "coupon:view", "lucide:list", 2)
+        ensureMenu(couponDirId, "优惠券统计", "menu", "/coupon/statistics", "/coupon/statistics", "coupon:view", "lucide:bar-chart-3", 3)
 
         // 推荐活动
         val referralDirId = ensureMenu(
@@ -1031,7 +1032,7 @@ object DataSeedService {
             "/clinic-ops", "/clinic-ops/clinic", "/clinic-ops/department", "/clinic-ops/doctor", "/clinic-ops/schedule", "/clinic-ops/appointment", "/clinic-ops/appointment-board",
             "/customer-ops", "/customer-ops/customer", "/customer-ops/customer-tags", "/customer-ops/points-rules", "/customer-ops/points-records",
             "/customer-ops/consumption", "/customer-ops/recharge-tier", "/customer-ops/member-level", "/customer-ops/recharge-records",
-            "/coupon", "/coupon/index", "/coupon/record",
+            "/coupon", "/coupon/index", "/coupon/record", "/coupon/statistics",
             "/referral", "/referral/index", "/referral/reward",
             "/content", "/content/activity", "/content/banner", "/content/notice",
             "/notification", "/notification/rules", "/notification/history", "/notification/template",

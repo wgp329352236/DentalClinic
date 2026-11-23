@@ -1,13 +1,21 @@
 <script lang="ts" setup>
+import { computed, ref } from 'vue';
+
 import { useVbenModal } from '@vben/common-ui';
 
 import { message } from 'ant-design-vue';
 
 import { useVbenForm } from '#/adapter/form';
 import { getDoctors } from '#/api/doctor';
-import { createSchedule } from '#/api/schedule';
+import { createSchedule, updateSchedule } from '#/api/schedule';
 
 const emit = defineEmits<{ success: [] }>();
+
+const mode = ref<'create' | 'edit'>('create');
+const editingId = ref(0);
+const title = computed(() =>
+  mode.value === 'create' ? '新建排班' : '编辑排班',
+);
 
 const [Form, formApi] = useVbenForm({
   showDefaultActions: false,
@@ -44,18 +52,28 @@ const [Form, formApi] = useVbenForm({
       },
     },
     {
-      component: 'Input',
+      component: 'TimePicker',
       fieldName: 'startTime',
       label: '开始时间',
       rules: 'required',
-      componentProps: { placeholder: 'HH:mm，如 09:00' },
+      componentProps: {
+        format: 'HH:mm',
+        placeholder: '请选择开始时间',
+        style: 'width: 100%',
+        valueFormat: 'HH:mm',
+      },
     },
     {
-      component: 'Input',
+      component: 'TimePicker',
       fieldName: 'endTime',
       label: '结束时间',
       rules: 'required',
-      componentProps: { placeholder: 'HH:mm，如 12:00' },
+      componentProps: {
+        format: 'HH:mm',
+        placeholder: '请选择结束时间',
+        style: 'width: 100%',
+        valueFormat: 'HH:mm',
+      },
     },
     {
       component: 'InputNumber',
@@ -79,9 +97,21 @@ const [Form, formApi] = useVbenForm({
 const [Modal, modalApi] = useVbenModal({
   onOpenChange(isOpen) {
     if (isOpen) {
-      const data = modalApi.getData<{ doctorId?: number }>();
+      const data = modalApi.getData<{ doctorId?: number; row?: any }>();
+      const row = data?.row;
+      mode.value = row ? 'edit' : 'create';
+      editingId.value = row?.id ?? 0;
       formApi.resetForm();
-      if (data?.doctorId) {
+      if (row) {
+        formApi.setValues({
+          dayOfWeek: row.dayOfWeek,
+          doctorId: row.doctorId,
+          endTime: row.endTime,
+          maxAppointments: row.maxAppointments,
+          slotDuration: row.slotDuration,
+          startTime: row.startTime,
+        });
+      } else if (data?.doctorId) {
         formApi.setValues({ doctorId: data.doctorId });
       }
     }
@@ -90,8 +120,13 @@ const [Modal, modalApi] = useVbenModal({
     const { valid } = await formApi.validate();
     if (!valid) return;
     const values = await formApi.getValues();
-    await createSchedule(values);
-    message.success('创建成功');
+    if (mode.value === 'create') {
+      await createSchedule(values);
+      message.success('创建成功');
+    } else {
+      await updateSchedule(editingId.value, values);
+      message.success('更新成功');
+    }
     emit('success');
     modalApi.close();
   },
@@ -99,7 +134,7 @@ const [Modal, modalApi] = useVbenModal({
 </script>
 
 <template>
-  <Modal title="新建排班">
+  <Modal :title="title">
     <Form />
   </Modal>
 </template>

@@ -17,18 +17,21 @@ function formatBusinessDays(raw: unknown): string {
     .split(',')
     .map((item) => Number(item.trim()))
     .filter((day) => Number.isInteger(day) && day >= 1 && day <= 7)
-    .sort((a, b) => a - b);
+    .toSorted((a, b) => a - b);
   if (days.length === 7) return '每天';
   if (days.length === 0) return '未设置';
   // 连续星期合并为区间，与 C 端文案保持一致
   const parts: string[] = [];
-  let rangeStart = days[0];
-  let rangeEnd = days[0];
+  const firstDay = days[0];
+  if (firstDay === undefined) return '未设置';
+  let rangeStart = firstDay;
+  let rangeEnd = firstDay;
+  const label = (day: number) => weekdayLabels[day - 1] ?? `星期${day}`;
   const flush = () => {
     parts.push(
       rangeStart === rangeEnd
-        ? weekdayLabels[rangeStart - 1]
-        : `${weekdayLabels[rangeStart - 1]}至${weekdayLabels[rangeEnd - 1]}`,
+        ? label(rangeStart)
+        : `${label(rangeStart)}至${label(rangeEnd)}`,
     );
   };
   for (const day of days.slice(1)) {
@@ -134,7 +137,9 @@ async function onDelete(row: any) {
       </template>
       <template #businessHours="{ row }">
         <div>{{ formatBusinessDays(row.businessDays) }}</div>
-        <div class="text-xs opacity-60">{{ row.openTime }} - {{ row.closeTime }}</div>
+        <div class="text-xs opacity-60">
+          {{ row.openTime }} - {{ row.closeTime }}
+        </div>
       </template>
       <template #status="{ row }">
         <Tag :color="row.status === 1 ? 'green' : 'default'">

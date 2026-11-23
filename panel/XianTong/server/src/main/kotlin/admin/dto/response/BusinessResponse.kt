@@ -29,7 +29,7 @@ data class DoctorResponse(
 data class ScheduleResponse(
     val id: Long, val doctorId: Long, val dayOfWeek: Int,
     val startTime: String, val endTime: String,
-    val maxAppointments: Int, val isEnabled: Int
+    val maxAppointments: Int, val slotDuration: Int, val isEnabled: Int
 )
 
 // ==================== 基础数据 Request ====================
@@ -319,5 +319,11 @@ data class LevelAdjustRequest(val levelCode: Int, val reason: String)
 
 @Serializable
 data class RemarkUpdateRequest(val remark: String?)
+
+@Serializable
+data class CustomerClinicChangeRequest(
+    val clinicId: Long,
+    val reason: String
+)
 
 // PointsAdjustRequest is defined in AdminPointsService.kt (com.dentalclinic.admin.service)

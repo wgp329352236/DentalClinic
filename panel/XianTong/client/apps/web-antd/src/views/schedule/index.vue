@@ -63,6 +63,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
         slots: { default: 'timeRange' },
       },
       { field: 'maxAppointments', title: '最大预约数', width: 110 },
+      { field: 'slotDuration', title: '时段时长', width: 100 },
       {
         field: 'isEnabled',
         title: '状态',
@@ -72,7 +73,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
       {
         field: 'action',
         title: '操作',
-        width: 100,
+        width: 140,
         fixed: 'right',
         slots: { default: 'action' },
       },
@@ -97,6 +98,10 @@ const [Grid, gridApi] = useVbenVxeGrid({
 
 function onCreate() {
   formModalApi.setData({ doctorId: selectedDoctorId.value }).open();
+}
+
+function onEdit(row: any) {
+  formModalApi.setData({ row }).open();
 }
 
 async function onDelete(row: any) {
@@ -135,6 +140,7 @@ async function onDelete(row: any) {
         </Tag>
       </template>
       <template #action="{ row }">
+        <Button type="link" size="small" @click="onEdit(row)">编辑</Button>
         <Button type="link" size="small" danger @click="onDelete(row)">
           删除
         </Button>

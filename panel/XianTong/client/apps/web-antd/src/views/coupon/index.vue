@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import { Page, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
+import { useRouter } from 'vue-router';
 
 import { Button, message, Modal, Tag } from 'ant-design-vue';
 
@@ -8,7 +9,9 @@ import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { deleteCouponTemplate, getCouponTemplates } from '#/api/coupon';
 
 import CouponFormModal from './form-modal.vue';
+import GrantModal from './grant-modal.vue';
 import PromoQrModalComponent from './promo-qr-modal.vue';
+import RedeemModal from './redeem-modal.vue';
 
 const couponTypeMap: Record<string, string> = {
   cash: '现金券',
@@ -25,6 +28,18 @@ const [PromoQrModal, promoQrModalApi] = useVbenModal({
   connectedComponent: PromoQrModalComponent,
   destroyOnClose: true,
 });
+
+const [GrantCouponModal, grantCouponModalApi] = useVbenModal({
+  connectedComponent: GrantModal,
+  destroyOnClose: true,
+});
+
+const [RedeemCouponModal, redeemCouponModalApi] = useVbenModal({
+  connectedComponent: RedeemModal,
+  destroyOnClose: true,
+});
+
+const router = useRouter();
 
 const [Grid, gridApi] = useVbenVxeGrid({
   gridOptions: {
@@ -56,7 +71,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
       {
         field: 'action',
         title: '操作',
-        width: 140,
+        width: 210,
         fixed: 'right',
         slots: { default: 'action' },
       },
@@ -86,6 +101,14 @@ function onPromoQr(row: any) {
   promoQrModalApi.setData({ row }).open();
 }
 
+function onGrant(row?: any) {
+  grantCouponModalApi.setData({ row }).open();
+}
+
+function onRedeem() {
+  redeemCouponModalApi.open();
+}
+
 async function onDelete(row: any) {
   Modal.confirm({
     title: '删除优惠券模板',
@@ -104,12 +127,17 @@ async function onDelete(row: any) {
   <Page auto-content-height>
     <FormModal @success="gridApi.query()" />
     <PromoQrModal />
+    <GrantCouponModal @success="gridApi.query()" />
+    <RedeemCouponModal @success="gridApi.query()" />
     <Grid table-title="优惠券模板">
       <template #toolbar-tools>
         <Button type="primary" @click="onCreate">
           <Plus class="size-5" />
           新建优惠券
         </Button>
+        <Button @click="onGrant()">定向发券</Button>
+        <Button @click="onRedeem">扫码核销</Button>
+        <Button @click="router.push('/coupon/statistics')">统计</Button>
       </template>
       <template #couponType="{ row }">
         <Tag color="blue">
@@ -126,6 +154,7 @@ async function onDelete(row: any) {
       </template>
       <template #action="{ row }">
         <Button type="link" size="small" @click="onEdit(row)">编辑</Button>
+        <Button type="link" size="small" @click="onGrant(row)">发券</Button>
         <Button type="link" size="small" @click="onPromoQr(row)">推广码</Button>
         <Button type="link" size="small" danger @click="onDelete(row)">
           删除

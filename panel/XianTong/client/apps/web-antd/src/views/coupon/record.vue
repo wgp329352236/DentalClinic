@@ -1,10 +1,12 @@
 <script lang="ts" setup>
-import { Page } from '@vben/common-ui';
+import { Page, useVbenModal } from '@vben/common-ui';
 
-import { Tag } from 'ant-design-vue';
+import { Button, Tag } from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getCouponRecords } from '#/api/coupon';
+
+import RedeemModal from './redeem-modal.vue';
 
 const statusMap: Record<string, { color: string; text: string }> = {
   expired: { color: 'default', text: '已过期' },
@@ -12,7 +14,7 @@ const statusMap: Record<string, { color: string; text: string }> = {
   used: { color: 'blue', text: '已使用' },
 };
 
-const [Grid] = useVbenVxeGrid({
+const [Grid, gridApi] = useVbenVxeGrid({
   formOptions: {
     schema: [
       {
@@ -76,11 +78,20 @@ const [Grid] = useVbenVxeGrid({
     toolbarConfig: { custom: true, refresh: true, search: true, zoom: true },
   },
 });
+
+const [RedeemCouponModal, redeemCouponModalApi] = useVbenModal({
+  connectedComponent: RedeemModal,
+  destroyOnClose: true,
+});
 </script>
 
 <template>
   <Page auto-content-height>
+    <RedeemCouponModal @success="gridApi.query()" />
     <Grid table-title="优惠券发放记录">
+      <template #toolbar-tools>
+        <Button @click="redeemCouponModalApi.open()">扫码核销</Button>
+      </template>
       <template #status="{ row }">
         <Tag :color="statusMap[row.status]?.color || 'default'">
           {{ statusMap[row.status]?.text || row.status }}

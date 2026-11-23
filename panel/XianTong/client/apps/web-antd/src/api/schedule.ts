@@ -14,6 +14,11 @@ export async function createSchedule(data: any) {
   return requestClient.post('/schedules', data);
 }
 
+// 编辑排班
+export async function updateSchedule(id: number, data: any) {
+  return requestClient.put(`/schedules/${id}`, data);
+}
+
 // 删除排班
 export async function deleteSchedule(id: number) {
   return requestClient.delete(`/schedules/${id}`);

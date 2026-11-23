@@ -10,6 +10,7 @@ import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.inList
+import org.jetbrains.exposed.v1.core.plus
 import org.jetbrains.exposed.v1.r2dbc.andWhere
 import org.jetbrains.exposed.v1.r2dbc.deleteWhere
 import org.jetbrains.exposed.v1.r2dbc.insert
@@ -105,6 +106,13 @@ class AdminCouponService : BaseService() {
             .toList()
             .singleOrNull()
             ?: return@dbQuery GrantResult.Error("优惠券模板不存在")
+
+        if (template[CouponTemplates.status] != 1) {
+            return@dbQuery GrantResult.Error("优惠券模板已停用，不能发放")
+        }
+        if (template[CouponTemplates.validTo].isBefore(LocalDateTime.now())) {
+            return@dbQuery GrantResult.Error("优惠券模板已过期，不能发放")
+        }
 
         // Check stock
         val issuedQuantity = template[CouponTemplates.issuedQuantity]
@@ -233,15 +241,23 @@ class AdminCouponService : BaseService() {
                 return@dbQuery ScanRedeemResult.Error("优惠券已过期")
             }
 
-            // Mark as used
-            UserCoupons.update({ UserCoupons.id eq couponId }) {
+            // 条件更新保证并发扫码时只有一次核销成功，避免重复计数。
+            val marked = UserCoupons.update({
+                (UserCoupons.id eq couponId) and
+                    (UserCoupons.userId eq userId) and
+                    (UserCoupons.couponCode eq couponCode) and
+                    (UserCoupons.status eq "unused")
+            }) {
                 it[UserCoupons.status] = "used"
                 it[UserCoupons.usedAt] = now
             }
+            if (marked == 0) {
+                return@dbQuery ScanRedeemResult.Error("优惠券已使用或已过期")
+            }
 
-            // Update used quantity in template
+            // 原子自增，避免多个核销请求同时覆盖同一个旧值。
             CouponTemplates.update({ CouponTemplates.id eq coupon[UserCoupons.templateId] }) {
-                it[CouponTemplates.usedQuantity] = template[CouponTemplates.usedQuantity] + 1
+                it[CouponTemplates.usedQuantity] = CouponTemplates.usedQuantity + 1
             }
 
             ScanRedeemResult.Success(

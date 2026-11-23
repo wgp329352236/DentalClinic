@@ -75,9 +75,14 @@ object MemberLevelReviewService : BaseService() {
             .where {
                 (ConsumptionRecords.createdAt greaterEq yearStart) and
                     (ConsumptionRecords.createdAt less yearEnd) and
-                    (ConsumptionRecords.status eq "success")
+                    (ConsumptionRecords.status eq "success") and
+                    // 与营收看板、客户累计消费保持一致：待支付尾款不算年度消费，
+                    // 否则 status=success + paymentStatus=pending 的记录会虚增复评金额。
+                    (ConsumptionRecords.paymentStatus eq "success")
             }
             .toList()
+            // 双重保障：即使后续有人调整 SQL 条件，也不会把未支付记录计入年度消费。
+            .filter { isPaidConsumption(it[ConsumptionRecords.status], it[ConsumptionRecords.paymentStatus]) }
             .groupBy { it[ConsumptionRecords.userId] }
             .mapValues { (_, rows) ->
                 rows.fold(BigDecimal.ZERO) { acc, row -> acc.add(row[ConsumptionRecords.amount]) }
@@ -129,4 +134,8 @@ object MemberLevelReviewService : BaseService() {
         }
         downgradedCount
     }
+
+    /** 只有业务完成且资金已到账的消费才进入会员年度复评口径。 */
+    internal fun isPaidConsumption(status: String, paymentStatus: String): Boolean =
+        status == "success" && paymentStatus == "success"
 }

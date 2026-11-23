@@ -7,9 +7,11 @@ import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getClinics } from '#/api/clinic';
 import { getCustomers } from '#/api/customer';
 import { getCustomerTags } from '#/api/customerTag';
+import { getMemberLevels } from '#/api/member';
 
 import CustomerAdjustModal from './adjust-modal.vue';
 import CustomerDetailModal from './detail-modal.vue';
+import CustomerClinicModal from './clinic-modal.vue';
 
 const genderMap: Record<number, string> = { 0: '未知', 1: '男', 2: '女' };
 
@@ -20,6 +22,11 @@ const [DetailModal, detailModalApi] = useVbenModal({
 
 const [AdjustModal, adjustModalApi] = useVbenModal({
   connectedComponent: CustomerAdjustModal,
+  destroyOnClose: true,
+});
+
+const [ClinicModal, clinicModalApi] = useVbenModal({
+  connectedComponent: CustomerClinicModal,
   destroyOnClose: true,
 });
 
@@ -57,6 +64,30 @@ const [Grid, gridApi] = useVbenVxeGrid({
         },
         fieldName: 'tagId',
         label: '标签',
+      },
+      {
+        component: 'ApiSelect',
+        componentProps: {
+          allowClear: true,
+          api: getMemberLevels,
+          labelField: 'levelName',
+          placeholder: '全部等级',
+          style: 'width: 100%',
+          valueField: 'levelCode',
+        },
+        fieldName: 'memberLevel',
+        label: '会员等级',
+      },
+      {
+        component: 'RangePicker',
+        componentProps: {
+          allowClear: true,
+          placeholder: ['注册开始日期', '注册结束日期'],
+          style: 'width: 100%',
+          valueFormat: 'YYYY-MM-DD',
+        },
+        fieldName: 'registrationRange',
+        label: '注册时间',
       },
     ],
     submitOnChange: true,
@@ -96,7 +127,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
       {
         field: 'action',
         title: '操作',
-        width: 140,
+        width: 210,
         fixed: 'right',
         slots: { default: 'action' },
       },
@@ -105,8 +136,11 @@ const [Grid, gridApi] = useVbenVxeGrid({
     proxyConfig: {
       ajax: {
         query: async ({ page }: any, formValues: any) => {
+          const { registrationRange, ...params } = formValues ?? {};
           const res = await getCustomers({
-            ...formValues,
+            ...params,
+            startDate: registrationRange?.[0],
+            endDate: registrationRange?.[1],
             page: page.currentPage,
             pageSize: page.pageSize,
           });
@@ -126,12 +160,17 @@ function onDetail(row: any) {
 function onAdjust(row: any) {
   adjustModalApi.setData({ row }).open();
 }
+
+function onChangeClinic(row: any) {
+  clinicModalApi.setData({ row }).open();
+}
 </script>
 
 <template>
   <Page auto-content-height>
     <DetailModal />
     <AdjustModal @success="gridApi.query()" />
+    <ClinicModal @success="gridApi.query()" />
     <Grid table-title="客户管理">
       <template #name="{ row }">
         {{ row.realName || row.nickname || '-' }}
@@ -159,6 +198,9 @@ function onAdjust(row: any) {
       <template #action="{ row }">
         <Button type="link" size="small" @click="onDetail(row)">详情</Button>
         <Button type="link" size="small" @click="onAdjust(row)">调整</Button>
+        <Button type="link" size="small" @click="onChangeClinic(row)">
+          归属门店
+        </Button>
       </template>
     </Grid>
   </Page>

@@ -11,6 +11,8 @@ import com.dentalclinic.common.CouponUsageSupport
 import com.dentalclinic.common.security.PhoneCipherService
 import com.dentalclinic.common.scheduler.ScheduledNotifier
 import kotlinx.coroutines.flow.toList
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
@@ -305,6 +307,7 @@ class ScheduleService : BaseService() {
                     startTime = r[DoctorSchedules.startTime],
                     endTime = r[DoctorSchedules.endTime],
                     maxAppointments = r[DoctorSchedules.maxAppointments],
+                    slotDuration = r[DoctorSchedules.slotDuration],
                     isEnabled = r[DoctorSchedules.isEnabled]
                 )
             }
@@ -312,21 +315,97 @@ class ScheduleService : BaseService() {
 
     suspend fun createSchedule(req: ScheduleRequest, scope: ClinicScope): Long = dbQuery {
         requireDoctorInScope(req.doctorId, scope)
+        val values = validateSchedule(req)
+        ensureNoScheduleOverlap(req.doctorId, req.dayOfWeek, values, excludeId = null)
         DoctorSchedules.insert {
             it[doctorId] = req.doctorId
             it[dayOfWeek] = req.dayOfWeek
-            it[startTime] = req.startTime
-            it[endTime] = req.endTime
-            it[maxAppointments] = req.maxAppointments
-            it[slotDuration] = req.slotDuration
+            it[startTime] = values.startTime
+            it[endTime] = values.endTime
+            it[maxAppointments] = values.maxAppointments
+            it[slotDuration] = values.slotDuration
             it[isEnabled] = 1
         } get DoctorSchedules.id
+    }
+
+    suspend fun updateSchedule(id: Long, req: ScheduleRequest, scope: ClinicScope): Unit = dbQuery {
+        requireScheduleInScope(id, scope)
+        requireDoctorInScope(req.doctorId, scope)
+        val values = validateSchedule(req)
+        ensureNoScheduleOverlap(req.doctorId, req.dayOfWeek, values, excludeId = id)
+
+        DoctorSchedules.update({ DoctorSchedules.id eq id }) {
+            it[doctorId] = req.doctorId
+            it[dayOfWeek] = req.dayOfWeek
+            it[startTime] = values.startTime
+            it[endTime] = values.endTime
+            it[maxAppointments] = values.maxAppointments
+            it[slotDuration] = values.slotDuration
+        }
     }
 
     suspend fun deleteSchedule(id: Long, scope: ClinicScope): Unit = dbQuery {
         requireScheduleInScope(id, scope)
         DoctorSchedules.deleteWhere { DoctorSchedules.id eq id }
     }
+
+    private fun validateSchedule(req: ScheduleRequest): ValidatedSchedule {
+        if (req.dayOfWeek !in 1..7) throw ValidationException("星期取值必须为 1-7")
+        if (req.maxAppointments < 1) throw ValidationException("最大预约数必须大于 0")
+        if (req.slotDuration !in 15..120) throw ValidationException("时段时长必须在 15-120 分钟之间")
+
+        val start = parseScheduleTime(req.startTime, "开始时间")
+        val end = parseScheduleTime(req.endTime, "结束时间")
+        if (start >= end) throw ValidationException("结束时间必须晚于开始时间")
+
+        val formatter = DateTimeFormatter.ofPattern("HH:mm")
+        return ValidatedSchedule(
+            startTime = start.format(formatter),
+            endTime = end.format(formatter),
+            maxAppointments = req.maxAppointments,
+            slotDuration = req.slotDuration
+        )
+    }
+
+    private fun parseScheduleTime(value: String, label: String): LocalTime =
+        try {
+            LocalTime.parse(value.trim())
+        } catch (_: DateTimeParseException) {
+            throw ValidationException("${label}格式应为 HH:mm，收到：$value")
+        }
+
+    private suspend fun ensureNoScheduleOverlap(
+        doctorId: Long,
+        dayOfWeek: Int,
+        values: ValidatedSchedule,
+        excludeId: Long?
+    ) {
+        val rows = DoctorSchedules.selectAll()
+            .where { (DoctorSchedules.doctorId eq doctorId) and (DoctorSchedules.dayOfWeek eq dayOfWeek) }
+            .toList()
+        val requestedStart = LocalTime.parse(values.startTime)
+        val requestedEnd = LocalTime.parse(values.endTime)
+        val conflict = rows.firstOrNull { row ->
+            if (row[DoctorSchedules.id] == excludeId) return@firstOrNull false
+            val existingStart = runCatching { LocalTime.parse(row[DoctorSchedules.startTime]) }.getOrNull()
+                ?: return@firstOrNull false
+            val existingEnd = runCatching { LocalTime.parse(row[DoctorSchedules.endTime]) }.getOrNull()
+                ?: return@firstOrNull false
+            existingStart < requestedEnd && existingEnd > requestedStart
+        }
+        if (conflict != null) {
+            throw ConflictException(
+                "与已有排班冲突：${conflict[DoctorSchedules.startTime]}-${conflict[DoctorSchedules.endTime]}"
+            )
+        }
+    }
+
+    private data class ValidatedSchedule(
+        val startTime: String,
+        val endTime: String,
+        val maxAppointments: Int,
+        val slotDuration: Int
+    )
 }
 
 /**
@@ -1515,5 +1594,62 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
             it[Users.remark] = remark
             it[Users.updatedAt] = LocalDateTime.now()
         }
+    }
+
+    suspend fun changePrimaryClinic(
+        userId: Long,
+        clinicId: Long,
+        reason: String,
+        adminUserId: Long,
+        operator: String,
+        ipAddress: String? = null,
+        userAgent: String? = null,
+        scope: ClinicScope = ClinicScope.ALL
+    ): Unit = dbQuery {
+        val user = requireUserInScope(userId, scope)
+        if (reason.isBlank()) throw ValidationException("调整原因不能为空")
+        val targetClinic = requireClinicInScope(clinicId, scope)
+        val oldClinicId = user[Users.primaryClinicId]
+        if (oldClinicId == clinicId) throw ValidationException("客户已归属该门店，无需调整")
+
+        val oldClinicName = oldClinicId?.let { id ->
+            Clinics.selectAll().where { Clinics.id eq id }.toList().singleOrNull()?.get(Clinics.name)
+        }
+        val targetClinicName = targetClinic[Clinics.name]
+        val now = LocalDateTime.now()
+
+        Users.update({ Users.id eq userId }) {
+            it[Users.primaryClinicId] = clinicId
+            it[Users.updatedAt] = now
+        }
+
+        // 归属门店会影响客户列表、预约和资金数据的可见范围，必须留下可查询的操作凭证。
+        val auditParams = buildJsonObject {
+            put("oldClinicId", oldClinicId)
+            put("oldClinicName", oldClinicName ?: "")
+            put("newClinicId", clinicId)
+            put("newClinicName", targetClinicName)
+            put("reason", reason.take(500))
+        }.toString()
+        AdminAuditLogs.insert {
+            it[AdminAuditLogs.userId] = adminUserId
+            it[AdminAuditLogs.username] = operator
+            it[AdminAuditLogs.operationType] = "customer_clinic_change"
+            it[AdminAuditLogs.targetResource] = "customer_primary_clinic"
+            it[AdminAuditLogs.targetId] = userId.toString()
+            it[AdminAuditLogs.requestParams] = auditParams
+            it[AdminAuditLogs.responseCode] = 200
+            it[AdminAuditLogs.ipAddress] = ipAddress?.take(45)
+            it[AdminAuditLogs.userAgent] = userAgent?.take(255)
+            it[AdminAuditLogs.createdAt] = now
+        }
+
+        sendNotification(
+            userId = userId,
+            title = "归属门店调整通知",
+            content = "您的归属门店已由「${oldClinicName ?: "未设置"}」调整为「$targetClinicName」。" +
+                "原因：${reason.take(100)}。如有疑问请联系门店工作人员。",
+            msgType = "system"
+        )
     }
 }

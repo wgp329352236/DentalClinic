@@ -2,6 +2,60 @@
 
 本文件按日期倒序记录 XianTong 项目的代码改动，每条包含：改了什么、为什么改、影响范围。
 
+## 2026-11-23
+
+### 新增本地一键启动脚本（新增）
+
+- **改了什么**：新增 `panel/XianTong/start-local.sh`。检测 8080/5666 端口，已监听的服务直接复用；后端复用 `server/run-local.sh`（自动加载 `server/.env.local`），前端执行 `pnpm -F @vben/web-antd run dev`；日志写入 `panel/XianTong/logs/{backend,frontend}.log`；启动后按端口探活并打印管理端地址与当前局域网地址（供小程序真机联调）；支持 `--backend-only` / `--frontend-only`；Ctrl+C 时回收本次启动的子进程并按端口兜底清理。
+- **原因**：本地联调需要分别手动启动前后端，容易漏加载 `.env.local`（导致能力误降级为 mock）或撞端口，且内网 IP 变化后难以确认小程序该指向哪个地址。
+- **影响范围**：仅新增脚本，无运行时行为变化；`logs/*.log` 已被根 `.gitignore` 的 `*.log` 忽略。
+
+### 小程序联调 API 地址更新（修改）
+
+- **改了什么**：`app/XianTong/miniprogram/utils/request.ts` 的 `API_ORIGIN` 由 `http://192.168.1.102:8080` 改为 `http://192.168.1.182:8080`。
+- **原因**：本机内网 IP 变化，真机预览请求原地址无法连通。
+- **影响范围**：仅开发环境常量，`USE_MOCK` 仍为 `false`；上线前需切换为生产 HTTPS 域名。
+
+## 2026-11-22
+
+### 管理端优惠券定向发放、扫码核销与统计（新增）
+
+- **改了什么**：
+  1. 后端 `AdminCouponService` 新增 `grantCouponsToUsers`（目标用户去重、校验模板状态/有效期/库存，发放后累加 `issuedQuantity`，支持部分失败返回失败用户）与扫码核销逻辑（条件更新 `user_coupons.status=used` 防止并发重复核销，原子累加 `usedQuantity`）。
+  2. 后端 `CouponRoutes` 新增 `POST /api/admin/coupons/grant`、`POST /api/admin/coupons/scan-redeem`、`GET /api/admin/coupons/statistics`，统一受 `coupon:manage` 权限约束。
+  3. 前端新增 `coupon/grant-modal.vue`（选模板 + 多选客户，至少一名客户）、`coupon/redeem-modal.vue`（`qrData` 必填，成功展示券名与优惠金额）、`coupon/statistics.vue` 统计页；`coupon/index.vue` 增加「定向发券 / 扫码核销 / 统计」入口及行内「发券」；`coupon/record.vue` 增加扫码核销入口；`api/coupon.ts` 补充对应方法。
+  4. 菜单种子 `DataSeedService` 新增「优惠券统计」菜单（`/coupon/statistics`，`coupon:view`）并加入 super_admin 路由白名单。
+- **原因**：管理端此前只能创建模板、查看记录，缺少补发券、线下扫码核销和数据统计入口。
+- **影响范围**：新增接口与页面，不影响原有模板 CRUD 与推广码逻辑；统计菜单需重新登录或等待菜单同步后可见。
+
+### 客户归属门店调整（新增）
+
+- **改了什么**：
+  1. 后端新增 `PUT /api/admin/customers/{id}/clinic`（`customer:update`），请求体 `CustomerClinicChangeRequest(clinicId, reason)`；`CustomerService.changePrimaryClinic` 校验 ClinicScope 后更新归属门店，写入审计日志（操作人、IP、UA）并通知客户。
+  2. 前端新增 `customer/clinic-modal.vue`：目标门店下拉禁用当前门店、仅显示启用门店，调整原因必填且最多 500 字；`customer/index.vue` 增加「调整门店」入口；`api/customer.ts` 新增 `changeCustomerClinic`。
+- **原因**：客户跨店流转此前只能改库，缺少带原因与审计痕迹的管理入口。
+- **影响范围**：仅管理端新增操作；客户原有预约/消费记录不迁移，后续新数据按新门店权限展示。
+
+### 排班支持编辑并回显时段时长（新增）
+
+- **改了什么**：
+  1. 后端新增 `PUT /api/admin/schedules/{id}`（`doctor:update`，受 ClinicScope 约束）；`ScheduleResponse` 增加 `slotDuration` 字段。
+  2. 前端 `schedule/form-modal.vue` 改为一套表单复用新建/编辑，起止时间改用 `TimePicker`（`HH:mm`）并在编辑时回填 `slotDuration`；`schedule/index.vue` 增加「编辑」按钮与「时段时长」列；`api/schedule.ts` 新增 `updateSchedule`。
+- **原因**：此前排班只能删除重建，且列表看不到时段时长。
+- **影响范围**：排班列表接口返回新增字段（向后兼容）；新建流程不变。
+
+### 门诊营业日区间展示修复（修复）
+
+- **改了什么**：`views/clinic/index.vue` 营业日展示改用区间文案（如「周一至周五」），空数据返回「未设置」，星期编号越界回退为「星期N」，排序改用 `toSorted` 避免原地修改源数组。
+- **原因**：原实现直接按下标取星期名，空数据与越界值会显示 `undefined`，原地 `sort` 还会副作用修改源数组。
+- **影响范围**：仅门诊列表展示层，无接口变化。
+
+### 会员年度复评逻辑补齐单测（修改）
+
+- **改了什么**：`MemberLevelReviewService` 按上一年「成功且已支付」的消费汇总计算，低于当前等级门槛 50% 时触发降级，保留最低等级并做幂等处理，同时更新 `lastYearConsumption` 并发送通知；新增 `MemberLevelReviewServiceTest.kt` 覆盖支付状态过滤与降级判定。
+- **原因**：年度复评涉及金额与等级变更，缺少单测保护，支付状态过滤一旦回归会误降级。
+- **影响范围**：仅每年 1 月 1 日 00:35 的复评任务及其测试，无接口变化。
+
 ## 2026-11-20
 
 ### 小程序资料保存后回读校验（新增）
