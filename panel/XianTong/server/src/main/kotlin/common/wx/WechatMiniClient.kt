@@ -20,8 +20,17 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import org.slf4j.LoggerFactory
 
-/** 微信接口业务错误（errcode != 0 或网络层失败）。 */
-class WechatApiException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+/**
+ * 微信接口业务错误（errcode != 0 或网络层失败）。
+ *
+ * [errcode] 保留微信原始错误码，调用方据此区分「凭证失效可重试」与「appId/appSecret 配置错误」
+ * 等不同分支，避免统一回 500 让用户无意义地重试；网络层/配置缺失类失败为 null。
+ */
+class WechatApiException(
+    message: String,
+    val errcode: Int? = null,
+    cause: Throwable? = null
+) : RuntimeException(message, cause)
 
 /** code2session 结果。 */
 data class WxSession(
@@ -77,13 +86,16 @@ object WechatMiniClient {
         val text = try {
             client.get(url).bodyAsText()
         } catch (e: Exception) {
-            throw WechatApiException("调用微信 code2session 网络失败: ${e.message}", e)
+            throw WechatApiException("调用微信 code2session 网络失败: ${e.message}", cause = e)
         }
 
         val resp = json.decodeFromString<Code2SessionResp>(text)
         // 成功时无 errcode；失败时 errcode 非 0 且 openid 为空
         if (resp.errcode != null && resp.errcode != 0) {
-            throw WechatApiException("微信 code2session 失败 errcode=${resp.errcode} errmsg=${resp.errmsg}")
+            throw WechatApiException(
+                "微信 code2session 失败 errcode=${resp.errcode} errmsg=${resp.errmsg}",
+                errcode = resp.errcode
+            )
         }
         val openid = resp.openid
             ?: throw WechatApiException("微信 code2session 返回缺少 openid: $text")
@@ -104,12 +116,15 @@ object WechatMiniClient {
                 setBody("""{"code":"$phoneCode"}""")
             }.bodyAsText()
         } catch (e: Exception) {
-            throw WechatApiException("调用微信 getuserphonenumber 网络失败: ${e.message}", e)
+            throw WechatApiException("调用微信 getuserphonenumber 网络失败: ${e.message}", cause = e)
         }
 
         val resp = json.decodeFromString<PhoneNumberResp>(text)
         if (resp.errcode != null && resp.errcode != 0) {
-            throw WechatApiException("微信获取手机号失败 errcode=${resp.errcode} errmsg=${resp.errmsg}")
+            throw WechatApiException(
+                "微信获取手机号失败 errcode=${resp.errcode} errmsg=${resp.errmsg}",
+                errcode = resp.errcode
+            )
         }
         return resp.phoneInfo?.phoneNumber?.takeIf { it.isNotBlank() }
     }
@@ -259,12 +274,15 @@ object WechatMiniClient {
         val text = try {
             client.get(url).bodyAsText()
         } catch (e: Exception) {
-            throw WechatApiException("获取微信 access_token 网络失败: ${e.message}", e)
+            throw WechatApiException("获取微信 access_token 网络失败: ${e.message}", cause = e)
         }
         val resp = json.decodeFromString<AccessTokenResp>(text)
         val token = resp.accessToken
         if (token.isNullOrBlank()) {
-            throw WechatApiException("获取微信 access_token 失败 errcode=${resp.errcode} errmsg=${resp.errmsg}")
+            throw WechatApiException(
+                "获取微信 access_token 失败 errcode=${resp.errcode} errmsg=${resp.errmsg}",
+                errcode = resp.errcode
+            )
         }
         // 提前 5 分钟过期，临界点用旧 token 换取的数据不会在处理途中失效
         val marginMillis = 5 * 60_000L

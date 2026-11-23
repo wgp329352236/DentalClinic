@@ -1,5 +1,6 @@
 package com.dentalclinic.user.route
 
+import com.dentalclinic.common.wx.WechatApiException
 import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.ContentTransformationException
 import io.r2dbc.spi.R2dbcException
@@ -95,3 +96,35 @@ internal fun translateApiError(
             500 to fallback
         }
     }
+
+/**
+ * 微信登录相关错误码 → (body.code, 面向 C 端的提示)。
+ *
+ * 微信 errcode 是稳定契约，按「用户能否自行解决」分三类翻译：
+ * - 凭证问题（40029 invalid code / 40163 code been used）：用户重新点一次登录即可，回 400 引导重试；
+ * - 频率限制（45011）：短时间重复点击/多人共用同一 code，回 429 要求稍后重试；
+ * - 凭证配置错误（40013 appid 无效 / 40125 appsecret 无效 / 40164 IP 未白名单）：
+ *   重试不会恢复，必须运维改配置，回 500 但提示「配置异常」，避免用户反复尝试。
+ *
+ * 未命中的错误（网络超时、openid 缺失等）仍走 [translateApiError] 的通用兜底，
+ * 原始 errcode/errmsg 只留在日志里，不回传调用方。
+ */
+private val WECHAT_LOGIN_ERRORS: Map<Int, Pair<Int, String>> = mapOf(
+    40029 to (400 to "登录凭证已失效，请重新点击登录"),
+    40163 to (400 to "登录凭证已失效，请重新点击登录"),
+    45011 to (429 to "操作过于频繁，请稍后再试"),
+    40013 to (500 to "微信登录服务配置异常，请联系客服"),
+    40125 to (500 to "微信登录服务配置异常，请联系客服"),
+    40164 to (500 to "微信登录服务配置异常，请联系客服")
+)
+
+/**
+ * 微信一键登录的异常翻译：已知 errcode 走 [WECHAT_LOGIN_ERRORS]，
+ * 其余（含唯一约束冲突、请求体不合法）复用 [translateApiError]。
+ */
+internal fun translateWechatLoginError(logger: Logger, e: Exception): Pair<Int, String> {
+    val wx = e as? WechatApiException
+    val mapped = wx?.errcode?.let(WECHAT_LOGIN_ERRORS::get)
+    return if (mapped != null) mapped
+    else translateApiError(logger, "[Auth]: 微信登录", "登录失败，请稍后重试", e)
+}

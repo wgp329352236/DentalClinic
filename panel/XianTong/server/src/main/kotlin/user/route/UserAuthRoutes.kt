@@ -56,9 +56,7 @@ fun Application.userAuthRoutes(authService: UserAuthService) {
                     call.respond(ApiResponse<Unit>(code = 403, message = "账号已注销，无法登录"))
                 } catch (e: Exception) {
                     // scene 里不拼 request.code：微信登录凭证不应落入日志
-                    val (code, message) = translateApiError(
-                        logger, "[Auth]: 微信登录", "登录失败，请稍后重试", e
-                    )
+                    val (code, message) = translateWechatLoginError(logger, e)
                     call.respond(ApiResponse<Unit>(code = code, message = message))
                 }
             }
