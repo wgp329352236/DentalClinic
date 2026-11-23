@@ -10,6 +10,7 @@ import {
   isValidCoordinate,
   resolveFileUrl
 } from '../../utils/util'
+import type { UserLocation } from '../../utils/util'
 
 // tabBar 页面清单（与 app.json 的 tabBar.list 一致）。
 // wx.navigateTo 跳 tabBar 页会静默失败，必须用 switchTab，
@@ -375,54 +376,82 @@ Page({
   // 加载门店列表
   async loadClinics() {
     try {
-      // 距离定位只在本页加载时请求一次；拒绝授权或定位失败时不影响门店展示。
-      const [result, location] = await Promise.all([getClinics(), getCurrentLocation()])
-      if (result.code === 0 && result.data) {
-        const clinics: Clinic[] = result.data.map((item: any) => {
-          const latitude = item.latitude == null ? null : Number(item.latitude)
-          const longitude = item.longitude == null ? null : Number(item.longitude)
-          const businessDays = item.businessDays || '1,2,3,4,5,6,7'
-          const hasCoordinates =
-            location !== null && isValidCoordinate(latitude, longitude)
-          const fallbackDistance = item.distance == null ? undefined : Number(item.distance)
-          const distance = hasCoordinates
-            ? getDistanceMeters(location, { latitude: latitude!, longitude: longitude! })
-            : Number.isFinite(fallbackDistance)
-              ? fallbackDistance
-              : undefined
-          return {
-            id: item.id,
-            name: item.name,
-            address: item.address,
-            phone: item.phone,
-            businessHours:
-              item.businessHours ||
-              (item.openTime && item.closeTime ? `${item.openTime}-${item.closeTime}` : ''),
-            businessDays,
-            latitude,
-            longitude,
-            distance,
-            distanceText: distance == null ? '' : formatDistance(distance),
-            businessDayText: formatBusinessDays(businessDays),
-            openStatusText: getBusinessStatus(
-              businessDays,
-              item.openTime,
-              item.closeTime
-            ),
-            image: resolveFileUrl(item.image || item.coverImage || '')
-          }
-        })
-        // 「附近门诊」优先按真实距离排序；坐标缺失时仍保留管理端配置的排序。
-        clinics.sort((left, right) => {
-          const leftDistance = left.distance == null ? Number.POSITIVE_INFINITY : left.distance
-          const rightDistance = right.distance == null ? Number.POSITIVE_INFINITY : right.distance
-          return leftDistance - rightDistance
-        })
-        this.setData({ clinics })
-      }
+      const result = await getClinics()
+      if (result.code !== 0 || !result.data) return
+
+      // 先用服务端数据渲染，避免定位授权弹窗阻塞列表；定位成功后只补距离。
+      this.setData({ clinics: this.mapClinics(result.data, null) })
+
+      const location = await getCurrentLocation()
+      if (!location) return
+      this.setData({ clinics: this.mapClinics(result.data, location) })
     } catch (error) {
       console.error('加载门店失败:', error)
     }
+  },
+
+  /** 把后端门店数据映射为页面展示结构，并按当前定位补充距离。 */
+  mapClinics(items: any[], location: UserLocation | null): Clinic[] {
+    const clinics: Clinic[] = items.map((item: any) => {
+      const latitude = item.latitude == null ? null : Number(item.latitude)
+      const longitude = item.longitude == null ? null : Number(item.longitude)
+      const businessDays = item.businessDays || '1,2,3,4,5,6,7'
+
+      // 只在坐标有效时构造坐标对象，避免用 hasCoordinates 布尔值配合非空断言绕过类型检查。
+      const clinicLocation: UserLocation | null =
+        isValidCoordinate(latitude, longitude)
+          ? { latitude: latitude as number, longitude: longitude as number }
+          : null
+
+      // 后端距离可能是负数、NaN 或单位异常，先收敛为合法的非负有限数。
+      const rawFallback = item.distance == null ? undefined : Number(item.distance)
+      const fallbackDistance =
+        rawFallback != null && Number.isFinite(rawFallback) && rawFallback >= 0
+          ? rawFallback
+          : undefined
+
+      const computedDistance =
+        location && clinicLocation
+          ? getDistanceMeters(location, clinicLocation)
+          : undefined
+      const distance =
+        computedDistance != null &&
+        Number.isFinite(computedDistance) &&
+        computedDistance >= 0
+          ? computedDistance
+          : fallbackDistance
+
+      return {
+        id: item.id,
+        name: item.name,
+        address: item.address,
+        phone: item.phone,
+        businessHours:
+          item.businessHours ||
+          (item.openTime && item.closeTime ? `${item.openTime}-${item.closeTime}` : ''),
+        businessDays,
+        latitude: clinicLocation ? clinicLocation.latitude : null,
+        longitude: clinicLocation ? clinicLocation.longitude : null,
+        distance,
+        distanceText: distance == null ? '' : formatDistance(distance),
+        businessDayText: formatBusinessDays(businessDays),
+        openStatusText: getBusinessStatus(
+          businessDays,
+          item.openTime,
+          item.closeTime
+        ),
+        image: resolveFileUrl(item.image || item.coverImage || '')
+      }
+    })
+
+    // 「附近门诊」优先按真实距离排序；坐标缺失时保留服务端原顺序。
+    clinics.sort((left, right) => {
+      const leftDistance = left.distance == null ? Number.POSITIVE_INFINITY : left.distance
+      const rightDistance = right.distance == null ? Number.POSITIVE_INFINITY : right.distance
+      if (leftDistance === rightDistance) return 0
+      return leftDistance - rightDistance
+    })
+    return clinics
   },
 
   /**

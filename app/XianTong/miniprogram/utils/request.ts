@@ -14,8 +14,11 @@ import { mockApiService } from './mockData'
  * 2. 真机预览：localhost 指向手机自身，需改成电脑局域网 IP（如 http://192.168.1.100:8080）
  * 3. 生产环境：必须使用 HTTPS 域名，并在微信公众平台配置 request 合法域名
  */
-export const API_ORIGIN = 'http://localhost:8080' // 开发环境
+
+export const API_ORIGIN = 'http://localhost:8080' // 开发环境（模拟器用 localhost；真机调试改为电脑局域网 IP）
 // export const API_ORIGIN = 'https://your-domain.com' // 生产环境
+
+console.log('[Config] API_ORIGIN:', API_ORIGIN)
 
 const BASE_URL = `${API_ORIGIN}/api/v1`
 
