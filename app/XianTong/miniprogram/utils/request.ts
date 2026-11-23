@@ -82,6 +82,8 @@ export function request<T = any>(options: RequestOptions): Promise<ApiResponse<T
         // 与 mock 模式错误语义保持一致
         if (data.code !== 0) {
           // 带上业务码，调用方才能区分「活动已结束(404)」这类正常分支与网络异常
+          // 同时打印完整响应，便于定位后端只回「请稍后重试」这类泛化文案的问题
+          console.warn('[Request] 业务失败:', options.method || 'GET', options.url, 'code=', data.code, 'message=', data.message, data)
           reject(Object.assign(new Error(data.message || '请求失败'), { code: data.code }))
           return
         }
