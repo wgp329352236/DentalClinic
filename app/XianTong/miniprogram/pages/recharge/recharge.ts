@@ -102,9 +102,8 @@ Page({
       wx.showLoading({ title: '下单中...' })
 
       // 1. 创建充值订单（POST /recharge/create，赠送金额由后端按规则计算）
-      const app = getApp<IAppOption>()
-      const clinicId = app.globalData.userInfo?.clinicId || 0
-      const result = await createRecharge({ amount, clinicId })
+      // 用户属于全医院，无需选择门店；门店由后端按最近到店/默认营业门店解析
+      const result = await createRecharge({ amount })
       wx.hideLoading()
 
       if (result.code !== 0 || !result.data) {

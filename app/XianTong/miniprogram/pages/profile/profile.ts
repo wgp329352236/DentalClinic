@@ -74,7 +74,6 @@ Page({
           age: d.age || 0,
           // 后端存的是 /api/v1/files/xxx.png 形式的相对地址，<image> 需要绝对地址
           avatar: resolveFileUrl(d.avatar),
-          clinicId: d.primaryClinicId || 0,
           // 等级、折扣、权益、累计消费、升级差额全部由 /profile/me 下发，
           // 不再前端硬编码：此前写死 Lv1 导致等级卡片长期展示假数据
           memberLevel: {

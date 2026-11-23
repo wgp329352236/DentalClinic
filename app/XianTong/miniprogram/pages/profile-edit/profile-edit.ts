@@ -2,11 +2,10 @@
 import {
   bindPhone,
   claimProfileCompleteReward,
-  getClinics,
   getUserProfile,
   updateUserProfile
 } from '../../utils/api'
-import type { Clinic, UpdateProfileParams } from '../../utils/api'
+import type { UpdateProfileParams } from '../../utils/api'
 import { checkLogin } from '../../utils/auth'
 import { uploadFile } from '../../utils/request'
 import { resolveFileUrl } from '../../utils/util'
@@ -27,15 +26,7 @@ Page({
     // 存的是可直接渲染的绝对地址；提交给后端时要还原成后端返回的相对地址
     avatar: '',
     avatarUploading: false,
-    submitting: false,
-
-    // 归属门店：首次设置后锁定，后续如需变更联系门店
-    primaryClinicId: null as number | null,
-    primaryClinicName: '',
-    primaryClinicLocked: false,
-    clinics: [] as Clinic[],
-    clinicNames: [] as string[],
-    clinicIndex: 0
+    submitting: false
   },
 
   // 后端返回的原始头像地址（相对路径），提交时若用户没换图就原样回传，
@@ -45,7 +36,6 @@ Page({
   async onLoad() {
     if (!checkLogin()) return
     await this.loadProfile()
-    await this.loadClinics()
   },
 
   async loadProfile() {
@@ -70,40 +60,12 @@ Page({
           phone,
           gender: d.gender ?? null,
           age: d.age ?? '',
-          avatar: resolveFileUrl(d.avatar || ''),
-          primaryClinicId: d.primaryClinicId ?? null,
-          primaryClinicLocked: d.primaryClinicId != null
+          avatar: resolveFileUrl(d.avatar || '')
         })
       }
     } catch (error) {
       console.error('[ProfileEdit] 加载资料失败:', error)
       wx.showToast({ title: '加载失败', icon: 'none' })
-    }
-  },
-
-  async loadClinics() {
-    try {
-      const result = await getClinics()
-      if (result.code !== 0 || !Array.isArray(result.data)) return
-      const clinics = result.data
-      const clinicNames = clinics.map(item => item.name)
-      const primaryClinicId = this.data.primaryClinicId
-      const matchedIndex = primaryClinicId == null
-        ? -1
-        : clinics.findIndex(item => item.id === primaryClinicId)
-      this.setData({
-        clinics,
-        clinicNames,
-        clinicIndex: matchedIndex >= 0 ? matchedIndex : 0,
-        primaryClinicName:
-          matchedIndex >= 0
-            ? clinics[matchedIndex]?.name || ''
-            : primaryClinicId != null
-              ? ''
-              : ''
-      })
-    } catch (error) {
-      console.error('[ProfileEdit] 加载门店失败:', error)
     }
   },
 
@@ -183,18 +145,6 @@ Page({
     this.setData({ gender: Number(e.detail.value) })
   },
 
-  onClinicChange(e: any) {
-    if (this.data.primaryClinicLocked) return
-    const index = Number(e.detail.value)
-    const clinic = this.data.clinics[index]
-    if (!clinic) return
-    this.setData({
-      clinicIndex: index,
-      primaryClinicId: clinic.id,
-      primaryClinicName: clinic.name
-    })
-  },
-
   /**
    * 保存后回读校验（仅开发版/体验版执行）：
    * 重新拉取服务端资料，比对本次提交的头像与昵称是否真正落库。
@@ -244,7 +194,6 @@ Page({
         avatar: this.originalAvatar || undefined
       }
       if (this.data.gender !== null) payload.gender = this.data.gender
-      if (this.data.primaryClinicId != null) payload.primaryClinicId = this.data.primaryClinicId
 
       // request.ts 已把 code !== 0 统一 reject，这里只需处理成功路径
       await updateUserProfile(payload)

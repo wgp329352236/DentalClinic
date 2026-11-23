@@ -269,7 +269,6 @@ Page({
       gender: profile.userInfo.gender === 2 ? 'female' : 'male',
       age: 0,
       avatar: profile.userInfo.avatarUrl || '',
-      clinicId: 0,
       memberLevel: {
         // 微信资料兜底路径拿不到会员信息：等级按最低的 Lv1 展示，
         // nextLevelCost 置 null 让进度条整块隐藏，而不是编一个「还需 3000」的假目标
@@ -346,7 +345,6 @@ Page({
           gender: d.gender === 2 ? 'female' : 'male',
           age: d.age || 0,
           avatar: resolveFileUrl(d.avatar),
-          clinicId: d.primaryClinicId || 0,
           // 等级/折扣/权益/累计消费/升级差额全部取自 /profile/me，不再前端写死
           memberLevel: {
             level: d.levelCode,

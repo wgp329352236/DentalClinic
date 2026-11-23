@@ -68,7 +68,6 @@ export interface UserProfileResponse {
   gender: number | null
   age: number | null
   avatar: string | null
-  primaryClinicId: number | null
   balance: number
   bonusBalance: number
   // 会员等级（需求 3.7.1 等级卡片）
@@ -90,8 +89,6 @@ export interface UpdateProfileParams {
   age?: number
   avatar?: string
   nickname?: string
-  /** 首次设置归属门店；已有归属门店时后端不允许自助修改 */
-  primaryClinicId?: number
 }
 
 /**
@@ -349,7 +346,8 @@ export function getRechargeTiers() {
  */
 export interface CreateRechargeParams {
   amount: number
-  clinicId: number
+  /** 可省略：后端按最近到店门店/默认营业门店解析 */
+  clinicId?: number
 }
 
 /** wx.requestPayment 调起参数（字段名与微信 API 保持一致） */

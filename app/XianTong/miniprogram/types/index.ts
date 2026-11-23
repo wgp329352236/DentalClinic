@@ -6,7 +6,6 @@ export interface UserInfo {
   gender: 'male' | 'female'
   age: number
   avatar: string
-  clinicId: number
   memberLevel: MemberLevel
   registerSource: 'self' | 'referral' | 'store'
   totalSpent?: number // 累计消费金额
