@@ -204,10 +204,9 @@ class PointsService : BaseService() {
         if (user[Users.realName].isNullOrBlank() ||
             phone.isNullOrBlank() ||
             user[Users.gender] == null ||
-            user[Users.age] == null ||
-            user[Users.primaryClinicId] == null
+            user[Users.age] == null
         ) {
-            return@dbQuery PointsResult.Error("请先完善姓名、手机号、性别、年龄和归属门店")
+            return@dbQuery PointsResult.Error("请先完善姓名、手机号、性别和年龄")
         }
 
         val rule = PointsRules.selectAll()

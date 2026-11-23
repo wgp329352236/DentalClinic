@@ -381,28 +381,6 @@ fun Route.customerRoutes(customerService: CustomerService) {
                     call.ok<Unit>(message = "备注更新成功")
                 }
             }
-
-            requirePermission("customer:update") {
-                put("/{id}/clinic") {
-                    val id = call.parameters["id"]?.toLongOrNull() ?: throw ValidationException("无效的客户ID")
-                    val req = call.receive<CustomerClinicChangeRequest>()
-                    val principal = call.adminPrincipal()
-                    val ipAddress = call.request.header("X-Forwarded-For")
-                        ?: call.request.header("X-Real-IP")
-                        ?: call.request.local.remoteAddress
-                    customerService.changePrimaryClinic(
-                        userId = id,
-                        clinicId = req.clinicId,
-                        reason = req.reason,
-                        adminUserId = principal.userId,
-                        operator = principal.username,
-                        ipAddress = ipAddress,
-                        userAgent = call.request.userAgent(),
-                        scope = call.clinicScope()
-                    )
-                    call.ok<Unit>(message = "客户归属门店已调整")
-                }
-            }
         }
     }
 }

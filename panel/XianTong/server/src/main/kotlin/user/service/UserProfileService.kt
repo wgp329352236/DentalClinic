@@ -1,7 +1,6 @@
 package com.dentalclinic.user.service
 
 import com.dentalclinic.admin.entity.MemberLevels
-import com.dentalclinic.admin.entity.Clinics
 import com.dentalclinic.admin.entity.UserMemberLevels
 import com.dentalclinic.admin.entity.UserPointsSummary
 import com.dentalclinic.admin.entity.UserWallets
@@ -82,7 +81,6 @@ class UserProfileService : BaseService() {
             gender = userRow[Users.gender],
             age = userRow[Users.age],
             avatar = userRow[Users.avatar],
-            primaryClinicId = userRow[Users.primaryClinicId],
             balance = walletRow?.get(UserWallets.balance)?.toDouble() ?: 0.0,
             bonusBalance = walletRow?.get(UserWallets.bonusBalance)?.toDouble() ?: 0.0,
             levelCode = currentLevel?.get(MemberLevels.levelCode) ?: 1,
@@ -126,30 +124,11 @@ class UserProfileService : BaseService() {
         // 唯一约束冲突（如手机号已被占用）不在此处捕获：
         // 交由路由层的 translateApiError 统一翻译，保持 C 端错误映射只有一处
         return dbQuery {
-            val currentUser = Users.selectAll()
+            val exists = Users.selectAll()
                 .where { Users.id eq userId }
-                .forUpdate()
                 .toList()
-                .singleOrNull()
-                ?: return@dbQuery ProfileUpdateResult.NotFound
-
-            val requestedClinicId = request.primaryClinicId
-            if (requestedClinicId != null) {
-                val currentClinicId = currentUser[Users.primaryClinicId]
-                if (currentClinicId != null && currentClinicId != requestedClinicId) {
-                    return@dbQuery ProfileUpdateResult.Error("归属门店已设置，暂不支持自行修改，请联系门店")
-                }
-                if (currentClinicId == null) {
-                    val clinic = Clinics.selectAll()
-                        .where { Clinics.id eq requestedClinicId }
-                        .toList()
-                        .singleOrNull()
-                        ?: return@dbQuery ProfileUpdateResult.Error("门店不存在")
-                    if (clinic[Clinics.status] != 1) {
-                        return@dbQuery ProfileUpdateResult.Error("门店当前未营业，请选择其他门店")
-                    }
-                }
-            }
+                .isNotEmpty()
+            if (!exists) return@dbQuery ProfileUpdateResult.NotFound
 
             val updated = Users.update({ Users.id eq userId }) {
                 if (request.realName != null) it[Users.realName] = request.realName
@@ -169,9 +148,6 @@ class UserProfileService : BaseService() {
                 if (request.age != null) it[Users.age] = request.age
                 if (request.avatar != null) it[Users.avatar] = request.avatar
                 if (request.nickname != null) it[Users.nickname] = request.nickname
-                if (requestedClinicId != null && currentUser[Users.primaryClinicId] == null) {
-                    it[Users.primaryClinicId] = requestedClinicId
-                }
             }
             if (updated > 0) ProfileUpdateResult.Success else ProfileUpdateResult.NotFound
         }
@@ -288,8 +264,7 @@ data class UpdateProfileRequest(
     val gender: Int? = null,
     val age: Int? = null,
     val avatar: String? = null,
-    val nickname: String? = null,
-    val primaryClinicId: Long? = null
+    val nickname: String? = null
 )
 
 @Serializable
@@ -302,7 +277,6 @@ data class UserProfileDto(
     val gender: Int?,
     val age: Int?,
     val avatar: String?,
-    val primaryClinicId: Long?,
     val balance: Double,
     val bonusBalance: Double,
     // ─── 会员等级（需求 3.7.1 等级卡片） ───

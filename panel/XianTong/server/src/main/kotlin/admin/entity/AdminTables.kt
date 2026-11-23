@@ -3,6 +3,7 @@ package com.dentalclinic.admin.entity
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.javatime.date
 import org.jetbrains.exposed.v1.javatime.datetime
+import java.math.BigDecimal
 import java.time.LocalDateTime
 
 // ============================================================
@@ -389,6 +390,35 @@ object Users : Table("user") {
         uniqueIndex("cuser_uk_phone_hash", phoneHash)
         index("cuser_user_idx_referred_by", false, referredBy)
         index("cuser_user_idx_created_at", false, createdAt)
+    }
+}
+
+/**
+ * 客户-门店业务关系表（多对多）。
+ *
+ * 业务口径：客户属于整个医院，门店只是就诊地点。本表记录客户与每家门店发生业务的时间与累计量，
+ * 取代原 `user.primary_clinic_id` 的单一归属模型，用于管理端门店维度的客户筛选与看板统计。
+ * 写入统一走 `CustomerClinicRelationService.touch()`，与业务事件处于同一事务。
+ */
+object CustomerClinicRelations : Table("customer_clinic_relation") {
+    val id = long("id").autoIncrement()
+    val userId = long("user_id")
+    val clinicId = long("clinic_id")
+    val firstVisitAt = datetime("first_visit_at").defaultExpression(CurrentTimestamp) // 首次与本店产生业务
+    val lastVisitAt = datetime("last_visit_at").defaultExpression(CurrentTimestamp) // 最近一次与本店产生业务
+    val appointmentCount = integer("appointment_count").default(0)
+    val consumptionCount = integer("consumption_count").default(0)
+    val consumptionAmount = decimal("consumption_amount", 12, 2).default(BigDecimal.ZERO)
+    // appointment / consumption / recharge / points_exchange / legacy_primary / manual
+    val visitSource = varchar("source", 20).default("appointment")
+    val createdAt = datetime("created_at").defaultExpression(CurrentTimestamp)
+    val updatedAt = datetime("updated_at").defaultExpression(CurrentTimestamp)
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        uniqueIndex("ccr_uk_user_clinic", userId, clinicId)
+        index("ccr_idx_clinic_last", false, clinicId, lastVisitAt)
+        index("ccr_idx_user", false, userId)
     }
 }
 

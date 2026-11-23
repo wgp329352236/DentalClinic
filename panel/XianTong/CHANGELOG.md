@@ -4,6 +4,17 @@
 
 ## 2026-11-23
 
+### 移除客户「归属门店」，改为客户-门店业务关系（修改）
+
+- **改了什么**：
+  1. 新增 `customer_clinic_relation` 表（`user_id + clinic_id` 唯一），记录首次/最近到店、预约与消费次数、消费金额、来源；由 `AdminTables.kt` 定义、`AdminModule.kt` 建表，`SchemaMigration.migrateCustomerClinicRelations()` 首次启动时按预约/消费/充值回填，并以 `user.primary_clinic_id` 兜底历史客户。
+  2. 新增 `CustomerClinicRelationService.touch()`，在用户端预约创建、管理端代客预约、消费结算、充值成功后与业务数据同事务写入关系。
+  3. 读口径切换：`ClinicScopeGuard` 客户范围、客户列表门店筛选与详情关联门店、看板新客/客户来源/等级/留存/推荐、积分兑换核销与待核销列表全部改读关系表；积分兑换改为全局口径，不校验门店。
+  4. 删除 `PUT /api/admin/customers/{id}/clinic` 及「调整归属门店」弹窗/API；资料接口不再读写 `primaryClinicId`，完善资料积分不再要求门店。
+  5. 小程序资料页删除门店 picker、`primaryClinicId` 与全局 `clinicId` 字段；充值不再传门店，由后端按最近到店/默认营业门店解析。
+- **原因**：业务上整个医院是一个整体，门店只是就诊地点，客户不归属单一门店；原 `user.primary_clinic_id` 既承担用户自选又承担管理端数据隔离，无法表达跨店就诊。
+- **影响范围**：客户数、新客数改为「首次到店」口径，同一客户可计入多家门店，看板数字会跳变；从未到店客户不再出现在单店客户列表；`user.primary_clinic_id` 暂保留，阶段 5 清理。旧版小程序仍传 `primaryClinicId` 不会报错（全局 `ignoreUnknownKeys`）。
+
 ### 微信一键登录错误码细分（修改）
 
 - **改了什么**：

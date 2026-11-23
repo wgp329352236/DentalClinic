@@ -176,7 +176,6 @@ data class CustomerResponse(
     val gender: Int?,
     val age: Int?,
     val avatar: String?,
-    val primaryClinicId: Long?,
     val balance: Double,
     val bonusBalance: Double,
     val memberLevel: Int?,
@@ -277,10 +276,20 @@ data class CustomerInfoDto(
     val gender: Int?,
     val age: Int?,
     val avatar: String?,
-    val primaryClinicId: Long?,
+    /** 关联门店（客户与门店的业务关系），按最近到店时间倒序 */
+    val clinics: List<CustomerClinicDto> = emptyList(),
     val tags: List<CustomerTagDto> = emptyList(),
     val remark: String? = null,
     val createdAt: String
+)
+
+/** 客户在某家门店的业务关系：首次/最近到店时间。 */
+@Serializable
+data class CustomerClinicDto(
+    val clinicId: Long,
+    val clinicName: String,
+    val firstVisitAt: String,
+    val lastVisitAt: String
 )
 
 @Serializable
@@ -319,11 +328,5 @@ data class LevelAdjustRequest(val levelCode: Int, val reason: String)
 
 @Serializable
 data class RemarkUpdateRequest(val remark: String?)
-
-@Serializable
-data class CustomerClinicChangeRequest(
-    val clinicId: Long,
-    val reason: String
-)
 
 // PointsAdjustRequest is defined in AdminPointsService.kt (com.dentalclinic.admin.service)

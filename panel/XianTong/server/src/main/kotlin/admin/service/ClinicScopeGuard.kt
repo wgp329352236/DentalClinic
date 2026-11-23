@@ -3,6 +3,7 @@ package com.dentalclinic.admin.service
 import com.dentalclinic.admin.auth.ClinicScope
 import com.dentalclinic.admin.entity.Appointments
 import com.dentalclinic.admin.entity.Clinics
+import com.dentalclinic.admin.entity.CustomerClinicRelations
 import com.dentalclinic.admin.entity.Departments
 import com.dentalclinic.admin.entity.DoctorClinicRels
 import com.dentalclinic.admin.entity.DoctorSchedules
@@ -12,6 +13,7 @@ import com.dentalclinic.admin.util.ForbiddenException
 import com.dentalclinic.admin.util.NotFoundException
 import kotlinx.coroutines.flow.toList
 import org.jetbrains.exposed.v1.core.ResultRow
+import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.r2dbc.selectAll
@@ -72,7 +74,8 @@ suspend fun requireClinicsInScope(clinicIds: Collection<Long>, scope: ClinicScop
 /**
  * 校验客户属于当前门店范围并返回用户行。
  *
- * 客户归属口径与客户列表一致：user.primary_clinic_id。必须在数据库事务内调用。
+ * 客户属于整个医院，没有「归属门店」；门店数据范围以客户与本店的业务关系
+ * （预约/消费/充值等，见 customer_clinic_relation）判定。必须在数据库事务内调用。
  */
 suspend fun requireUserInScope(userId: Long, scope: ClinicScope): ResultRow {
     val user = Users.selectAll()
@@ -81,8 +84,15 @@ suspend fun requireUserInScope(userId: Long, scope: ClinicScope): ResultRow {
         .singleOrNull()
         ?: throw NotFoundException("客户不存在")
 
-    if (!scope.allowsClinic(user[Users.primaryClinicId])) {
-        throw ForbiddenException("无权访问该门店的客户")
+    if (!scope.all) {
+        val related = scope.clinicIds.isNotEmpty() &&
+            CustomerClinicRelations.selectAll()
+                .where {
+                    (CustomerClinicRelations.userId eq userId) and
+                        (CustomerClinicRelations.clinicId inList scope.clinicIds)
+                }
+                .count() > 0L
+        if (!related) throw ForbiddenException("无权访问该客户")
     }
     return user
 }
@@ -175,12 +185,14 @@ suspend fun requireScheduleInScope(scheduleId: Long, scope: ClinicScope): Result
 }
 
 /**
- * 受限账号可见客户 ID。调用方必须先排除 scope.all，避免超大 IN 查询。
+ * 受限账号可见客户 ID：与授权门店有业务关系的客户。调用方必须先排除 scope.all，
+ * 避免超大 IN 查询。
  */
 suspend fun restrictedScopedUserIds(scope: ClinicScope): List<Long> {
     if (scope.all || scope.clinicIds.isEmpty()) return emptyList()
-    return Users.selectAll()
-        .where { Users.primaryClinicId inList scope.clinicIds }
+    return CustomerClinicRelations.selectAll()
+        .where { CustomerClinicRelations.clinicId inList scope.clinicIds }
         .toList()
-        .map { it[Users.id] }
+        .map { it[CustomerClinicRelations.userId] }
+        .distinct()
 }

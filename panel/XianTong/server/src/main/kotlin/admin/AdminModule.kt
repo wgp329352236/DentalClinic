@@ -69,6 +69,7 @@ fun Application.adminModule() {
                 UserMemberLevels,
                 CustomerTags,
                 UserTagRels,
+                CustomerClinicRelations,
                 ConsumptionRecords,
                 // Appointments
                 Appointments,

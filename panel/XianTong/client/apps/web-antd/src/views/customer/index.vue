@@ -11,7 +11,6 @@ import { getMemberLevels } from '#/api/member';
 
 import CustomerAdjustModal from './adjust-modal.vue';
 import CustomerDetailModal from './detail-modal.vue';
-import CustomerClinicModal from './clinic-modal.vue';
 
 const genderMap: Record<number, string> = { 0: '未知', 1: '男', 2: '女' };
 
@@ -22,11 +21,6 @@ const [DetailModal, detailModalApi] = useVbenModal({
 
 const [AdjustModal, adjustModalApi] = useVbenModal({
   connectedComponent: CustomerAdjustModal,
-  destroyOnClose: true,
-});
-
-const [ClinicModal, clinicModalApi] = useVbenModal({
-  connectedComponent: CustomerClinicModal,
   destroyOnClose: true,
 });
 
@@ -50,7 +44,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
           valueField: 'id',
         },
         fieldName: 'clinicId',
-        label: '门诊',
+        label: '就诊门店',
       },
       {
         component: 'ApiSelect',
@@ -160,17 +154,12 @@ function onDetail(row: any) {
 function onAdjust(row: any) {
   adjustModalApi.setData({ row }).open();
 }
-
-function onChangeClinic(row: any) {
-  clinicModalApi.setData({ row }).open();
-}
 </script>
 
 <template>
   <Page auto-content-height>
     <DetailModal />
     <AdjustModal @success="gridApi.query()" />
-    <ClinicModal @success="gridApi.query()" />
     <Grid table-title="客户管理">
       <template #name="{ row }">
         {{ row.realName || row.nickname || '-' }}
@@ -198,9 +187,6 @@ function onChangeClinic(row: any) {
       <template #action="{ row }">
         <Button type="link" size="small" @click="onDetail(row)">详情</Button>
         <Button type="link" size="small" @click="onAdjust(row)">调整</Button>
-        <Button type="link" size="small" @click="onChangeClinic(row)">
-          归属门店
-        </Button>
       </template>
     </Grid>
   </Page>

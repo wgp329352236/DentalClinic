@@ -11,14 +11,11 @@ import com.dentalclinic.common.CouponUsageSupport
 import com.dentalclinic.common.security.PhoneCipherService
 import com.dentalclinic.common.scheduler.ScheduledNotifier
 import kotlinx.coroutines.flow.toList
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greaterEq
 import org.jetbrains.exposed.v1.core.inList
-import org.jetbrains.exposed.v1.core.isNull
 import org.jetbrains.exposed.v1.core.lessEq
 import org.jetbrains.exposed.v1.core.like
 import org.jetbrains.exposed.v1.core.lowerCase
@@ -908,8 +905,8 @@ class AppointmentAdminService : BaseService() {
         val dayOfWeek = appointmentDate.dayOfWeek.value
 
         return dbQuery {
-            // 客户存在性（同时读取归属门店，预约后用于首次归属回填）
-            val user = Users.selectAll()
+            // 客户存在性（客户属于全医院，不再读取归属门店）
+            Users.selectAll()
                 .where { Users.id eq req.userId }
                 .toList()
                 .singleOrNull()
@@ -990,13 +987,13 @@ class AppointmentAdminService : BaseService() {
                 it[Appointments.updatedAt] = LocalDateTime.now()
             } get Appointments.id
 
-            if (user[Users.primaryClinicId] == null) {
-                Users.update({
-                    (Users.id eq req.userId) and Users.primaryClinicId.isNull()
-                }) {
-                    it[Users.primaryClinicId] = req.clinicId
-                }
-            }
+            // 方案 C：客户不属于单一门店，记录与本次就诊门店的业务关系
+            CustomerClinicRelationService.touch(
+                userId = req.userId,
+                clinicId = req.clinicId,
+                source = "appointment",
+                appointmentCount = 1
+            )
             appointmentId
         }
     }
@@ -1028,8 +1025,27 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
         startDate: String? = null,
         endDate: String? = null
     ): CustomerListResponse = dbQuery {
-        // 门店数据隔离：客户归属按首选就诊门店 primaryClinicId 判定
+        // 门店口径：客户属于整个医院，门店只是就诊地点。筛选与数据隔离按客户与本店的
+        // 业务关系（customer_clinic_relation），不再使用单一「归属门店」。
         if (scope.isEmpty) {
+            return@dbQuery CustomerListResponse(list = emptyList(), total = 0, page = page, pageSize = pageSize)
+        }
+        val relationClinicIds: List<Long>? = when {
+            clinicId != null -> {
+                requireClinicInScope(clinicId, scope)
+                listOf(clinicId)
+            }
+            !scope.all -> scope.clinicIds
+            else -> null
+        }
+        val relationUserIds: List<Long>? = relationClinicIds?.let { ids ->
+            CustomerClinicRelations.selectAll()
+                .where { CustomerClinicRelations.clinicId inList ids }
+                .toList()
+                .map { it[CustomerClinicRelations.userId] }
+                .distinct()
+        }
+        if (relationUserIds != null && relationUserIds.isEmpty()) {
             return@dbQuery CustomerListResponse(list = emptyList(), total = 0, page = page, pageSize = pageSize)
         }
         // 标签筛选：先定位打了该标签的 userId 集合（一次查询复用）；标签下无客户时直接空页，避免 IN ()
@@ -1064,11 +1080,8 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
         } else null
         
         var query = Users.selectAll()
-        if (clinicId != null) {
-            query = query.andWhere { Users.primaryClinicId eq clinicId }
-        }
-        if (!scope.all) {
-            query = query.andWhere { Users.primaryClinicId inList scope.clinicIds }
+        if (relationUserIds != null) {
+            query = query.andWhere { Users.id inList relationUserIds }
         }
         if (tagUserIds != null) {
             query = query.andWhere { Users.id inList tagUserIds }
@@ -1189,7 +1202,6 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
                 gender = user[Users.gender],
                 age = user[Users.age],
                 avatar = user[Users.avatar],
-                primaryClinicId = user[Users.primaryClinicId],
                 balance = wallet?.get(UserWallets.balance)?.toDouble() ?: 0.0,
                 bonusBalance = wallet?.get(UserWallets.bonusBalance)?.toDouble() ?: 0.0,
                 memberLevel = ml?.get(MemberLevels.levelCode),
@@ -1210,6 +1222,17 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
         scope: ClinicScope = ClinicScope.ALL
     ): CustomerDetailResponse = dbQuery {
         val user = requireUserInScope(id, scope)
+
+        // 客户与门店的业务关系：详情展示「关联门店」而非单一归属门店；
+        // 受限账号只展示授权门店内的关系，避免泄露跨店就诊信息。
+        val relations = CustomerClinicRelations.selectAll()
+            .where { CustomerClinicRelations.userId eq id }
+            .let { query ->
+                if (scope.all) query
+                else query.andWhere { CustomerClinicRelations.clinicId inList scope.clinicIds }
+            }
+            .toList()
+            .sortedByDescending { it[CustomerClinicRelations.lastVisitAt] }
 
         val wallet = UserWallets.selectAll()
             .where { UserWallets.userId eq id }
@@ -1278,7 +1301,8 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
         val appointmentDoctorIds = recentAppointments.map { it[Appointments.doctorId] }.distinct()
         val appointmentDepartmentIds = recentAppointments.mapNotNull { it[Appointments.departmentId] }.distinct()
         val consumptionClinicIds = recentConsumptions.map { it[ConsumptionRecords.clinicId] }.distinct()
-        val allClinicIds = (appointmentClinicIds + consumptionClinicIds).distinct()
+        val relationClinicIds = relations.map { it[CustomerClinicRelations.clinicId] }.distinct()
+        val allClinicIds = (appointmentClinicIds + consumptionClinicIds + relationClinicIds).distinct()
 
         val clinicsMap = if (allClinicIds.isNotEmpty()) {
             Clinics.selectAll().where { Clinics.id inList allClinicIds }.toList()
@@ -1331,7 +1355,17 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
                 gender = user[Users.gender],
                 age = user[Users.age],
                 avatar = user[Users.avatar],
-                primaryClinicId = user[Users.primaryClinicId],
+                clinics = relations.mapNotNull { rel ->
+                    val clinicId = rel[CustomerClinicRelations.clinicId]
+                    clinicsMap[clinicId]?.let { clinicRow ->
+                        CustomerClinicDto(
+                            clinicId = clinicId,
+                            clinicName = clinicRow[Clinics.name],
+                            firstVisitAt = rel[CustomerClinicRelations.firstVisitAt].toString(),
+                            lastVisitAt = rel[CustomerClinicRelations.lastVisitAt].toString()
+                        )
+                    }
+                },
                 tags = detailTags,
                 remark = user[Users.remark],
                 createdAt = user[Users.createdAt].toString()
@@ -1594,62 +1628,5 @@ class CustomerService(private val pointsService: AdminPointsService) : BaseServi
             it[Users.remark] = remark
             it[Users.updatedAt] = LocalDateTime.now()
         }
-    }
-
-    suspend fun changePrimaryClinic(
-        userId: Long,
-        clinicId: Long,
-        reason: String,
-        adminUserId: Long,
-        operator: String,
-        ipAddress: String? = null,
-        userAgent: String? = null,
-        scope: ClinicScope = ClinicScope.ALL
-    ): Unit = dbQuery {
-        val user = requireUserInScope(userId, scope)
-        if (reason.isBlank()) throw ValidationException("调整原因不能为空")
-        val targetClinic = requireClinicInScope(clinicId, scope)
-        val oldClinicId = user[Users.primaryClinicId]
-        if (oldClinicId == clinicId) throw ValidationException("客户已归属该门店，无需调整")
-
-        val oldClinicName = oldClinicId?.let { id ->
-            Clinics.selectAll().where { Clinics.id eq id }.toList().singleOrNull()?.get(Clinics.name)
-        }
-        val targetClinicName = targetClinic[Clinics.name]
-        val now = LocalDateTime.now()
-
-        Users.update({ Users.id eq userId }) {
-            it[Users.primaryClinicId] = clinicId
-            it[Users.updatedAt] = now
-        }
-
-        // 归属门店会影响客户列表、预约和资金数据的可见范围，必须留下可查询的操作凭证。
-        val auditParams = buildJsonObject {
-            put("oldClinicId", oldClinicId)
-            put("oldClinicName", oldClinicName ?: "")
-            put("newClinicId", clinicId)
-            put("newClinicName", targetClinicName)
-            put("reason", reason.take(500))
-        }.toString()
-        AdminAuditLogs.insert {
-            it[AdminAuditLogs.userId] = adminUserId
-            it[AdminAuditLogs.username] = operator
-            it[AdminAuditLogs.operationType] = "customer_clinic_change"
-            it[AdminAuditLogs.targetResource] = "customer_primary_clinic"
-            it[AdminAuditLogs.targetId] = userId.toString()
-            it[AdminAuditLogs.requestParams] = auditParams
-            it[AdminAuditLogs.responseCode] = 200
-            it[AdminAuditLogs.ipAddress] = ipAddress?.take(45)
-            it[AdminAuditLogs.userAgent] = userAgent?.take(255)
-            it[AdminAuditLogs.createdAt] = now
-        }
-
-        sendNotification(
-            userId = userId,
-            title = "归属门店调整通知",
-            content = "您的归属门店已由「${oldClinicName ?: "未设置"}」调整为「$targetClinicName」。" +
-                "原因：${reason.take(100)}。如有疑问请联系门店工作人员。",
-            msgType = "system"
-        )
     }
 }

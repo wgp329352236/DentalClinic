@@ -251,8 +251,9 @@ fun Application.userRechargeRoutes(
     }
 }
 
+/** 充值下单请求；clinicId 可省略，由后端按最近到店/默认营业门店解析。 */
 @Serializable
-data class RechargeRequest(val amount: Double, val clinicId: Long)
+data class RechargeRequest(val amount: Double, val clinicId: Long = 0)
 
 /**
  * 创建充值订单响应。

@@ -1,9 +1,12 @@
 package com.dentalclinic.user.service
 
+import com.dentalclinic.admin.entity.Clinics
+import com.dentalclinic.admin.entity.CustomerClinicRelations
 import com.dentalclinic.admin.entity.PointsRules
 import com.dentalclinic.admin.entity.RechargeRecords
 import com.dentalclinic.admin.entity.UserWallets
 import com.dentalclinic.admin.entity.Users
+import com.dentalclinic.admin.service.CustomerClinicRelationService
 import com.dentalclinic.admin.util.ConflictException
 import com.dentalclinic.common.BaseService
 import com.dentalclinic.common.scheduler.ScheduledNotifier
@@ -64,8 +67,13 @@ class RechargeService(
             return RechargeResult.Error("充值金额最多保留两位小数")
         }
 
+        // 用户属于全医院，不再有「归属门店」。客户端未指定门店时，优先取最近到店的门店，
+        // 否则取第一家营业门店；充值记录仍需一个门店用于履约与对账归属。
+        val effectiveClinicId = resolveClinicId(userId, clinicId)
+            ?: return RechargeResult.Error("暂无可用的充值门店")
+
         if (!WechatConfig.pay.enabled) {
-            return createMockOrder(userId, clinicId, amount)
+            return createMockOrder(userId, effectiveClinicId, amount)
         }
 
         // 赠送金额在事务外按当前启用档位算好（档位读取自带独立事务，不能嵌套进下单事务）
@@ -76,7 +84,7 @@ class RechargeService(
             val outTradeNo = generateOutTradeNo()
             val recordId = RechargeRecords.insert {
                 it[RechargeRecords.userId] = userId
-                it[RechargeRecords.clinicId] = clinicId
+                it[RechargeRecords.clinicId] = effectiveClinicId
                 it[RechargeRecords.amount] = amount
                 it[RechargeRecords.bonusAmount] = bonusAmount
                 it[RechargeRecords.paymentMethod] = "wechat"
@@ -180,6 +188,7 @@ class RechargeService(
                             creditIfPending(
                                 recordId = record[RechargeRecords.id],
                                 userId = record[RechargeRecords.userId],
+                                clinicId = record[RechargeRecords.clinicId],
                                 amount = record[RechargeRecords.amount],
                                 bonusAmount = record[RechargeRecords.bonusAmount],
                                 transactionId = notification.transactionId.takeIf { it.isNotBlank() },
@@ -251,6 +260,7 @@ class RechargeService(
                                 creditIfPending(
                                     recordId = fresh[RechargeRecords.id],
                                     userId = fresh[RechargeRecords.userId],
+                                    clinicId = fresh[RechargeRecords.clinicId],
                                     amount = fresh[RechargeRecords.amount],
                                     bonusAmount = fresh[RechargeRecords.bonusAmount],
                                     transactionId = state.transactionId,
@@ -298,6 +308,28 @@ class RechargeService(
     }
 
     /**
+     * 解析充值归属门店：优先使用客户端指定的有效门店；
+     * 未指定（<=0）时按最近到店门店、默认营业门店兜底。
+     */
+    private suspend fun resolveClinicId(userId: Long, requestedClinicId: Long): Long? = dbQuery {
+        if (requestedClinicId > 0) return@dbQuery requestedClinicId
+        CustomerClinicRelations.selectAll()
+            .where { CustomerClinicRelations.userId eq userId }
+            .orderBy(CustomerClinicRelations.lastVisitAt, SortOrder.DESC)
+            .limit(1)
+            .toList()
+            .firstOrNull()
+            ?.get(CustomerClinicRelations.clinicId)
+            ?: Clinics.selectAll()
+                .where { Clinics.status eq 1 }
+                .orderBy(Clinics.sortOrder, SortOrder.ASC)
+                .limit(1)
+                .toList()
+                .firstOrNull()
+                ?.get(Clinics.id)
+    }
+
+    /**
      * mock 模式：未配置微信支付时，下单即支付成功并入账（仅限本地/演示环境）。
      */
     private suspend fun createMockOrder(userId: Long, clinicId: Long, amount: BigDecimal): RechargeResult.Success {
@@ -319,6 +351,7 @@ class RechargeService(
             creditIfPending(
                 recordId = recordId,
                 userId = userId,
+                clinicId = clinicId,
                 amount = amount,
                 bonusAmount = bonusAmount,
                 transactionId = "MOCK_WX_${System.currentTimeMillis()}",
@@ -359,6 +392,7 @@ class RechargeService(
     private suspend fun creditIfPending(
         recordId: Long,
         userId: Long,
+        clinicId: Long,
         amount: BigDecimal,
         bonusAmount: BigDecimal,
         transactionId: String?,
@@ -372,6 +406,14 @@ class RechargeService(
             if (transactionId != null) it[RechargeRecords.wechatOrderId] = transactionId
         }
         if (flipped == 0) return false
+
+        // 方案 C 双写：充值成功即客户与充值门店产生业务关系
+        CustomerClinicRelationService.touch(
+            userId = userId,
+            clinicId = clinicId,
+            source = "recharge",
+            at = paidAt
+        )
 
         // Update wallet balance with optimistic locking
         val change = updateWalletBalance(userId, amount, bonusAmount)

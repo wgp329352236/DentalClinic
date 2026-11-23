@@ -48,6 +48,7 @@ object SchemaMigration {
                 migrateProfileCompletePointsUniqueIndex()
                 migrateReferralRelationIndex()
                 migrateMpBannerActivity()
+                migrateCustomerClinicRelations()
             }
         } catch (e: Exception) {
             logger.error("[SchemaMigration] 表结构迁移失败，请检查数据库权限", e)
@@ -363,6 +364,90 @@ object SchemaMigration {
             exec("CREATE UNIQUE INDEX IF NOT EXISTS mp_banner_uk_activity ON mp_banner (activity_id)")
         }
         if (added) logger.info("[SchemaMigration] mp_banner 补齐 activity_id 列与活动唯一索引。")
+    }
+
+    /**
+     * customer_clinic_relation 历史数据回填（一次性）。
+     *
+     * 表由 `SchemaUtils.create` 建好后，若表为空则按既有业务事实回填客户-门店关系：
+     * 预约、消费、充值三类事件各自推导关系，最后用 `user.primary_clinic_id` 兜底
+     * 「有归属门店但无任何业务记录」的客户，避免切换读口径后这部分客户凭空消失。
+     *
+     * 只在表为空时执行：回填 SQL 的 ON CONFLICT 会累加计数，重复执行会导致计数翻倍。
+     */
+    private suspend fun R2dbcTransaction.migrateCustomerClinicRelations() {
+        val hasRows = exec(
+            "SELECT 1 FROM customer_clinic_relation LIMIT 1",
+            explicitStatementType = StatementType.SELECT,
+            transform = { 1 }
+        )?.toList().orEmpty().isNotEmpty()
+        if (hasRows) return
+
+        // 预约（排除已取消；待确认/已确认/已完成/爽约均视为到店行为）
+        exec(
+            """
+            INSERT INTO customer_clinic_relation
+              (user_id, clinic_id, first_visit_at, last_visit_at, appointment_count, source)
+            SELECT user_id, clinic_id, MIN(created_at), MAX(created_at), COUNT(*), 'appointment'
+            FROM appointment
+            WHERE status <> 'cancelled'
+            GROUP BY user_id, clinic_id
+            ON CONFLICT (user_id, clinic_id) DO UPDATE SET
+              first_visit_at    = LEAST(customer_clinic_relation.first_visit_at, EXCLUDED.first_visit_at),
+              last_visit_at     = GREATEST(customer_clinic_relation.last_visit_at, EXCLUDED.last_visit_at),
+              appointment_count = customer_clinic_relation.appointment_count + EXCLUDED.appointment_count,
+              updated_at        = now()
+            """.trimIndent()
+        )
+
+        // 消费（仅已结算：历史 status 可能为 success 而尾款仍 pending）
+        exec(
+            """
+            INSERT INTO customer_clinic_relation
+              (user_id, clinic_id, first_visit_at, last_visit_at,
+               consumption_count, consumption_amount, source)
+            SELECT user_id, clinic_id, MIN(created_at), MAX(created_at), COUNT(*), SUM(amount), 'consumption'
+            FROM consumption_record
+            WHERE status = 'success' AND payment_status = 'success'
+            GROUP BY user_id, clinic_id
+            ON CONFLICT (user_id, clinic_id) DO UPDATE SET
+              first_visit_at     = LEAST(customer_clinic_relation.first_visit_at, EXCLUDED.first_visit_at),
+              last_visit_at      = GREATEST(customer_clinic_relation.last_visit_at, EXCLUDED.last_visit_at),
+              consumption_count  = customer_clinic_relation.consumption_count + EXCLUDED.consumption_count,
+              consumption_amount = customer_clinic_relation.consumption_amount + EXCLUDED.consumption_amount,
+              updated_at         = now()
+            """.trimIndent()
+        )
+
+        // 充值
+        exec(
+            """
+            INSERT INTO customer_clinic_relation
+              (user_id, clinic_id, first_visit_at, last_visit_at, source)
+            SELECT user_id, clinic_id, MIN(created_at), MAX(created_at), 'recharge'
+            FROM recharge_record
+            WHERE status = 'success'
+            GROUP BY user_id, clinic_id
+            ON CONFLICT (user_id, clinic_id) DO UPDATE SET
+              first_visit_at = LEAST(customer_clinic_relation.first_visit_at, EXCLUDED.first_visit_at),
+              last_visit_at  = GREATEST(customer_clinic_relation.last_visit_at, EXCLUDED.last_visit_at),
+              updated_at     = now()
+            """.trimIndent()
+        )
+
+        // 历史归属兜底：有 primary_clinic_id 但无任何业务记录的客户
+        exec(
+            """
+            INSERT INTO customer_clinic_relation
+              (user_id, clinic_id, first_visit_at, last_visit_at, source)
+            SELECT id, primary_clinic_id, created_at, created_at, 'legacy_primary'
+            FROM "user"
+            WHERE primary_clinic_id IS NOT NULL
+            ON CONFLICT (user_id, clinic_id) DO NOTHING
+            """.trimIndent()
+        )
+
+        logger.info("[SchemaMigration] customer_clinic_relation 历史关系回填完成。")
     }
 
     /** 索引是否已存在。 */

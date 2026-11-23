@@ -21,10 +21,11 @@ import java.time.format.DateTimeFormatter
  *   即「这一天有多少客人要来」，而不是「这一天新下了多少单」——后者对排班和接诊无参考意义。
  * - 「营收」只计 [ConsumptionRecords.status] 为 success 的记录，取折后金额 amount，
  *   与 BusinessServices 的客户累计消费、会员等级升级判定同口径（已退款不算营收）。
- * - 「新客数」按 [Users.createdAt]（建档时间）统计。
+ * - 「新客数」按 `customer_clinic_relation.first_visit_at`（首次到店）统计。
  *
  * 门店隔离：所有统计均接受 [ClinicScope]。无全店权限的账号只统计其授权门店的数据：
- * 预约/营收按业务行的 clinicId 过滤，客户类指标按 Users.primaryClinicId 过滤。
+ * 预约/营收按业务行的 clinicId 过滤，客户类指标按客户与本店的业务关系
+ * （customer_clinic_relation）过滤；客户属于整个医院，没有「归属门店」。
  *
  * 性能：需求 5.1 要求看板查询响应不超过 3 秒，因此所有分组统计都采用
  * 「一次查询 + 内存聚合」（项目既有惯例，见 BusinessServices 的客户列表），
@@ -77,13 +78,8 @@ class AdminDashboardService : BaseService() {
                 .toList()
                 .sumOf { it[ConsumptionRecords.amount].toDouble() }
 
-            val todayNewCustomers = Users.selectAll()
-                .where {
-                    (Users.createdAt greaterEq todayStart) and
-                            (Users.createdAt less todayEnd)
-                }
-                .scopeClinic(scope, Users.primaryClinicId)
-                .count().toInt()
+            // 新客口径：首次到店（customer_clinic_relation.first_visit_at）
+            val todayNewCustomers = newCustomerIdsByDay(scope, todayStart, todayEnd)[today]?.size ?: 0
 
             DashboardSummary(
                 todayAppointments = todayAppointments,
@@ -133,13 +129,16 @@ class AdminDashboardService : BaseService() {
                 .groupBy { it[ConsumptionRecords.clinicId] }
                 .mapValues { (_, rows) -> rows.sumOf { it[ConsumptionRecords.amount].toDouble() } }
 
-            // 新客归属门店取 primaryClinicId（首选就诊门店）；该列可空，未指定门店的新客不落到任何门店
-            val newCustomersByClinic = Users.selectAll()
-                .where { Users.createdAt greaterEq monthStartTime }
-                .scopeClinic(scope, Users.primaryClinicId)
+            // 新客归属门店取客户与本店的首次到店时间；同一客户可在多家门店各算一次
+            val newCustomersByClinic = CustomerClinicRelations.selectAll()
+                .where { CustomerClinicRelations.firstVisitAt greaterEq monthStartTime }
+                .let { query ->
+                    if (scope.all) query
+                    else query.andWhere { CustomerClinicRelations.clinicId inList scope.clinicIds }
+                }
                 .toList()
-                .groupBy { it[Users.primaryClinicId] }
-                .mapValues { (_, rows) -> rows.size }
+                .groupBy { it[CustomerClinicRelations.clinicId] }
+                .mapValues { (_, rows) -> rows.map { it[CustomerClinicRelations.userId] }.distinct().size }
 
             clinics.map { clinicRow ->
                 val clinicId = clinicRow[Clinics.id]
@@ -204,15 +203,8 @@ class AdminDashboardService : BaseService() {
                 .groupBy { it[ConsumptionRecords.createdAt].toLocalDate() }
                 .mapValues { (_, rows) -> rows.sumOf { it[ConsumptionRecords.amount].toDouble() } }
 
-            val newCustomersByDay = Users.selectAll()
-                .where {
-                    (Users.createdAt greaterEq rangeStart) and
-                            (Users.createdAt less rangeEnd)
-                }
-                .scopeClinic(scope, Users.primaryClinicId)
-                .toList()
-                .groupBy { it[Users.createdAt].toLocalDate() }
-                .mapValues { (_, rows) -> rows.size }
+            val newCustomersByDay = newCustomerIdsByDay(scope, rangeStart, rangeEnd)
+                .mapValues { (_, ids) -> ids.size }
 
             (0 until days).map { i ->
                 val date = startDate.plusDays(i.toLong())
@@ -239,10 +231,7 @@ class AdminDashboardService : BaseService() {
                 .toList()
 
             // 门店范围下的客户 ID 集合（scope.all 时为 null，不加客户过滤）
-            val scopedUserIds: List<Long>? = if (scope.all) null else Users.selectAll()
-                .where { Users.primaryClinicId inList scope.clinicIds }
-                .toList()
-                .map { it[Users.id] }
+            val scopedUserIds: List<Long>? = if (scope.all) null else restrictedScopedUserIds(scope)
 
             // 授权门店下一个客户都没有：各等级计数均为 0，仍返回完整等级序列给前端画图例
             if (scopedUserIds != null && scopedUserIds.isEmpty()) {
@@ -301,10 +290,19 @@ class AdminDashboardService : BaseService() {
                 "store_entry" to "门店录入"
             )
 
-            // 一次取出范围内全部用户的来源后内存计数，避免每个来源一次查询
-            val scopedUsers = Users.selectAll()
-                .scopeClinic(scope, Users.primaryClinicId)
-                .toList()
+            // 一次取出范围内全部用户的来源后内存计数，避免每个来源一次查询。
+            // 客户属于全医院，受限账号的客户集由与本店的业务关系推导。
+            val scopedUserIds = if (scope.all) null else restrictedScopedUserIds(scope)
+            if (scopedUserIds != null && scopedUserIds.isEmpty()) {
+                return@dbQuery sourceTypes.map { (sourceType, label) ->
+                    CustomerSourceDistribution(sourceType, label, 0, 0.0)
+                }
+            }
+            val scopedUsers = if (scopedUserIds == null) {
+                Users.selectAll().toList()
+            } else {
+                Users.selectAll().where { Users.id inList scopedUserIds }.toList()
+            }
             val totalUsers = scopedUsers.size
             if (totalUsers == 0) {
                 return@dbQuery sourceTypes.map { (sourceType, label) ->
@@ -331,7 +329,7 @@ class AdminDashboardService : BaseService() {
     /**
      * 推荐统计：注册转化率、推荐人 TOP10、月度新客数与营收贡献
      *
-     * 门店口径：推荐关系按「被推荐人归属门店」（referee.primaryClinicId）收敛；
+     * 门店口径：推荐关系按「被推荐人与本店的业务关系」（customer_clinic_relation）收敛；
      * 月度营收按消费记录的 clinicId 收敛，与其他营收指标同口径。
      */
     suspend fun getReferralStats(scope: ClinicScope = ClinicScope.ALL): ReferralStats {
@@ -348,11 +346,8 @@ class AdminDashboardService : BaseService() {
             var relationQuery = ReferralRelations.selectAll()
                 .where { ReferralRelations.referrerId neq ReferralRelations.refereeId }
             if (!scope.all) {
-                // 先取授权门店客户集合，再收敛被推荐人
-                val scopedUserIds = Users.selectAll()
-                    .where { Users.primaryClinicId inList scope.clinicIds }
-                    .toList()
-                    .map { it[Users.id] }
+                // 先取授权门店的客户集合（与本店有业务关系），再收敛被推荐人
+                val scopedUserIds = restrictedScopedUserIds(scope)
                 if (scopedUserIds.isEmpty()) {
                     return@dbQuery ReferralStats(0.0, emptyList(), 0, 0.0)
                 }
@@ -428,19 +423,26 @@ class AdminDashboardService : BaseService() {
     suspend fun getCustomerRetention(scope: ClinicScope = ClinicScope.ALL): CustomerRetention {
         if (scope.isEmpty) return CustomerRetention(0.0, 0.0)
         return dbQuery {
-            // 门店范围客户集合：分母分子都限定在同一客户集内，避免跨店就诊客户串口径
-            val scopedUsers = Users.selectAll()
-                .scopeClinic(scope, Users.primaryClinicId)
-                .toList()
+            // 门店范围客户集合：分母分子都限定在同一客户集内，避免跨店就诊客户串口径。
+            // 客户属于全医院，客户集由与本店的业务关系推导。
+            val scopedUserIds = if (scope.all) null else restrictedScopedUserIds(scope)
+            if (scopedUserIds != null && scopedUserIds.isEmpty()) {
+                return@dbQuery CustomerRetention(0.0, 0.0)
+            }
+            val scopedUsers = if (scopedUserIds == null) {
+                Users.selectAll().toList()
+            } else {
+                Users.selectAll().where { Users.id inList scopedUserIds }.toList()
+            }
             val totalCustomers = scopedUsers.size
             if (totalCustomers == 0) return@dbQuery CustomerRetention(0.0, 0.0)
-            val scopedUserIds = scopedUsers.map { it[Users.id] }
+            val visibleUserIds = scopedUsers.map { it[Users.id] }
 
             // 复诊率 = 完成就诊 ≥2 次的客户 / 总客户（预约按门店 + 客户双重收敛）
             val completedByUser = Appointments.selectAll()
                 .where { Appointments.status eq "completed" }
                 .scopeClinic(scope, Appointments.clinicId)
-                .andWhere { Appointments.userId inList scopedUserIds }
+                .andWhere { Appointments.userId inList visibleUserIds }
                 .toList()
                 .groupBy { it[Appointments.userId] }
             val repeatVisitCustomers = completedByUser.count { (_, rows) -> rows.size >= 2 }
@@ -467,13 +469,54 @@ class AdminDashboardService : BaseService() {
         }
     }
 
+    /**
+     * 新客 = 首次到店：由 `customer_clinic_relation.first_visit_at` 推导，按天分组。
+     *
+     * - 受限账号：与授权门店的关系中首次到店落在区间的客户（同一客户可在多家门店各算一次）；
+     * - 全店账号：客户在全院最早一次到店落在区间的客户，避免老客户在新店首访被重复计为新客。
+     */
+    private suspend fun newCustomerIdsByDay(
+        scope: ClinicScope,
+        start: LocalDateTime,
+        end: LocalDateTime
+    ): Map<LocalDate, Set<Long>> {
+        val rows = CustomerClinicRelations.selectAll()
+            .where {
+                (CustomerClinicRelations.firstVisitAt greaterEq start) and
+                    (CustomerClinicRelations.firstVisitAt less end)
+            }
+            .let { query ->
+                if (scope.all) query
+                else query.andWhere { CustomerClinicRelations.clinicId inList scope.clinicIds }
+            }
+            .toList()
+        if (rows.isEmpty()) return emptyMap()
+
+        if (!scope.all) {
+            return rows.groupBy { it[CustomerClinicRelations.firstVisitAt].toLocalDate() }
+                .mapValues { (_, list) -> list.map { it[CustomerClinicRelations.userId] }.toSet() }
+        }
+
+        // 全店：再取这些客户在全院的最早到店时间，只保留「全院首访」落在区间的
+        val userIds = rows.map { it[CustomerClinicRelations.userId] }.distinct()
+        val firstVisitByUser = CustomerClinicRelations.selectAll()
+            .where { CustomerClinicRelations.userId inList userIds }
+            .toList()
+            .groupBy { it[CustomerClinicRelations.userId] }
+            .mapValues { (_, list) -> list.minOf { it[CustomerClinicRelations.firstVisitAt] } }
+        return firstVisitByUser
+            .filterValues { it >= start && it < end }
+            .entries
+            .groupBy({ it.value.toLocalDate() }, { it.key })
+            .mapValues { (_, ids) -> ids.toSet() }
+    }
+
     /** 金额与百分比统一保留两位小数：Double 直除会产生 9.090909090909092 这类长尾。 */
     private fun Double.round2(): Double = Math.round(this * 100) / 100.0
 
     /**
      * 非全店范围时给查询追加「门店列 IN 授权门店」过滤；全店范围原样返回。
-     * 列的可空性不影响过滤语义（[Users.primaryClinicId] 可空，其余门店列非空），
-     * 泛型擦除后运行时行为一致。
+     * 列的可空性不影响过滤语义，泛型擦除后运行时行为一致。
      */
     @Suppress("UNCHECKED_CAST")
     private fun Query.scopeClinic(scope: ClinicScope, column: ExpressionWithColumnType<*>): Query =

@@ -1,6 +1,5 @@
 package com.dentalclinic.admin.service
 
-import com.dentalclinic.admin.auth.ClinicScope
 import com.dentalclinic.admin.entity.PointsExchangeOrders
 import com.dentalclinic.admin.util.NotFoundException
 import com.dentalclinic.admin.util.ValidationException
@@ -8,10 +7,7 @@ import com.dentalclinic.common.BaseService
 import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.SortOrder
-import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.core.inList
-import org.jetbrains.exposed.v1.r2dbc.andWhere
 import org.jetbrains.exposed.v1.r2dbc.selectAll
 import org.jetbrains.exposed.v1.r2dbc.update
 import java.time.LocalDateTime
@@ -25,24 +21,22 @@ class AdminPointsMallService : BaseService() {
     /**
      * 核销积分兑换订单。
      *
+     * 用户属于整个医院，兑换订单不绑定门店，也不做门店范围校验：
+     * 任一具备核销权限的账号都可核销。
+     *
      * @param redeemCode 兑换码
      * @param operatorName 核销操作员姓名
-     * @param scope 当前管理员可操作的门店范围
      * @return 核销结果
      */
     suspend fun redeemOrder(
         redeemCode: String,
-        operatorName: String,
-        scope: ClinicScope
+        operatorName: String
     ): RedeemResult = dbQuery {
         val order = PointsExchangeOrders.selectAll()
             .where { PointsExchangeOrders.redeemCode eq redeemCode }
             .toList()
             .firstOrNull()
             ?: throw NotFoundException("兑换码不存在")
-
-        // 兑换订单没有 clinic_id，客户归属门店以 user.primary_clinic_id 为准。
-        requireUserInScope(order[PointsExchangeOrders.userId], scope)
 
         if (order[PointsExchangeOrders.status] == "used") {
             throw ValidationException("该兑换码已使用")
@@ -67,29 +61,14 @@ class AdminPointsMallService : BaseService() {
     /**
      * 查询待核销的兑换订单列表。
      *
-     * 兑换订单本身不存 clinic_id，因此受限账号只能看到授权门店客户的订单，
-     * 与客户列表、积分记录使用同一归属口径。
+     * 兑换订单不存 clinic_id，用户也是全局的，因此所有账号看到同一份全体订单。
      */
     suspend fun listPendingOrders(
         page: Int,
-        pageSize: Int,
-        scope: ClinicScope
+        pageSize: Int
     ): PendingOrdersResponse = dbQuery {
-        val scopedUserIds = if (scope.all) null else restrictedScopedUserIds(scope)
-        if (scopedUserIds != null && scopedUserIds.isEmpty()) {
-            return@dbQuery PendingOrdersResponse(
-                list = emptyList(),
-                total = 0,
-                page = page,
-                pageSize = pageSize
-            )
-        }
-
-        var query = PointsExchangeOrders.selectAll()
+        val query = PointsExchangeOrders.selectAll()
             .where { PointsExchangeOrders.status eq "unused" }
-        if (scopedUserIds != null) {
-            query = query.andWhere { PointsExchangeOrders.userId inList scopedUserIds }
-        }
 
         val total = query.count()
 

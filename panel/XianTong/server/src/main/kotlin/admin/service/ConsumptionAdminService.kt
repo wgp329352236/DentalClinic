@@ -359,6 +359,16 @@ class ConsumptionAdminService(
             it[ConsumptionRecords.pointsEarned] = pointsAward.points
         }
 
+        // 方案 C 双写：以已结算消费记录客户与该门店的业务关系（金额口径与看板一致，取优惠后金额）
+        CustomerClinicRelationService.touch(
+            userId = userId,
+            clinicId = record[ConsumptionRecords.clinicId],
+            source = "consumption",
+            at = paidAt,
+            consumptionCount = 1,
+            consumptionAmount = discountedAmount
+        )
+
         val wallet = UserWallets.selectAll()
             .where { UserWallets.userId eq userId }
             .toList()

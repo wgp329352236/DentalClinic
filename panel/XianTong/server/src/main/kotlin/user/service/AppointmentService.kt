@@ -1,6 +1,7 @@
 package com.dentalclinic.user.service
 
 import com.dentalclinic.admin.entity.*
+import com.dentalclinic.admin.service.CustomerClinicRelationService
 import com.dentalclinic.common.BaseService
 import com.dentalclinic.common.CouponUsageSupport
 import com.dentalclinic.common.config.AppointmentConfig
@@ -346,12 +347,13 @@ class AppointmentService(
                             it[Appointments.remark] = request.remark
                         } get Appointments.id
 
-                        // 首次预约即确定客户归属门店；已有归属时绝不因后续跨店预约被覆盖。
-                        Users.update({
-                            (Users.id eq userId) and Users.primaryClinicId.isNull()
-                        }) {
-                            it[Users.primaryClinicId] = request.clinicId
-                        }
+                        // 方案 C：客户不属于单一门店，记录与本次就诊门店的业务关系
+                        CustomerClinicRelationService.touch(
+                            userId = userId,
+                            clinicId = request.clinicId,
+                            source = "appointment",
+                            appointmentCount = 1
+                        )
 
                         if (!request.couponCode.isNullOrBlank()) {
                             when (val couponResult = CouponUsageSupport.useForAppointment(
