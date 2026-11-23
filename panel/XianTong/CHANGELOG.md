@@ -4,17 +4,37 @@
 
 ## 2026-11-23
 
+### 微信一键登录错误码细分（修改）
+
+- **改了什么**：
+  1. `common/wx/WechatMiniClient.kt`：`WechatApiException` 新增 `errcode` 字段，`code2session`、`getuserphonenumber`、`access_token` 三类微信调用失败时把微信原始错误码一并抛出，网络层失败保持为 null。
+  2. `user/route/UserApiErrors.kt`：新增 `translateWechatLoginError`，把微信错误码翻译成 C 端可理解的业务码与文案——40029/40163（code 无效或已使用）回 400「登录凭证已失效，请重新点击登录」；45011（频率限制）回 429「操作过于频繁，请稍后再试」；40013/40125/40164（appId/appSecret 配置错误、IP 未白名单）回 500「微信登录服务配置异常，请联系客服」；其余仍走原通用兜底。
+  3. `user/route/UserAuthRoutes.kt`：`/auth/wechat-login` 的异常兜底改用 `translateWechatLoginError`，保留原唯一约束冲突、请求体非法的翻译逻辑。
+- **原因**：本地 `WECHAT_APP_SECRET` 失效（微信返回 `40125 invalid appsecret`）时，接口统一回 500「登录失败，请稍后重试」，用户与前端都无法判断是凭证过期、重复点击还是服务配置错误，只能盲目重试。
+- **影响范围**：仅 `POST /api/v1/auth/wechat-login` 的错误响应码与文案；成功路径、`/auth/refresh`、`/auth/bind-phone` 不变。注意：若配置的 AppSecret 仍然错误，登录依旧失败，需在微信公众平台重置后更新 `server/.env.local`。
+
 ### 新增本地一键启动脚本（新增）
 
-- **改了什么**：新增 `panel/XianTong/start-local.sh`。检测 8080/5666 端口，已监听的服务直接复用；后端复用 `server/run-local.sh`（自动加载 `server/.env.local`），前端执行 `pnpm -F @vben/web-antd run dev`；日志写入 `panel/XianTong/logs/{backend,frontend}.log`；启动后按端口探活并打印管理端地址与当前局域网地址（供小程序真机联调）；支持 `--backend-only` / `--frontend-only`；Ctrl+C 时回收本次启动的子进程并按端口兜底清理。
-- **原因**：本地联调需要分别手动启动前后端，容易漏加载 `.env.local`（导致能力误降级为 mock）或撞端口，且内网 IP 变化后难以确认小程序该指向哪个地址。
-- **影响范围**：仅新增脚本，无运行时行为变化；`logs/*.log` 已被根 `.gitignore` 的 `*.log` 忽略。
+- **改了什么**：
+  1. 新增 `panel/XianTong/start-local.sh`：检测 8080/5666 端口，已监听的服务直接复用；后端复用 `server/run-local.sh`（自动加载 `server/.env.local`），前端执行 `pnpm -F @vben/web-antd run dev`；日志写入 `panel/XianTong/logs/{backend,frontend}.log`，监听进程 PID 写入同目录 `*.pid`；启动后按端口探活并打印管理端地址与当前局域网地址。
+  2. 参数：`--backend-only` / `--frontend-only` 单端操作，`--restart` 先停后启，`--help` 打印用法。
+  3. `--restart` 只停止 PID 文件记录且进程树匹配的服务；端口被非本项目进程占用时提示并跳过，不误杀。
+  4. 新增 `doc/本地启动脚本使用说明.md`，覆盖前置依赖、首次准备、参数、常用场景、日志与 PID、排障。
+  5. 根 `.gitignore` 增加 `panel/XianTong/logs/`，避免 PID 文件入库。
+- **原因**：本地联调需要分别手动启动前后端，容易漏加载 `.env.local`（导致能力误降级为 mock）或撞端口；改代码后缺少便捷的重启方式；内网 IP 变化后难以确认小程序该指向哪个地址。
+- **影响范围**：仅新增脚本与文档，无运行时行为变化。
 
-### 小程序联调 API 地址更新（修改）
+### 小程序接口地址配置补注释与调试日志（修改）
 
-- **改了什么**：`app/XianTong/miniprogram/utils/request.ts` 的 `API_ORIGIN` 由 `http://192.168.1.102:8080` 改为 `http://192.168.1.182:8080`。
-- **原因**：本机内网 IP 变化，真机预览请求原地址无法连通。
-- **影响范围**：仅开发环境常量，`USE_MOCK` 仍为 `false`；上线前需切换为生产 HTTPS 域名。
+- **改了什么**：`app/XianTong/miniprogram/utils/request.ts` 中 `API_ORIGIN` 保持 `http://localhost:8080`（模拟器可用），注释补充「真机调试改为电脑局域网 IP」；新增 `console.log('[Config] API_ORIGIN:', API_ORIGIN)` 便于真机确认实际请求地址。
+- **原因**：真机预览时 localhost 指向手机自身，排查联调问题时需要快速确认小程序当前使用的后端地址。
+- **影响范围**：仅开发期配置常量和日志，`USE_MOCK` 仍为 `false`；上线前需切换为生产 HTTPS 域名。
+
+### 小程序首页门店加载与距离计算重构（修改）
+
+- **改了什么**：`app/XianTong/miniprogram/pages/index/index.ts` 的 `loadClinics` 改为先渲染服务端门店数据、再异步补充定位距离，避免定位授权阻塞列表首屏；抽出 `mapClinics` 统一映射门店字段并计算距离，坐标无效时置空、距离收敛为非负有限数，缺失距离时回退服务端值；排序在距离相同时保持服务端原顺序。
+- **原因**：原先 `getClinics` 与 `getCurrentLocation` 用 `Promise.all` 并发，定位授权弹窗会拖慢门店展示；`hasCoordinates` 布尔值配合非空断言易在坐标缺失时产生无效距离。
+- **影响范围**：仅小程序首页「附近门诊」列表的渲染时机与距离计算；接口不变。
 
 ## 2026-11-22
 
