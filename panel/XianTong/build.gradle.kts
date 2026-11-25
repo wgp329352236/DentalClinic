@@ -1,4 +1,3 @@
-
 plugins {
     alias(libs.plugins.kotlin.multiplatform) apply false
     alias(libs.plugins.kotlin.jvm) apply false
@@ -8,5 +7,5 @@ plugins {
 
 subprojects {
     group = "com.dentalclinic"
-    version = "1.0.0-SNAPSHOT"
+    version = "1.0.0"
 }

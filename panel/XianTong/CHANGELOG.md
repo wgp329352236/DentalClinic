@@ -4,6 +4,18 @@
 
 ## 2026-11-25
 
+### 生产部署文档、环境变量模板与数据库初始化脚本（新增）
+
+- **改了什么**：
+  1. 新增 `doc/部署说明.md`：部署拓扑、环境要求、Server 打包与启动、systemd 托管、Client 构建与 Nginx 配置、验证清单、升级与回滚。
+  2. 新增 `server/.env.prod.example`（仅空值占位），`server/.gitignore` 忽略真实 `.env.prod`。
+  3. `application-prod.yaml` 新增 `redis` 配置段，支持 `REDIS_HOST/REDIS_PORT/REDIS_DATABASE/REDIS_PASSWORD` 环境变量注入，未设置时回落 `localhost:6379/0` 且无密码。
+  4. 新增 `server/scripts/deploy-db.sh`：创建数据库账号与库并导入 schema，密码交互输入，不落盘。
+  5. `doc/db-backup/` 仅提交建表结构 `*_schema.sql`；含真实业务数据的 `*_data.sql` / `*_full.sql` 已加入 `.gitignore`。
+  6. 构建版本由 `1.0.0-SNAPSHOT` 调整为 `1.0.0`。
+- **原因**：上线需要可复现的部署流程与配置清单；管理端登录强依赖 Redis，生产环境需可注入连接参数，且真实凭证与业务数据不能进入版本库。
+- **影响范围**：仅文档、配置模板与构建版本号，接口行为不变。生产启动仍由 `StartupPreflight` 校验必填项，缺项直接阻断。
+
 ### 预约接口协程取消异常修复（修复）
 
 - **改了什么**：`UserAppointmentRoutes` 在签到请求体解析失败时，若异常为 `CancellationException` 先 `currentCoroutineContext().ensureActive()` 再继续处理；`when (val result = ...)` 收敛临时变量。

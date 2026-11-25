@@ -20,3 +20,7 @@ Thumbs.db
 *.log
 panel/XianTong/logs/
 panel/XianTong/server/logs/
+
+# 数据库备份：仅建表结构入库，含真实业务数据的备份不入库
+doc/db-backup/*_data.sql
+doc/db-backup/*_full.sql
