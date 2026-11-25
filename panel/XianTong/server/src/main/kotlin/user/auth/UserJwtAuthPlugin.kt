@@ -64,6 +64,11 @@ fun ApplicationCall.userId(): Long =
     attributes.getOrNull(UserIdKey)
         ?: throw AuthenticationException("未认证")
 
+/**
+ * 非认证路由返回 null；供请求日志等基础设施读取操作者，不抛异常。
+ */
+fun ApplicationCall.userIdOrNull(): Long? = attributes.getOrNull(UserIdKey)
+
 private class UserAuthenticatedSelector : RouteSelector() {
     override suspend fun evaluate(context: RoutingResolveContext, segmentIndex: Int) =
         RouteSelectorEvaluation.Transparent

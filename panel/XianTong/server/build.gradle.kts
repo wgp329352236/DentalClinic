@@ -41,6 +41,7 @@ dependencies {
 
     // ─── Client: 管理后台 ───
     implementation(libs.ktor.server.status.pages)        // 统一异常处理 / 错误页
+    implementation(libs.ktor.server.call.logging)        // 请求访问日志（含 requestId / 耗时）
     implementation(libs.bcrypt)                          // 管理员密码哈希
     implementation(libs.lettuce.core)                    // Redis 异步客户端 (会话/缓存)
 

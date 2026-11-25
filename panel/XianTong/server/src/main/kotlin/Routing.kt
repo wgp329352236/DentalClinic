@@ -1,5 +1,6 @@
 package com.dentalclinic
 
+import com.dentalclinic.common.logging.installRequestLogging
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.plugins.cors.routing.*
@@ -11,6 +12,9 @@ import io.ktor.server.routing.*
  * Admin APIs are served under /api/admin via AdminModule.
  */
 fun Application.configureRouting() {
+    // 访问日志与 requestId：需在其他插件之前安装，保证后续业务/异常日志都能带上追踪 ID
+    installRequestLogging()
+
     // HSTS: 强制浏览器使用 HTTPS（需求 P0-4 合规）
     intercept(ApplicationCallPipeline.Call) {
         call.response.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")

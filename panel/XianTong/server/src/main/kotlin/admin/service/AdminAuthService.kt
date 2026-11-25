@@ -28,6 +28,7 @@ class AdminAuthService : BaseService() {
     suspend fun login(username: String, password: String): LoginResponse {
         // 1. 检查账户锁定
         if (AdminRedisClient.isAccountLocked(username)) {
+            logger.warn("[AdminAuth]: 用户 $username 登录失败：账户已锁定")
             throw AuthenticationException("账户已锁定，请30分钟后重试")
         }
 
@@ -35,17 +36,20 @@ class AdminAuthService : BaseService() {
         val user = dbQuery {
             AdminUsers.selectAll().where { AdminUsers.username eq username }.toList().singleOrNull()
         } ?: run {
+            logger.warn("[AdminAuth]: 用户 $username 登录失败：账号不存在")
             AdminRedisClient.incrementFailCount(username)
             throw AuthenticationException("用户名或密码错误")
         }
 
         // 3. 检查用户状态
         if (user[AdminUsers.status] == 0) {
+            logger.warn("[AdminAuth]: 用户 $username 登录失败：账户已被禁用")
             throw AuthenticationException("账户已被禁用")
         }
 
         // 4. 验证密码
         if (!PasswordEncoder.verify(password, user[AdminUsers.passwordHash])) {
+            logger.warn("[AdminAuth]: 用户 $username 登录失败：密码错误")
             AdminRedisClient.incrementFailCount(username)
             throw AuthenticationException("用户名或密码错误")
         }

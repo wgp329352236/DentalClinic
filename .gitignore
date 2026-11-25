@@ -19,3 +19,4 @@ Thumbs.db
 # Logs
 *.log
 panel/XianTong/logs/
+panel/XianTong/server/logs/

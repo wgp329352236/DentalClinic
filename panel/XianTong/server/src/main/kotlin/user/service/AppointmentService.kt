@@ -7,6 +7,9 @@ import com.dentalclinic.common.CouponUsageSupport
 import com.dentalclinic.common.config.AppointmentConfig
 import com.dentalclinic.common.security.CheckinCodeService
 import com.dentalclinic.common.scheduler.ScheduledNotifier
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.*
@@ -237,12 +240,12 @@ class AppointmentService(
         // 两边都是零填充的 HH:mm，否则 "9:00" 这类值会因字典序比较而错配排班时段。
         val appointmentDate = try {
             LocalDate.parse(request.appointmentDate)
-        } catch (e: DateTimeParseException) {
+        } catch (_: DateTimeParseException) {
             return AppointmentResult.Error("日期格式错误，请使用 yyyy-MM-dd")
         }
         val startTimeObj = try {
             LocalTime.parse(request.startTime)
-        } catch (e: DateTimeParseException) {
+        } catch (_: DateTimeParseException) {
             return AppointmentResult.Error("时间格式错误，请使用 HH:mm")
         }
 
@@ -376,7 +379,14 @@ class AppointmentService(
             AppointmentResult.Error(e.message ?: "优惠券使用失败")
         }
         if (result is AppointmentResult.Success) {
+            logger.info(
+                "[Appointment]: 用户 {} 创建预约 {} 门店={} 医生={} 时间={} {}",
+                userId, result.appointmentId, request.clinicId, request.doctorId,
+                request.appointmentDate, request.startTime
+            )
             notifyAppointmentSubmitted(userId, result.appointmentId, request)
+        } else if (result is AppointmentResult.Error) {
+            logger.info("[Appointment]: 用户 {} 创建预约失败: {}", userId, result.message)
         }
         return result
     }
@@ -416,6 +426,9 @@ class AppointmentService(
                 relatedId = appointmentId
             )
         } catch (e: Exception) {
+            if (e is CancellationException) {
+                currentCoroutineContext().ensureActive()
+            }
             logger.warn("[Appointment]: 预约 {} 提交通知失败，不影响预约结果: {}", appointmentId, e.message)
         }
     }
@@ -522,7 +535,10 @@ class AppointmentService(
     suspend fun checkIn(userId: Long, appointmentId: Long, code: String): AppointmentResult {
         // 纯密码学校验放事务外：伪造码直接拒绝，省一次 DB 往返
         val clinicId = checkinCodeService.verify(code)
-            ?: return AppointmentResult.Error("无效的门店码，请扫描门店前台二维码")
+            ?: run {
+                logger.warn("[Appointment]: 用户 {} 签到失败：门店码无效 appointmentId={}", userId, appointmentId)
+                return AppointmentResult.Error("无效的门店码，请扫描门店前台二维码")
+            }
 
         return dbQuery {
             val appointment = Appointments.selectAll()
@@ -573,6 +589,7 @@ class AppointmentService(
                 it[Appointments.status] = "arrived"
                 it[Appointments.arrivedAt] = LocalDateTime.now()
             }
+            logger.info("[Appointment]: 用户 {} 预约 {} 签到成功 门店={}", userId, appointmentId, clinicId)
             AppointmentResult.Success(appointmentId)
         }
     }
@@ -589,7 +606,7 @@ class AppointmentService(
         try {
             val start = LocalDateTime.of(date, LocalTime.parse(startTime))
             Duration.between(LocalDateTime.now(), start).toMinutes() < deadlineMinutes
-        } catch (e: DateTimeParseException) {
+        } catch (_: DateTimeParseException) {
             false
         }
 
@@ -638,6 +655,10 @@ class AppointmentService(
                     it[cancelReviewedAt] = null
                     it[updatedAt] = now
                 }
+                logger.info(
+                    "[Appointment]: 用户 {} 预约 {} 距就诊不足 {} 分钟，提交取消申请",
+                    userId, appointmentId, deadlineMinutes
+                )
                 AppointmentCancelResult.Requested(appointmentId)
             } else {
                 Appointments.update({ Appointments.id eq appointmentId }) {
@@ -653,6 +674,7 @@ class AppointmentService(
                     it[updatedAt] = now
                 }
                 CouponUsageSupport.releaseForAppointment(userId, appointmentId)
+                logger.info("[Appointment]: 用户 {} 预约 {} 取消成功", userId, appointmentId)
                 AppointmentCancelResult.Cancelled(appointmentId)
             }
         }
@@ -671,13 +693,13 @@ class AppointmentService(
         // Parse new date
         val appointmentDate = try {
             LocalDate.parse(newDate)
-        } catch (e: DateTimeParseException) {
+        } catch (_: DateTimeParseException) {
             return AppointmentResult.Error("日期格式错误，请使用 yyyy-MM-dd")
         }
         // 与 createAppointment 同理：时间格式在进事务前校验，避免退化成 500
         val startTimeObj = try {
             LocalTime.parse(newStartTime)
-        } catch (e: DateTimeParseException) {
+        } catch (_: DateTimeParseException) {
             return AppointmentResult.Error("时间格式错误，请使用 HH:mm")
         }
 

@@ -100,6 +100,10 @@ class UserConsumptionPaymentService(
                 wechatTransactionId = "MOCK_CONSUMPTION_${context.recordId}"
             )
             if (!finalized) throw NotFoundException("消费记录不存在或已支付")
+            logger.info(
+                "[ConsumptionPayment]: 用户 {} 消费 {} 未配置微信支付，按演示模式直接结算",
+                userId, context.recordId
+            )
             return ConsumptionPaymentInitDto(
                 consumptionId = context.recordId,
                 status = "success",
@@ -130,6 +134,10 @@ class UserConsumptionPaymentService(
                 it[ConsumptionRecords.outTradeNo] = outTradeNo
                 it[ConsumptionRecords.prepayId] = createdPrepayId
             }
+            logger.info(
+                "[ConsumptionPayment]: 用户 {} 消费 {} 发起微信支付 outTradeNo={}",
+                userId, context.recordId, outTradeNo
+            )
             createdPrepayId
         }
 

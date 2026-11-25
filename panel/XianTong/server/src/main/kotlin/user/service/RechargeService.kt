@@ -130,6 +130,10 @@ class RechargeService(
             }
         }
 
+        logger.info(
+            "[Recharge]: 用户 $userId 发起充值订单 ${order.recordId} 金额=${order.amount} outTradeNo=${order.outTradeNo}"
+        )
+
         return RechargeResult.Pending(
             recordId = order.recordId,
             amount = order.amount.toDouble(),

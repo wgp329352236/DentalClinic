@@ -2,6 +2,19 @@
 
 本文件按日期倒序记录 XianTong 项目的代码改动，每条包含：改了什么、为什么改、影响范围。
 
+## 2026-11-25
+
+### 后端请求日志插件与关键链路日志补全（新增）
+
+- **改了什么**：
+  1. 引入 `ktor-server-call-logging`，新增 `common/logging/RequestLogging.kt`：每个请求分配或沿用 `X-Request-Id`（格式合法才复用，否则生成 UUID），写入响应头并注入 MDC；完成后输出「方法 路径 状态码 耗时 客户端 IP 操作者」；对 token/code/phone 等敏感 query 参数打码，跳过静态资源。
+  2. `configureRouting()` 安装该插件；`UserJwtAuthPlugin` 新增 `userIdOrNull()`，供日志读取操作者而不抛异常。
+  3. `logback.xml` 改为控制台 + 滚动文件：`logs/server.log`（单文件 50MB、按天滚动、保留 14 天、上限 500MB）、`logs/error.log`（WARN 及以上、保留 30 天），文件写入走异步 appender；日志格式加入 `%X{requestId}`；`LOG_DIR` / `LOG_LEVEL` 可用环境变量覆盖。
+  4. 管理端 StatusPages 兜底异常日志补充请求方法、路径与 requestId。
+  5. 补齐关键链路日志：管理端登录四类失败原因、微信登录结果（是否新用户/是否授权手机号）、补绑手机号、预约创建与取消失败/成功、签到成功与门店码无效、消费支付发起与模拟结算、充值下单。
+- **原因**：此前没有请求级日志与追踪 ID，客户端报错时无法与日志对应；登录、预约、支付等关键链路缺少入口/出口日志，排查只能依赖堆栈猜测。
+- **影响范围**：仅日志输出，接口与业务行为不变。日志默认写入进程工作目录下的 `logs/`（`gradlew :server:run` 为 `server/logs/`），已在根 `.gitignore` 忽略；调整路径或级别请设置 `LOG_DIR` / `LOG_LEVEL`。注意：query 仅对已知敏感键打码，新增接口不要通过 query 传凭证。
+
 ## 2026-11-23
 
 ### 删除 user.primary_clinic_id 列（修改）

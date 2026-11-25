@@ -10,6 +10,7 @@ import com.dentalclinic.common.FileUploadService
 import com.dentalclinic.common.ReferralRewardService
 import com.dentalclinic.common.config.DBConfig
 import com.dentalclinic.common.config.SchemaMigration
+import com.dentalclinic.common.logging.requestIdOrNull
 import com.dentalclinic.common.scheduler.AppointmentReminderService
 import com.dentalclinic.common.scheduler.AutoNoShowService
 import com.dentalclinic.common.scheduler.MemberLevelReviewService
@@ -20,6 +21,8 @@ import io.ktor.server.application.*
 import io.ktor.server.plugins.*
 import io.ktor.server.plugins.NotFoundException
 import io.ktor.server.plugins.statuspages.*
+import io.ktor.server.request.httpMethod
+import io.ktor.server.request.path
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.coroutines.runBlocking
@@ -195,7 +198,11 @@ private fun Application.installAdminStatusPages() {
             )
         }
         exception<Exception> { call, cause ->
-            logger.error("Unhandled exception in admin API", cause)
+            logger.error(
+                "Unhandled exception in admin API ${call.request.httpMethod.value} ${call.request.path()}" +
+                    " requestId=${call.requestIdOrNull()}",
+                cause
+            )
             call.respond(
                 HttpStatusCode.InternalServerError,
                 ApiResponse<Unit>(code = 500, message = "服务器内部错误")

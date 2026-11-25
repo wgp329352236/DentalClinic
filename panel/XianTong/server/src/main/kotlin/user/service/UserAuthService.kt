@@ -52,7 +52,7 @@ class UserAuthService : BaseService() {
         val session = resolveSession(code)
         val phone = resolvePhone(phoneCode)
 
-        return dbQuery {
+        val response = dbQuery {
             // Check if user exists
             val existingRow = Users.selectAll()
                 .where { Users.openid eq session.openid }
@@ -137,6 +137,11 @@ class UserAuthService : BaseService() {
                 phone = phone
             )
         }
+        logger.info(
+            "[Auth]: 微信登录成功 userId=${response.userId} isNewUser=${response.isNewUser} 手机号={}",
+            if (response.phone != null) "已授权" else "未授权"
+        )
+        return response
     }
 
     /**
@@ -151,7 +156,7 @@ class UserAuthService : BaseService() {
      */
     suspend fun bindPhone(userId: Long, phoneCode: String): String? {
         val phone = resolvePhone(phoneCode) ?: return null
-        return dbQuery {
+        val bound = dbQuery {
             val updated = Users.update({ Users.id eq userId }) {
                 val encrypted = PhoneCipherService.encrypt(phone)
                 it[Users.phone] = null
@@ -160,6 +165,8 @@ class UserAuthService : BaseService() {
             }
             if (updated > 0) phone else null
         }
+        if (bound != null) logger.info("[Auth]: 用户 $userId 补绑手机号成功")
+        return bound
     }
 
     /**
