@@ -11,6 +11,9 @@ import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
 import java.time.LocalDate
@@ -78,7 +81,7 @@ fun Application.userAppointmentRoutes(appointmentService: AppointmentService) {
 
                 val date = try {
                     LocalDate.parse(dateStr)
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     call.respond(ApiResponse<Unit>(code = 400, message = "日期格式错误，请使用 yyyy-MM-dd"))
                     return@get
                 }
@@ -156,8 +159,7 @@ fun Application.userAppointmentRoutes(appointmentService: AppointmentService) {
                         return@put
                     }
 
-                    val result = appointmentService.cancelAppointment(userId, appointmentId)
-                    when (result) {
+                    when (val result = appointmentService.cancelAppointment(userId, appointmentId)) {
                         is AppointmentCancelResult.Cancelled -> {
                             call.respond(ApiResponse<Unit>(code = 0, message = "取消成功"))
                         }
@@ -189,6 +191,9 @@ fun Application.userAppointmentRoutes(appointmentService: AppointmentService) {
                     val request = try {
                         call.receive<CheckInRequestDto>()
                     } catch (e: Exception) {
+                        if (e is CancellationException) {
+                            currentCoroutineContext().ensureActive()
+                        }
                         // body 缺失/不是合法 JSON：给出业务化文案，避免抛出序列化原始异常
                         call.respond(ApiResponse<Unit>(code = 400, message = "无效的门店码，请扫描门店前台二维码"))
                         return@post
@@ -200,8 +205,7 @@ fun Application.userAppointmentRoutes(appointmentService: AppointmentService) {
                         return@post
                     }
 
-                    val result = appointmentService.checkIn(userId, appointmentId, code)
-                    when (result) {
+                    when (val result = appointmentService.checkIn(userId, appointmentId, code)) {
                         is AppointmentResult.Success -> {
                             call.respond(ApiResponse<Unit>(code = 0, message = "签到成功"))
                         }
