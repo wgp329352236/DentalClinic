@@ -27,7 +27,7 @@ class FileUploadService : BaseService() {
 
     private val logger = LoggerFactory.getLogger("FileUploadService")
 
-    private val uploadDir = System.getProperty("user.dir") + "/uploads"
+    private val uploadDir = resolveUploadDir()
     private val baseUrl = "/api/v1/files"
     private val maxSizeBytes = 5 * 1024 * 1024L // 5MB
     private val allowedExtensions = setOf("jpg", "jpeg", "png", "gif", "webp")
@@ -210,6 +210,29 @@ class FileUploadService : BaseService() {
             logger.warn("[FileUpload]: 解析文件路径失败", e)
             null
         }
+    }
+
+    /**
+     * 定位上传目录。
+     *
+     * 优先级：`UPLOAD_DIR` 环境变量 > 由 classes 输出目录反推的 server 模块目录 > `user.dir`。
+     * 仅依赖 `user.dir` 时，IDE 以仓库根为工作目录启动会读到根目录的空 `uploads`，
+     * 导致 `GET /api/v1/files/{name}` 全部 404。
+     */
+    private fun resolveUploadDir(): String {
+        System.getenv("UPLOAD_DIR")?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            return File(it).absoluteFile.path
+        }
+
+        val codeLocation = runCatching {
+            File(FileUploadService::class.java.protectionDomain.codeSource.location.toURI())
+        }.getOrNull()
+        val moduleDir = codeLocation?.let { location ->
+            generateSequence(location) { it.parentFile }.firstOrNull { dir ->
+                File(dir, "build.gradle.kts").isFile && File(dir, "src/main/kotlin").isDirectory
+            }
+        }
+        return File(moduleDir ?: File(System.getProperty("user.dir")), "uploads").absolutePath
     }
 
     companion object {
