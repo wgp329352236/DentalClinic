@@ -1,0 +1,82 @@
+# ═══════════════════════════════════════════════════════════════════════
+# 本地联调配置（APP_ENV=local 时加载）
+#
+# 与 application.yaml 的区别：
+#   1. 环境标识明确：启动日志显示 env=local，与 prod 区分；
+#   2. 缺失密钥/凭证只打 WARN 降级为 mock，不阻断启动（prod 会 fail-fast）；
+#   3. 增加 redis 段并支持环境变量注入（默认 localhost:6379/0，无密码）。
+#
+# 凭证仍推荐通过 server/.env.local 注入（run-local.sh 会自动 source 后启动）。
+# ═══════════════════════════════════════════════════════════════════════
+
+ktor:
+  deployment:
+    port: 8080
+  application:
+    modules:
+      - com.dentalclinic.PreflightKt.configurePreflight
+      - com.dentalclinic.SerializationKt.configureSerialization
+      - com.dentalclinic.SecurityKt.configureSecurity
+      - com.dentalclinic.KoinKt.configureKoin
+      - com.dentalclinic.RoutingKt.configureRouting
+      - com.dentalclinic.admin.AdminModuleKt.adminModule
+      - com.dentalclinic.user.UserModuleKt.userModule
+
+# ─── 数据库（本地 PostgreSQL，可用 DB_URL/DB_USERNAME/DB_PASSWORD 覆盖）───
+database:
+  url: "r2dbc:postgresql://localhost:5432/dental_clinic"
+  username: "postgres"
+  password: "postgres"
+
+# ─── Redis（管理端登录依赖 Refresh Token / 失败锁定）───
+# 未设置环境变量时回落到本地默认值
+redis:
+  host: "$REDIS_HOST:localhost"
+  port: "$REDIS_PORT:6379"
+  database: "$REDIS_DATABASE:0"
+  password: "$?REDIS_PASSWORD"
+
+# ─── 推荐分享 ─── 留空时邀请链接为死链（仅 WARN，不阻断）
+referral:
+  shareBaseUrl: ""
+
+# ─── 签到码 / JWT / 手机号密钥 ─── 留空时用内置开发默认值并打 WARN
+# 建议在 .env.local 中配置固定值，避免重启后 token 与已打印签到码失效
+checkin:
+  signingSecret: ""
+
+security:
+  phoneEncryptionKey: ""
+  phoneBlindIndexKey: ""
+
+admin:
+  jwt:
+    secret: ""
+
+user:
+  jwt:
+    secret: ""
+
+# ─── 微信小程序 / 微信支付 ─── 留空时自动降级为 mock（登录 mock_openid、充值模拟成功）
+wechat:
+  miniApp:
+    appId: ""
+    appSecret: ""
+    wxaEnvVersion: "release"
+  pay:
+    mchId: ""
+    apiV3Key: ""
+    merchantSerialNumber: ""
+    privateKey: ""
+    privateKeyPath: ""
+    notifyUrl: ""
+
+# ─── 腾讯云短信 ─── 留空时验证码只打日志、不真实下发
+sms:
+  tencent:
+    secretId: ""
+    secretKey: ""
+    sdkAppId: ""
+    signName: ""
+    templateId: ""
+    region: "ap-guangzhou"

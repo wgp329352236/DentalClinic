@@ -7,14 +7,6 @@ import {
 } from '../../utils/api'
 import type { UpdateProfileParams } from '../../utils/api'
 import { checkLogin } from '../../utils/auth'
-import { uploadFile } from '../../utils/request'
-import { resolveFileUrl } from '../../utils/util'
-
-interface UploadedFile {
-  url: string
-  fileName: string
-  size: number
-}
 
 Page({
   data: {
@@ -23,15 +15,12 @@ Page({
     phone: '',
     gender: null as number | null, // 1=男 2=女；未选择时不提交，避免误判资料已完善
     age: '' as number | string,
-    // 存的是可直接渲染的绝对地址；提交给后端时要还原成后端返回的相对地址
+    // 头像只存本地：本地头像 > 微信登录头像 > 服务端历史头像 > 默认图
     avatar: '',
-    avatarUploading: false,
+    // 未设置过本地头像时展示「选择头像」入口；设置后锁定只读
+    canPickAvatar: false,
     submitting: false
   },
-
-  // 后端返回的原始头像地址（相对路径），提交时若用户没换图就原样回传，
-  // 避免把补全主机名后的绝对地址写进库，导致换域名后图片全失效
-  originalAvatar: '',
 
   async onLoad() {
     if (!checkLogin()) return
@@ -43,10 +32,9 @@ Page({
       const result = await getUserProfile()
       if (result.code === 0 && result.data) {
         const d = result.data
-        this.originalAvatar = d.avatar || ''
+        const app = getApp<IAppOption>()
 
         // 手机号优先取微信登录时拿到的手机号（只读），其次用后端资料里的 phone
-        const app = getApp<IAppOption>()
         const wechatPhone = app?.globalData?.wechatPhone || ''
         const phone = wechatPhone || d.phone || ''
 
@@ -60,7 +48,8 @@ Page({
           phone,
           gender: d.gender ?? null,
           age: d.age ?? '',
-          avatar: resolveFileUrl(d.avatar || '')
+          avatar: app.getAvatarUrl(d.avatar || ''),
+          canPickAvatar: !app.globalData.localAvatarPath
         })
       }
     } catch (error) {
@@ -77,32 +66,44 @@ Page({
   },
 
   /**
-   * 微信「头像填写能力」：<button open-type="chooseAvatar"> 的回调，
-   * e.detail.avatarUrl 为临时文件路径（支持从微信头像选择），上传到服务端后存相对地址。
-   * 这是新版基础库获取头像的推荐方式；旧版 wx.getUserProfile 已不再返回真实头像。
+   * 微信「头像选择能力」：仅在未设置过本地头像时可用。
+   *
+   * 选中的临时文件保存到小程序本地文件系统，路径写入本地缓存，**不上传服务器**；
+   * 设置后头像行变为只读，不允许再次修改。
    */
   async onChooseAvatar(e: any) {
-    if (this.data.avatarUploading) return
+    const app = getApp<IAppOption>()
+    if (app.globalData.localAvatarPath) return
     const tempPath = e?.detail?.avatarUrl
     if (!tempPath) return
 
     try {
-      this.setData({ avatarUploading: true })
-      const upload = await uploadFile<UploadedFile>('/files/upload', tempPath)
-      if (upload.code === 0 && upload.data?.url) {
-        this.originalAvatar = upload.data.url
-        this.setData({ avatar: resolveFileUrl(upload.data.url) })
-      } else {
-        wx.showToast({ title: upload.message || '上传失败', icon: 'none' })
-      }
+      const savedPath = await this.saveAvatarToLocal(tempPath)
+      app.setLocalAvatarPath(savedPath)
+      // 同步全局用户信息，首页/我的页返回时立即显示新头像
+      const current = app.globalData.userInfo
+      if (current) app.setUserInfo({ ...current, avatar: savedPath })
+      this.setData({ avatar: savedPath, canPickAvatar: false })
+      wx.showToast({ title: '头像已设置', icon: 'success' })
     } catch (error: any) {
       // 用户在选图面板点取消也会走到这里，不弹错误提示
       if (error?.errMsg?.includes('cancel')) return
-      console.error('[ProfileEdit] 头像上传失败:', error)
-      wx.showToast({ title: error?.message || '上传失败', icon: 'none' })
-    } finally {
-      this.setData({ avatarUploading: false })
+      console.error('[ProfileEdit] 头像保存失败:', error)
+      wx.showToast({ title: '头像设置失败，请重试', icon: 'none' })
     }
+  },
+
+  /** 把 chooseAvatar 返回的临时文件持久化到小程序本地目录（不经过服务器） */
+  saveAvatarToLocal(tempPath: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const filePath = `${wx.env.USER_DATA_PATH}/avatar_${Date.now()}.jpg`
+      wx.getFileSystemManager().saveFile({
+        tempFilePath: tempPath,
+        filePath,
+        success: (res: any) => resolve(res.savedFilePath || filePath),
+        fail: reject
+      })
+    })
   },
 
   /**
@@ -147,26 +148,19 @@ Page({
 
   /**
    * 保存后回读校验（仅开发版/体验版执行）：
-   * 重新拉取服务端资料，比对本次提交的头像与昵称是否真正落库。
+   * 重新拉取服务端资料，比对本次提交的昵称是否真正落库。
+   * 头像只存本地、不上传服务器，故不参与回读比对。
    * 用于验证「授权 → 上报 → 落库」闭环，不一致只打日志告警，不影响已成功的保存结果。
    */
   async verifyProfileSaved(submitted: UpdateProfileParams) {
     try {
       const { data } = await getUserProfile()
-      const mismatches: string[] = []
       if (submitted.nickname && data.nickname !== submitted.nickname) {
-        mismatches.push(`昵称 提交=${submitted.nickname} 服务端=${data.nickname ?? 'null'}`)
-      }
-      if (submitted.avatar && data.avatar !== submitted.avatar) {
-        mismatches.push(`头像 提交=${submitted.avatar} 服务端=${data.avatar ?? 'null'}`)
-      }
-      if (mismatches.length > 0) {
-        console.error('[ProfileEdit] 资料回读不一致：' + mismatches.join('；'))
+        console.error(
+          `[ProfileEdit] 资料回读不一致：昵称 提交=${submitted.nickname} 服务端=${data.nickname ?? 'null'}`
+        )
       } else {
-        console.log('[ProfileEdit] 资料回读一致：', {
-          nickname: data.nickname,
-          avatar: data.avatar
-        })
+        console.log('[ProfileEdit] 资料回读一致：', { nickname: data.nickname })
       }
     } catch (error) {
       // 回读失败只说明校验没做成，不能反推保存失败
@@ -187,18 +181,18 @@ Page({
 
     this.setData({ submitting: true })
     try {
+      // 头像只存本地，提交时不再携带 avatar
       const payload: UpdateProfileParams = {
         nickname: this.data.nickname.trim() || undefined,
         realName: this.data.realName.trim() || undefined,
-        age: age === '' ? undefined : Number(age),
-        avatar: this.originalAvatar || undefined
+        age: age === '' ? undefined : Number(age)
       }
       if (this.data.gender !== null) payload.gender = this.data.gender
 
       // request.ts 已把 code !== 0 统一 reject，这里只需处理成功路径
       await updateUserProfile(payload)
 
-      // 非线上版做一次回读校验：确认授权得到的头像/昵称已真正落库（线上版跳过，避免多余请求）
+      // 非线上版做一次回读校验：确认昵称已真正落库（线上版跳过，避免多余请求）
       if (wx.getAccountInfoSync().miniProgram.envVersion !== 'release') {
         await this.verifyProfileSaved(payload)
       }

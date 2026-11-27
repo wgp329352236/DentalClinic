@@ -1,7 +1,6 @@
 // pages/profile/profile.ts
 import { exportProfile, deleteAccount, getUserProfile, getCoupons, getUnreadCount } from '../../utils/api'
 import { checkLogin } from '../../utils/auth'
-import { resolveFileUrl } from '../../utils/util'
 import type { UserInfo, Coupon } from '../../types'
 
 Page({
@@ -65,6 +64,7 @@ Page({
       const result = await getUserProfile()
       if (result.code === 0 && result.data) {
         const d = result.data
+        const app = getApp<IAppOption>()
         const userInfo: UserInfo = {
           id: d.userId,
           name: d.nickname || d.realName || '',
@@ -72,8 +72,8 @@ Page({
           phone: d.phone || '',
           gender: d.gender === 2 ? 'female' : 'male',
           age: d.age || 0,
-          // 后端存的是 /api/v1/files/xxx.png 形式的相对地址，<image> 需要绝对地址
-          avatar: resolveFileUrl(d.avatar),
+          // 头像只存本地：本地选择 > 微信登录头像 > 服务端历史头像 > 默认图
+          avatar: app.getAvatarUrl(d.avatar || ''),
           // 等级、折扣、权益、累计消费、升级差额全部由 /profile/me 下发，
           // 不再前端硬编码：此前写死 Lv1 导致等级卡片长期展示假数据
           memberLevel: {
@@ -93,7 +93,6 @@ Page({
           progressPercent: this.calcProgress(userInfo),
           discountText: this.formatDiscount(userInfo.memberLevel.discount)
         })
-        const app = getApp<IAppOption>()
         app.setUserInfo(userInfo)
       }
     } catch (error) {

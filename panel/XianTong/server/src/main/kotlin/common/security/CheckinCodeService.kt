@@ -1,5 +1,6 @@
 package com.dentalclinic.common.security
 
+import com.dentalclinic.common.config.EnvFileLoader
 import com.dentalclinic.common.config.GlobalConfig.appConfig
 import org.slf4j.LoggerFactory
 import java.security.MessageDigest
@@ -69,9 +70,7 @@ class CheckinCodeService {
     }
 
     private fun resolveSecret(): ByteArray {
-        val configured = System.getenv("CHECKIN_SIGNING_SECRET")
-            ?.takeIf { it.isNotBlank() }
-            ?.trim()
+        val configured = EnvFileLoader.get("CHECKIN_SIGNING_SECRET")
             ?: appConfig.propertyOrNull("checkin.signingSecret")
                 ?.getString()
                 ?.trim()

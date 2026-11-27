@@ -7,9 +7,9 @@ object GlobalConfig {
 
     private val logger = LoggerFactory.getLogger("GlobalConfig")
 
-    /** 运行环境：dev / prod；未设置时按本地默认配置运行 */
+    /** 运行环境：local / prod；未设置时按本地默认配置运行 */
     val appEnv: String?
-        get() = System.getenv("APP_ENV")
+        get() = EnvFileLoader.get("APP_ENV")
 
     val isDebug: Boolean
         get() = appEnv == "dev"
@@ -20,7 +20,7 @@ object GlobalConfig {
 
     private val configPath: String
         get() = when (appEnv) {
-            "dev" -> "application-dev.yaml"
+            "local", "dev" -> "application-local.yaml"
             "prod" -> "application-prod.yaml"
             else -> "application.yaml"
         }
@@ -35,7 +35,7 @@ object GlobalConfig {
      * 两侧都缺失或为空白时返回 null。调用方自行决定降级（mock）还是 fail-fast。
      */
     fun resolveConfig(envName: String, yamlPath: String): String? =
-        System.getenv(envName)?.trim()?.takeIf { it.isNotEmpty() }
+        EnvFileLoader.get(envName)
             ?: appConfig.propertyOrNull(yamlPath)
                 ?.getString()
                 ?.trim()

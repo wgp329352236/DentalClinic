@@ -1,5 +1,6 @@
 package com.dentalclinic.common.wx
 
+import com.dentalclinic.common.config.EnvFileLoader
 import com.dentalclinic.common.config.GlobalConfig.appConfig
 import org.slf4j.LoggerFactory
 import java.io.File
@@ -105,9 +106,9 @@ object WechatConfig {
         cfg
     }
 
-    /** 环境变量优先，其次 yaml 配置路径；都没有返回空串（不抛异常，交由 enabled 判断降级）。 */
+    /** 环境变量（含 server/.env.local）优先，其次 yaml 配置路径；都没有返回空串（不抛异常，交由 enabled 判断降级）。 */
     private fun resolve(envName: String, yamlPath: String): String {
-        System.getenv(envName)?.takeIf { it.isNotBlank() }?.let { return it.trim() }
+        EnvFileLoader.get(envName)?.let { return it }
         return appConfig.propertyOrNull(yamlPath)
             ?.getString()
             ?.trim()

@@ -14,5 +14,8 @@ set -a
 source .env.local
 set +a
 
+# 默认以 local 环境启动（加载 application-local.yaml）；.env.local 中显式设置可覆盖
+export APP_ENV="${APP_ENV:-local}"
+
 cd ..
 exec ./gradlew :server:run

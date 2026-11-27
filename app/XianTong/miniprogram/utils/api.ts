@@ -87,7 +87,6 @@ export interface UpdateProfileParams {
   phone?: string
   gender?: number
   age?: number
-  avatar?: string
   nickname?: string
 }
 

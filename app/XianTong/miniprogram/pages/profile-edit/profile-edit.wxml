@@ -1,14 +1,15 @@
 <!--pages/profile-edit/profile-edit.wxml-->
 <view class="container">
   <view class="card">
-    <!-- 头像：微信「头像填写能力」，支持从微信头像/相册选择 -->
+    <!-- 头像：首次可用微信头像选择能力设置，保存到本地后只读，不上传服务器 -->
     <view class="form-row">
       <view class="form-label">头像</view>
-      <button class="form-value avatar-cell avatar-pick-btn" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar">
-        <image wx:if="{{avatar}}" class="avatar-preview" src="{{avatar}}" mode="aspectFill"></image>
-        <view wx:else class="avatar-empty">未设置</view>
-        <text class="text-muted font-small">{{avatarUploading ? '上传中...' : '点击更换'}}</text>
+      <button wx:if="{{canPickAvatar}}" class="form-value avatar-cell avatar-pick-btn" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar">
+        <image class="avatar-preview" src="{{avatar}}" mode="aspectFill"></image>
       </button>
+      <view wx:else class="form-value avatar-cell">
+        <image class="avatar-preview" src="{{avatar}}" mode="aspectFill"></image>
+      </view>
     </view>
 
     <!-- 昵称：优先服务端值，其次微信昵称，最后手机号后 4 位；type="nickname" 唤起微信昵称填写 -->
@@ -52,7 +53,7 @@
     </view>
   </view>
 
-  <view class="tip text-muted">完善昵称、头像、姓名、性别、年龄后，保存时可领取首次完善资料积分。手机号可点右侧「重新授权」补绑或更换。</view>
+  <view class="tip text-muted">完善昵称、姓名、性别、年龄后，保存时可领取首次完善资料积分。头像首次可设置，保存后不可更改；手机号可点右侧「重新授权」补绑或更换。</view>
 
   <button class="btn-primary" loading="{{submitting}}" disabled="{{submitting}}" bindtap="onSave">
     {{submitting ? '保存中...' : '保存'}}

@@ -1,12 +1,21 @@
 // app.ts
 import type { UserInfo } from './types'
-import { preloadSubscribeTemplates } from './utils/util'
+import { preloadSubscribeTemplates, resolveFileUrl } from './utils/util'
 
 /** 待绑定推荐码的本地缓存键：登录完成前可能经历多次冷启动，需持久化等待登录后消费 */
 const REFERRAL_STORAGE_KEY = 'pendingReferralCode'
 
 /** 待领取推广券模板的本地缓存键（扫码进入领取 2 张券，场景同推荐码） */
 const PROMO_STORAGE_KEY = 'pendingPromoTemplateId'
+
+/** 微信登录时取到的头像 URL（仅本地缓存，用于默认展示） */
+const WECHAT_AVATAR_KEY = 'wechatAvatar'
+
+/** 用户首次选择的头像文件路径（已保存到小程序本地文件，之后只读） */
+const LOCAL_AVATAR_KEY = 'localAvatarPath'
+
+/** 无任何头像时的兜底图（小程序包内资源，不依赖网络） */
+const DEFAULT_AVATAR = '/images/avatar.jpg'
 
 interface AppGlobalData {
   userInfo: UserInfo | null
@@ -21,6 +30,15 @@ interface AppGlobalData {
   wechatPhone: string
   /** 微信登录时拿到的昵称，用于上报服务端并作为昵称默认值 */
   wechatNickname: string
+  /**
+   * 微信登录时取到的头像 URL（本地缓存，不上传服务器）。
+   *
+   * 新版微信 getUserProfile 返回的是统一灰色默认头像，仅作兜底展示；
+   * 用户首次在编辑资料页选择头像后，优先使用 localAvatarPath。
+   */
+  wechatAvatar: string
+  /** 用户首次选择的头像文件路径（保存在小程序本地文件系统，之后只读） */
+  localAvatarPath: string
   /**
    * 首页点门店后要带进预约页的门诊 id。
    *
@@ -103,6 +121,8 @@ App<IAppOption>({
     clinics: [],
     wechatPhone: '',
     wechatNickname: '',
+    wechatAvatar: '',
+    localAvatarPath: '',
     pendingClinicId: null,
     pendingRescheduleId: null,
     pendingReferralCode: null,
@@ -121,6 +141,16 @@ App<IAppOption>({
       console.log('[App] 已登录用户:', userInfo.name)
     } else {
       console.log('[App] 未登录，需要引导登录')
+    }
+
+    // 头像只落本地：微信头像 URL + 用户首次选择的本地文件路径。
+    // 本地文件可能被系统清理，失效时丢弃缓存并回退微信头像/默认图。
+    this.globalData.wechatAvatar = wx.getStorageSync(WECHAT_AVATAR_KEY) || ''
+    const localAvatar = wx.getStorageSync(LOCAL_AVATAR_KEY) || ''
+    if (localAvatar && this.isLocalAvatarUsable(localAvatar)) {
+      this.globalData.localAvatarPath = localAvatar
+    } else if (localAvatar) {
+      wx.removeStorageSync(LOCAL_AVATAR_KEY)
     }
 
     // 推荐码：本次启动参数优先；未携带则沿用历史暂存（用户可能先扫码、后完成登录）
@@ -167,6 +197,52 @@ App<IAppOption>({
   // 设置微信登录昵称（更新全局态）
   setWechatNickname(nickname: string) {
     this.globalData.wechatNickname = nickname || ''
+  },
+
+  /**
+   * 缓存微信登录时取到的头像 URL（只存本地，不上传服务器）。
+   * 传空串时清除缓存。
+   */
+  setWechatAvatar(avatar: string) {
+    this.globalData.wechatAvatar = avatar || ''
+    if (avatar) {
+      wx.setStorageSync(WECHAT_AVATAR_KEY, avatar)
+    } else {
+      wx.removeStorageSync(WECHAT_AVATAR_KEY)
+    }
+  },
+
+  /**
+   * 记录用户首次选择的头像文件路径（已保存到小程序本地文件，之后只读）。
+   * 传空串时清除缓存。
+   */
+  setLocalAvatarPath(path: string) {
+    this.globalData.localAvatarPath = path || ''
+    if (path) {
+      wx.setStorageSync(LOCAL_AVATAR_KEY, path)
+    } else {
+      wx.removeStorageSync(LOCAL_AVATAR_KEY)
+    }
+  },
+
+  /** 本地头像文件是否仍可访问（系统可能清理临时文件） */
+  isLocalAvatarUsable(path: string): boolean {
+    try {
+      wx.getFileSystemManager().accessSync(path)
+      return true
+    } catch (error) {
+      return false
+    }
+  },
+
+  /**
+   * 头像展示地址，优先级：本地选择的头像 → 微信登录头像 → 服务端旧头像 → 包内默认图。
+   * 头像不再上传服务器，服务端头像仅用于兼容历史数据。
+   */
+  getAvatarUrl(serverAvatar = ''): string {
+    if (this.globalData.localAvatarPath) return this.globalData.localAvatarPath
+    if (this.globalData.wechatAvatar) return this.globalData.wechatAvatar
+    return resolveFileUrl(serverAvatar) || DEFAULT_AVATAR
   },
 
   // 设置 Token
@@ -222,6 +298,18 @@ App<IAppOption>({
 
   // 登出
   logout() {
+    // 头像属于账号隐私：登出时清掉本地缓存并删除已保存的头像文件
+    const localAvatar = this.globalData.localAvatarPath
+    this.setWechatAvatar('')
+    this.setLocalAvatarPath('')
+    if (localAvatar) {
+      try {
+        wx.getFileSystemManager().unlinkSync(localAvatar)
+      } catch (error) {
+        // 文件已被清理时忽略
+      }
+    }
+
     this.globalData.userInfo = null
     this.globalData.token = ''
     wx.removeStorageSync('token')

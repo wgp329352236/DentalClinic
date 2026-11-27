@@ -65,11 +65,12 @@ Page({
   },
 
   onShow() {
-    // 每次显示页面时刷新用户信息
+    // 每次显示页面时刷新用户信息；头像按本地缓存重新解析，确保改完头像立即生效
     const app = getApp<IAppOption>()
     if (app.globalData.userInfo) {
+      const cached = app.globalData.userInfo
       this.setData({
-        userInfo: app.globalData.userInfo
+        userInfo: { ...cached, avatar: app.getAvatarUrl(cached.avatar) }
       })
     }
     // 内容只在首次拉取失败（列表为空）时补拉：首页是 tabBar 落地页，
@@ -162,12 +163,19 @@ Page({
             app.setWechatNickname(wechatNickname)
           }
 
+          // 微信头像：仅缓存本地供展示，不上传服务器；用户首次选择本地头像后优先用本地
+          const wechatAvatar = (profile?.userInfo?.avatarUrl || '').trim()
+          if (wechatAvatar) {
+            app.setWechatAvatar(wechatAvatar)
+          }
+
           // 新用户或本地无用户信息时，拉取用户资料
           if (result.data.isNewUser || !app.globalData.userInfo) {
             await this.loadUserProfile()
           } else {
+            const cached = app.globalData.userInfo
             this.setData({
-              userInfo: app.globalData.userInfo,
+              userInfo: { ...cached, avatar: app.getAvatarUrl(cached.avatar) },
               loading: false
             })
           }
@@ -268,7 +276,7 @@ Page({
       phone: getApp<IAppOption>()?.globalData?.wechatPhone || '',
       gender: profile.userInfo.gender === 2 ? 'female' : 'male',
       age: 0,
-      avatar: profile.userInfo.avatarUrl || '',
+      avatar: getApp<IAppOption>()?.getAvatarUrl() || profile.userInfo.avatarUrl || '',
       memberLevel: {
         // 微信资料兜底路径拿不到会员信息：等级按最低的 Lv1 展示，
         // nextLevelCost 置 null 让进度条整块隐藏，而不是编一个「还需 3000」的假目标
@@ -344,7 +352,8 @@ Page({
           phone: d.phone || '',
           gender: d.gender === 2 ? 'female' : 'male',
           age: d.age || 0,
-          avatar: resolveFileUrl(d.avatar),
+          // 头像只存本地：本地选择 > 微信登录头像 > 服务端历史头像 > 默认图
+          avatar: app.getAvatarUrl(d.avatar || ''),
           // 等级/折扣/权益/累计消费/升级差额全部取自 /profile/me，不再前端写死
           memberLevel: {
             level: d.levelCode,

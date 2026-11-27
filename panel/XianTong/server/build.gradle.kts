@@ -10,6 +10,13 @@ application {
     mainClass = "io.ktor.server.netty.EngineMain"
 }
 
+// 后端从根目录用 gradlew :server:run 启动时，JavaExec 默认工作目录是根项目。
+// FileUploadService 依赖 user.dir 定位 uploads，这里固定为 server 模块目录，
+// 避免读取 /DentalClinic/uploads 空目录导致 /api/v1/files/{name} 404。
+tasks.withType<JavaExec>().configureEach {
+    workingDir = projectDir
+}
+
 kotlin {
     jvmToolchain(21)
 }

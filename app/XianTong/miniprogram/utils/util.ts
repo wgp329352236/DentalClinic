@@ -164,6 +164,7 @@ export function resolveFileUrl(url?: null | string): string {
     url.startsWith('data:') ||
     url.startsWith('wxfile://') ||
     url.startsWith('http://tmp/') ||
+    url.startsWith('http://usr/') ||
     url.startsWith('/images/') ||
     /^https?:\/\//.test(url)
   ) {
